@@ -216,17 +216,42 @@ describe("the production gate", () => {
     terminal.typed = "nope"
     expect(await runSeed(undefined, flags({ env: "production" }))).toBe(2)
     expect(seedPosts()).toEqual([])
-    terminal.typed = "abc"
+    terminal.typed = CLOUD_REF
     expect(await runSeed(undefined, flags({ env: "production" }))).toBe(0)
     expect(seedPosts()[0]?.body).toMatchObject({ confirmProduction: true })
   })
 
-  it("names the Cloud ref to type, and takes it as well as the slug", async () => {
+  it("names the Cloud ref to type, and takes only the ref", async () => {
     terminal.interactive = true
     terminal.typed = CLOUD_REF
     expect(await runSeed(undefined, flags({ env: "production" }))).toBe(0)
     expect(terminal.asked.join("\n")).toContain(CLOUD_REF)
     expect(seedPosts()[0]?.body).toMatchObject({ confirmProduction: true })
+  })
+
+  it("does not take the slug when the ref is known", async () => {
+    terminal.interactive = true
+    terminal.typed = "abc"
+    expect(await runSeed(undefined, flags({ env: "production" }))).toBe(2)
+    expect(seedPosts()).toEqual([])
+    expect(said.errors.join("\n")).toContain(CLOUD_REF)
+  })
+
+  it("reads the ref from the link, and does not ask Cloud for it", async () => {
+    saveProjectLink(dir, { ...link("cloud"), ref: CLOUD_REF })
+    terminal.interactive = true
+    terminal.typed = CLOUD_REF
+    expect(await runSeed(undefined, flags({ env: "production" }))).toBe(0)
+    expect(calls.filter((c) => c.url.endsWith("/projects/abc"))).toEqual([])
+    expect(terminal.asked.join("\n")).toContain(CLOUD_REF)
+  })
+
+  it("does not take the slug when the link holds the ref", async () => {
+    saveProjectLink(dir, { ...link("cloud"), ref: CLOUD_REF })
+    terminal.interactive = true
+    terminal.typed = "abc"
+    expect(await runSeed(undefined, flags({ env: "production" }))).toBe(2)
+    expect(seedPosts()).toEqual([])
   })
 
   it("still refuses a wrong answer when the Cloud ref is known", async () => {

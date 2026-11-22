@@ -206,10 +206,11 @@ async function productionConfirmed(target: DeployTarget, opts: SeedFlags): Promi
     )
     return false
   }
-  // Cloud's link holds the slug; the ref is what the dashboard and the API call the project.
-  const ref = (await targetProjectRef(target)) ?? target.projectRef
+  // Cloud's link holds the slug; the ref is what the dashboard and the API call the project. A link
+  // made since the ref was recorded holds it, an older one asks Cloud, and only the ref is accepted.
+  const ref = target.link?.ref ?? (await targetProjectRef(target)) ?? target.projectRef
   const typed = await promptText(`This seeds production in ${ref}. Type the project ref, ${ref}, to continue`)
-  if (typed.trim() === ref || typed.trim() === target.projectRef) return true
+  if (typed.trim() === ref) return true
   error(`That is not the project ref (${ref}), so nothing was seeded.`)
   return false
 }
