@@ -49,7 +49,7 @@ import {
   resolveCloudAccessToken,
   resolveCloudRefreshToken,
 } from "./cloud-credentials.js"
-import { TargetApiError, targetFetch, type TargetFetchOptions } from "./target-client.js"
+import { TargetApiError, targetFetch, targetFetchWithSiblings, type TargetFetchOptions } from "./target-client.js"
 import { requireLocalStack } from "./local-stack-guard.js"
 import { CAPABILITIES_TTL_MS, capabilitiesCache, rememberCapabilities, type CapabilitiesCache } from "@supatype/shared"
 import {
@@ -525,11 +525,13 @@ export async function targetSchemaPush(
     }
   }
 
-  return targetFetch(
+  // Cloud answers `{ data, cache }`: the cache report sits beside `data`, which `targetFetch` drops.
+  return targetFetchWithSiblings(
     target.apiBaseUrl,
     target.apiPrefix,
     apiFetchOpts(target, "POST", projectPath(target, "/schema/push"), pushBody),
     isEnginePushResult,
+    ["cache"],
   )
 }
 

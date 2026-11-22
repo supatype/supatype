@@ -228,9 +228,42 @@ export async function targetFetch(
 ): Promise<unknown> {
   const url = `${baseUrl.replace(/\/$/, "")}${apiPrefix}${opts.path}`
   const result = await timedAnswer(url, opts)
-  const answer = isJsonObject(result.json) && result.json["data"] !== undefined ? result.json["data"] : result.json
+  const answer = unwrapData(result.json)
   if (!guard(answer)) throw new Error(`Unexpected response from ${url} (HTTP ${result.status})`)
   return answer
+}
+
+/** The body's `data` when it has one, else the body. */
+function unwrapData(json: unknown): unknown {
+  return isJsonObject(json) && json["data"] !== undefined ? json["data"] : json
+}
+
+/**
+ * {@link targetFetch} for an answer whose control plane puts some fields beside `data` rather
+ * than inside it (Cloud's push answers `{ data, cache }`). The named siblings are carried onto the
+ * unwrapped answer when it is an object, so a caller reads them from one place whichever shape
+ * answered. A field `data` already holds wins.
+ */
+export async function targetFetchWithSiblings<T>(
+  baseUrl: string,
+  apiPrefix: TargetApiPrefix,
+  opts: TargetFetchOptions,
+  guard: Guard<T>,
+  siblings: readonly string[],
+): Promise<T> {
+  const url = `${baseUrl.replace(/\/$/, "")}${apiPrefix}${opts.path}`
+  const result = await timedAnswer(url, opts)
+  const data = unwrapData(result.json)
+  const answer =
+    isJsonObject(result.json) && isJsonObject(data) && data !== result.json
+      ? { ...pickPresent(result.json, siblings), ...data }
+      : data
+  if (!guard(answer)) throw new Error(`Unexpected response from ${url} (HTTP ${result.status})`)
+  return answer
+}
+
+function pickPresent(from: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
+  return Object.fromEntries(keys.filter((key) => from[key] !== undefined).map((key) => [key, from[key]]))
 }
 
 /** The whole answer to a request, within `opts.timeoutMs` when it is set. */
