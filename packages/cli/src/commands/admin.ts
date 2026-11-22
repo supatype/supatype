@@ -4,7 +4,7 @@
 // auth.users table. First admin is ensured on `supatype dev` or `supatype push`.
 
 import { requireLocalStack } from "../local-stack-guard.js"
-import { cloudAdminTarget, inviteCloudStudioUser, listCloudStudioUsers, setCloudStudioRole } from "../cloud-admin.js"
+import { cloudAdminTarget, inviteCloudStudioUser, listCloudStudioUsers, selfHostLinkRefusal, setCloudStudioRole } from "../cloud-admin.js"
 import type { Command } from "commander"
 import { existsSync } from "node:fs"
 import { dirname, resolve } from "node:path"
@@ -14,7 +14,7 @@ import { isNumber, isShape, isString, isUnknown } from "@supatype/shared"
 import { loadConfig } from "../config.js"
 import { queryRows, type RowQueryable, type UnknownRow } from "../db-rows.js"
 import { resolveRuntimeProvider, usesExternalDatabase, type SupatypeProjectConfig } from "../project-config.js"
-import { resolveHostDatabaseUrl } from "../host-database.js"
+import { NoStackRunning, resolveHostDatabaseUrl } from "../host-database.js"
 import { projectStudioUrl } from "../local-stack.js"
 import { STUDIO_ROLES } from "../studio-roles.js"
 import { readEnvValue, upsertEnvFile } from "../env-file.js"
@@ -122,7 +122,12 @@ function resolveAdminConnection(
   command: string,
   override?: string,
 ): string {
-  requireLocalStack(cwd, config, command, { connection: override, direct: true })
+  try {
+    requireLocalStack(cwd, config, command, { connection: override, direct: true })
+  } catch (err) {
+    // A linked self-host project has no local stack to find: say so, rather than that none is running.
+    throw (err instanceof NoStackRunning ? selfHostLinkRefusal(cwd, command) : null) ?? err
+  }
   return resolveHostDatabaseUrl(cwd, config, { connection: override, allowDerived: true }).dsn
 }
 
