@@ -107,3 +107,20 @@ export function projectConfigIfAny(cwd: string): SupatypeProjectConfig | undefin
     return undefined
   }
 }
+
+/**
+ * Refuse `supatype <command>` in a folder linked to a Supatype Cloud project, naming the link. The
+ * command works on this machine's own database or stack, and Cloud's database is not one this
+ * machine can reach: without this it went on to the local stack and said that was not running, as
+ * if the link were not there. Running it through Cloud's API is not built yet. A folder with no
+ * Cloud link is not refused.
+ */
+export function refuseOnCloudLink(cwd: string, command: string, instead: string): void {
+  const link = loadProjectLink(cwd)
+  if (link?.kind !== "cloud") return
+  const apiUrl = link.environments[link.defaultEnvironment]?.apiUrl ?? link.cloudApiUrl
+  const where = apiUrl === undefined ? "" : ` (${apiUrl})`
+  throw new Error(
+    `supatype ${command} does not work on a Supatype Cloud link yet: this folder is linked to the Supatype Cloud project "${link.projectRef}"${where}. ${instead}`,
+  )
+}

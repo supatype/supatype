@@ -1,4 +1,4 @@
-import { requireLocalStack } from "../local-stack-guard.js"
+import { refuseOnCloudLink, requireLocalStack } from "../local-stack-guard.js"
 import { withPublishing } from "../model-versioning.js"
 import type { Command } from "commander"
 import { writeFileSync } from "node:fs"
@@ -162,6 +162,10 @@ export function registerMigrate(program: Command): void {
     .option("-o, --output <file>", "Write the SQL to this file instead of stdout")
     .action(async (opts: MigrateOptions) => {
       const cwd = process.cwd()
+      // --connection names a database for this run, which is reached as it is.
+      if (!opts.connection?.trim()) {
+        refuseOnCloudLink(cwd, "migrate", "Pass --connection <database URL> to write the SQL against a database you can reach.")
+      }
       const config = loadConfig(cwd)
       requireLocalStack(cwd, config, "migrate", { connection: opts.connection, direct: true })
       const connection = resolveHostDatabaseUrl(cwd, config, { connection: opts.connection, allowDerived: true }).dsn
