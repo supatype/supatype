@@ -188,7 +188,7 @@ export function defaultScaffoldOptions(
 
 // ─── Registration ──────────────────────────────────────────────────────────--
 
-interface InitCliOptions {
+export interface InitCliOptions {
   mode: string
   defaults?: boolean
   install: boolean
@@ -309,10 +309,14 @@ async function createProject(args: CreateProjectArgs): Promise<void> {
 }
 
 /** `--no-admin`, or `--admin-email` with `--admin-password`, over the answers. */
-function applyAdminFlags(result: WizardResult, opts: InitCliOptions): void {
+export function applyAdminFlags(result: WizardResult, opts: InitCliOptions): void {
   if (opts.admin === false) {
     delete result.adminEmail
     delete result.adminPassword
+  } else if (Boolean(opts.adminEmail) !== Boolean(opts.adminPassword)) {
+    // An admin needs both. One alone used to write nothing and say nothing.
+    error(`${opts.adminEmail ? "--admin-email" : "--admin-password"} needs ${opts.adminEmail ? "--admin-password" : "--admin-email"} too. Give both, or neither and create the admin later.`)
+    process.exit(1)
   } else if (opts.adminEmail && opts.adminPassword) {
     refuseAdminFlags(opts.adminEmail, opts.adminPassword)
     result.adminEmail = opts.adminEmail.trim()
