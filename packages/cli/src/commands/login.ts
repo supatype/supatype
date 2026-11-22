@@ -131,7 +131,7 @@ export function registerLogin(program: Command): void {
     })
 }
 
-/** The control plane's answer for the stored session, refreshed once on a rejection. Exits 1 when it is gone. */
+/** The control plane's answer for the stored session, refreshed once on a rejection. Exits 1 when it is gone, 2 when the control plane cannot be reached. */
 async function reportSessionState(
   cwd: string,
   creds: CloudCredentials | null,
@@ -163,6 +163,7 @@ async function reportSessionState(
     error(`Session: rejected by ${apiUrl}. It was signed out or revoked. Run: supatype login`)
     process.exit(1)
   } else {
-    plain(`Session: not checked, ${check.reason}`)
+    error(`Session: not checked, ${check.reason}`)
+    process.exit(2)
   }
 }

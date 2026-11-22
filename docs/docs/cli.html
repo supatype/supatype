@@ -273,7 +273,7 @@
       <tbody>
         <tr><td><code>login</code></td><td>Sign in to Supatype Cloud (stores refreshable session for push/deploy)</td><td><code>--email &lt;email&gt;</code>, <code>--password &lt;password&gt;</code> (prefer <code>SUPATYPE_PASSWORD</code>)</td></tr>
         <tr><td><code>logout</code></td><td>Clear stored Supatype Cloud credentials</td><td></td></tr>
-        <tr><td><code>whoami</code></td><td>Show the current Supatype Cloud session</td><td></td></tr>
+        <tr><td><code>whoami</code></td><td>Show the current Supatype Cloud session, checked against the control plane. Exit 0 when valid, 1 when rejected, 2 when the control plane cannot be reached</td><td></td></tr>
         <tr><td><code>link --project &lt;slug&gt;</code></td><td>Link this project to cloud or self-host (unified .supatype/link.json)</td><td><code>--token &lt;token&gt;</code>, <code>--env &lt;name&gt;</code></td></tr>
         <tr><td><code>projects list</code></td><td>List all projects in your organisation</td><td></td></tr>
         <tr><td><code>projects create &lt;name&gt;</code></td><td>Create a new project</td><td><code>--tier &lt;tier&gt;</code>, <code>--region &lt;region&gt;</code></td></tr>

@@ -4962,7 +4962,7 @@ All of these need Supatype Cloud, which is coming soon.
 | --- | --- | --- |
 | `login` | Sign in to Supatype Cloud (stores refreshable session for push/deploy) | `--email <email>`, `--password <password>` (prefer `SUPATYPE_PASSWORD`) |
 | `logout` | Clear stored Supatype Cloud credentials |  |
-| `whoami` | Show the current Supatype Cloud session |  |
+| `whoami` | Show the current Supatype Cloud session, checked against the control plane. Exit 0 when valid, 1 when rejected, 2 when the control plane cannot be reached |  |
 | `link --project <slug>` | Link this project to cloud or self-host (unified .supatype/link.json) | `--token <token>`, `--env <name>` |
 | `projects list` | List all projects in your organisation |  |
 | `projects create <name>` | Create a new project | `--tier <tier>`, `--region <region>` |

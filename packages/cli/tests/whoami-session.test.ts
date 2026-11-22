@@ -98,9 +98,11 @@ describe("supatype whoami", () => {
     expect(persisted).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ accessToken: "access-2", refreshToken: "refresh-2" }))
   })
 
-  it("does not sign anyone out because the control plane could not be reached", async () => {
+  it("exits 2 naming the address and the error when the control plane could not be reached", async () => {
     controlPlane({ me: new Error("connect ECONNREFUSED") })
-    expect(await whoami()).toBeNull()
+    expect(await whoami()).toBe(2)
     expect(lines.join("\n")).toContain("Session: not checked")
+    expect(lines.join("\n")).toContain("https://api.example.test")
+    expect(lines.join("\n")).toContain("ECONNREFUSED")
   })
 })
