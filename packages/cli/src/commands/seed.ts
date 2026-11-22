@@ -68,9 +68,9 @@ export interface SeedFlags {
 
 export function registerSeed(program: Command): void {
   program
-    .command("seed [file]")
+    .command("seed [files...]")
     .description(
-      "Run database seeds: optional single file; else all seeds/*.ts (alphabetical); else seed.ts",
+      "Run database seeds: the files named, in that order; else all seeds/*.ts (alphabetical); else seed.ts",
     )
     .option(
       "--force",
@@ -81,8 +81,8 @@ export function registerSeed(program: Command): void {
     .option("--status", "Show what has been applied, and what has changed since", false)
     .option("--connection <dsn>", "Database to seed, instead of the resolved one")
     .option("--environment <name>", "Environment name, for an `environment` condition")
-    .action(async (file: string | undefined, opts: SeedFlags) => {
-      const code = await runSeed(file, opts)
+    .action(async (files: string[], opts: SeedFlags) => {
+      const code = await runSeed(files, opts)
       if (code !== 0) process.exit(code)
     })
 }
@@ -93,7 +93,7 @@ export function registerSeed(program: Command): void {
  * `0` applied, `1` a seed failed, `2` the run could not start. The split is what lets CI
  * retry one and not the other.
  */
-export async function runSeed(file: string | undefined, opts: SeedFlags): Promise<number> {
+export async function runSeed(file: SeedFiles | undefined, opts: SeedFlags): Promise<number> {
   const cwd = process.cwd()
   const config = loadConfig(cwd)
 
@@ -183,8 +183,12 @@ export async function runSeed(file: string | undefined, opts: SeedFlags): Promis
 // --- Discovery ---
 
 /** The seed files a run uses: `file` when given, else every `seeds/*.ts`, else `seed.ts`. */
-export function seedPaths(file: string | undefined, cwd: string, config: SupatypeConfig): string[] {
-  if (file !== undefined && file.trim() !== "") return [resolve(cwd, file)]
+/** The seed files a run names: one, several in the order given, or none (the project's own). */
+export type SeedFiles = string | readonly string[]
+
+export function seedPaths(file: SeedFiles | undefined, cwd: string, config: SupatypeConfig): string[] {
+  const named = (typeof file === "string" ? [file] : [...(file ?? [])]).filter((name) => name.trim() !== "")
+  if (named.length > 0) return named.map((name) => resolve(cwd, name))
   const root = projectRootFromConfig(config, cwd)
   const fromDir = discoverSeedsDir(cwd, join(root, "seeds"))
   return fromDir.length > 0 ? fromDir : [resolve(root, "seed.ts")]
