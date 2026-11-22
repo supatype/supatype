@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { SupatypeProjectConfig } from "../src/project-config.js"
+import { projectConfig } from "./support/project-config.js"
 import { writeNativeAppliedAst } from "../src/commands/dev.js"
 
 /**
@@ -10,7 +10,7 @@ import { writeNativeAppliedAst } from "../src/commands/dev.js"
  * left the cache allowlist off, so the declaration answered BYPASS until `supatype push` ran. Docker
  * dev and push switch it on after every apply; native dev now does too.
  */
-const config: SupatypeProjectConfig = { project: { name: "acme" } }
+const config = projectConfig({ project: { name: "acme" } })
 const AST = { models: [{ name: "Post", fields: {}, annotations: { db: { tableName: "posts" }, platform: { cache: { enabled: true } } } }] }
 
 let dir = ""

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { writeAppliedAstArtifacts } from "../src/applied-ast-artifacts.js"
 import { reloadHooksWorker } from "../src/hooks-worker-reload.js"
 import type { ComposeWorkerTarget } from "../src/dev-functions-watch.js"
-import type { SupatypeProjectConfig } from "../src/project-config.js"
+import { projectConfig } from "./support/project-config.js"
 
 /**
  * FF-11: on a self-host or Docker stack brought up before the first push, the push wrote
@@ -14,7 +14,7 @@ import type { SupatypeProjectConfig } from "../src/project-config.js"
  * by hand. A push that writes that file now restarts the worker, as `dev` does on a save.
  */
 
-const config: SupatypeProjectConfig = { project: { name: "acme" } }
+const config = projectConfig({ project: { name: "acme" } })
 const AST = {
   astVersion: 2,
   models: [

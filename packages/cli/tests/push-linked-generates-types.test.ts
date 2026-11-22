@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { DeployTarget } from "../src/resolve-target.js"
-import type { SupatypeProjectConfig } from "../src/project-config.js"
+import { projectConfig } from "./support/project-config.js"
 
 /**
  * FF-20: a push to a linked Cloud or self-host project wrote no generated types and no seed
@@ -31,7 +31,7 @@ vi.mock("../src/ui/messages.js", async (importOriginal) => {
 
 const { finishTargetPush } = await import("../src/commands/push.js")
 
-const config: SupatypeProjectConfig = { project: { name: "acme" } }
+const config = projectConfig({ project: { name: "acme" } })
 const AST = { astVersion: 2, models: [] }
 
 function linkedTarget(mode: "cloud" | "self-host"): DeployTarget {
