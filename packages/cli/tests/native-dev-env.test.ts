@@ -185,7 +185,24 @@ describe("the keyspace login native dev hands the server", () => {
     })
   })
 
-  it("is left to .env for a Valkey SUPATYPE_VALKEY_ADDR names, which may have its own password", () => {
-    expect(nativeKeyspaceServerEnv({ sidecar: { addr: "10.0.0.5:6379", containerName: null, started: false }, login: null })).toEqual({})
+  // FF-33: init writes a keyspace password to .env, which a Valkey the developer runs does not have, so
+  // the server's AUTH got WRONGPASS. That Valkey's password is SUPATYPE_VALKEY_PASSWORD, or none.
+  it("is blank for a Valkey SUPATYPE_VALKEY_ADDR names when no SUPATYPE_VALKEY_PASSWORD is given", () => {
+    expect(nativeKeyspaceServerEnv({ sidecar: { addr: "10.0.0.5:6379", containerName: null, started: false }, login: null })).toEqual({
+      SUPATYPE_KEYSPACE_PASSWORD: "",
+      SUPATYPE_KEYSPACE_PASSWORD_FILE: "",
+    })
+  })
+
+  it("is SUPATYPE_VALKEY_PASSWORD for a Valkey SUPATYPE_VALKEY_ADDR names", () => {
+    const sidecar = { addr: "10.0.0.5:6379", containerName: null, started: false, password: "s3cret" }
+    expect(nativeKeyspaceServerEnv({ sidecar, login: null })).toEqual({
+      SUPATYPE_KEYSPACE_PASSWORD: "s3cret",
+      SUPATYPE_KEYSPACE_PASSWORD_FILE: "",
+    })
+  })
+
+  it("is nothing when there is no Valkey at all", () => {
+    expect(nativeKeyspaceServerEnv({ sidecar: { addr: "", containerName: null, started: false }, login: null })).toEqual({})
   })
 })

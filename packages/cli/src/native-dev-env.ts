@@ -35,7 +35,9 @@ export interface NativeCache {
  * Valkey sidecar, which has no password, the password is blanked, since one .env holds for a
  * Docker phase of the project would have the server's AUTH refused. The server reads only the
  * SUPATYPE_KEYSPACE_* spellings, so nothing else needs blanking. A Valkey that
- * SUPATYPE_VALKEY_ADDR names is the developer's, and so is whether .env gives it a password.
+ * SUPATYPE_VALKEY_ADDR names is the developer's: its password is SUPATYPE_VALKEY_PASSWORD, handed
+ * to the server as the keyspace password, and blank without one, since the password `init` wrote
+ * to .env belongs to the project's own keyspace and the named Valkey answers it WRONGPASS (FF-33).
  *
  * SUPATYPE_KEYSPACE_PASSWORD_FILE is blanked in both cases (R2-S16): with the keyspace, native dev
  * read the password from that file already, and the server refuses to start given both; beside the
@@ -49,7 +51,9 @@ export function nativeKeyspaceServerEnv(cache: NativeCache): Record<string, stri
       [KEYSPACE_PASSWORD_FILE_ENV]: "",
     }
   }
-  return cache.sidecar.started ? { [KEYSPACE_PASSWORD_ENV]: "", [KEYSPACE_PASSWORD_FILE_ENV]: "" } : {}
+  if (cache.sidecar.addr === "") return {}
+  const password = cache.sidecar.started ? "" : (cache.sidecar.password ?? "")
+  return { [KEYSPACE_PASSWORD_ENV]: password, [KEYSPACE_PASSWORD_FILE_ENV]: "" }
 }
 
 /** Inputs to the outer layer of supatype-server's environment on the native path. */

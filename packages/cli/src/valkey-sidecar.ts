@@ -15,6 +15,7 @@ import { describeKeyspacePorts, firstFreeKeyspacePort, keyspacePorts } from "./k
 
 const DEFAULT_HOST = "127.0.0.1"
 const VALKEY_ADDR_ENV = "SUPATYPE_VALKEY_ADDR"
+const VALKEY_PASSWORD_ENV = "SUPATYPE_VALKEY_PASSWORD"
 const IMAGE = "valkey/valkey:8-alpine"
 
 function containerName(projectName: string): string {
@@ -75,11 +76,13 @@ export interface ValkeySidecarResult {
   addr: string
   containerName: string | null
   started: boolean
+  /** The password of a Valkey SUPATYPE_VALKEY_ADDR names, from SUPATYPE_VALKEY_PASSWORD; none for the sidecar. */
+  password?: string
 }
 
 /** A Valkey this run uses and did not start; "" for none, when the REST cache bypasses. */
-export function externalValkey(addr: string): ValkeySidecarResult {
-  return { addr, containerName: null, started: false }
+export function externalValkey(addr: string, password?: string): ValkeySidecarResult {
+  return { addr, containerName: null, started: false, ...(password !== undefined && { password }) }
 }
 
 /** No Valkey for this run: the REST cache bypasses. */
@@ -122,7 +125,7 @@ export async function ensureValkeySidecar(
   const envAddr = namedValkeyAddr(cwd)
   if (envAddr) {
     console.log(`[supatype] Using the Valkey SUPATYPE_VALKEY_ADDR names (${envAddr}).`)
-    return externalValkey(envAddr)
+    return externalValkey(envAddr, namedDotEnvValue(cwd, VALKEY_PASSWORD_ENV))
   }
   const name = containerName(projectName)
   await deps.docker(["rm", "-f", name])
@@ -146,8 +149,13 @@ export async function ensureValkeySidecar(
  * port variables. It was read from the shell only, so one in .env was ignored (0.9.2 round 2, R2-S21).
  */
 function namedValkeyAddr(cwd: string): string | undefined {
-  const fromShell = process.env[VALKEY_ADDR_ENV]?.trim()
-  return fromShell || readDotEnvFiles(cwd)[VALKEY_ADDR_ENV]?.trim() || undefined
+  return namedDotEnvValue(cwd, VALKEY_ADDR_ENV)
+}
+
+/** A variable's value from the shell, else `.env` and `.env.local`; undefined when neither holds it. */
+function namedDotEnvValue(cwd: string, name: string): string | undefined {
+  const fromShell = process.env[name]?.trim()
+  return fromShell || readDotEnvFiles(cwd)[name]?.trim() || undefined
 }
 
 /**
