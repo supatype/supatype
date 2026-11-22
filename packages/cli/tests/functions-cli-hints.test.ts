@@ -40,7 +40,8 @@ function writeFunction(dir: string): void {
   writeFileSync(join(dir, "functions", "hello", "index.ts"), "export default () => new Response('hi')\n")
 }
 
-function linkToCloud(dir: string): void {
+/** A Cloud link; `projectUrl` is the environment's own API address, as `supatype link` records it. */
+function linkToCloud(dir: string, projectUrl = "https://acme-ref.supatype.dev"): void {
   mkdirSync(join(dir, ".supatype"), { recursive: true })
   const link = {
     version: 1,
@@ -48,7 +49,7 @@ function linkToCloud(dir: string): void {
     projectRef: "acme-ref",
     defaultEnvironment: "production",
     cloudApiUrl: "https://api.example.test",
-    environments: { production: { name: "production", apiUrl: "https://api.example.test", linkedAt: "2026-01-01T00:00:00Z" } },
+    environments: { production: { name: "production", apiUrl: projectUrl, linkedAt: "2026-01-01T00:00:00Z" } },
   }
   writeFileSync(join(dir, ".supatype", "link.json"), JSON.stringify(link))
 }
@@ -336,6 +337,20 @@ describe("functions invoke on a Cloud link with no session", () => {
     const run = await runCommand(registerFunctions, ["functions", "invoke", "hello"], project.dir)
     expect(run.exitCode).toBeUndefined()
     expect(seen).toEqual([{ url: "https://acme-ref.supatype.dev/functions/v1/hello", auth: null }])
+  })
+
+  it("refuses a link that holds no API address, saying to link again, sending nothing", async () => {
+    writeConfig(project.dir)
+    linkToCloud(project.dir, "https://api.example.test")
+    const seen = invokedWith()
+    const refusal = await runCommand(registerFunctions, ["functions", "invoke", "hello"], project.dir).then(
+      () => "",
+      (err: unknown) => (err instanceof Error ? err.message : String(err)),
+    )
+    expect(refusal).toContain("predates")
+    expect(refusal).toContain("supatype link")
+    expect(refusal).not.toContain("supatype.dev")
+    expect(seen).toEqual([])
   })
 
   it("asks for a login when --auth wants a token, sending nothing", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { targetFunctions, type DeployTarget } from "../src/resolve-target.js"
+import { targetFunctions, targetLogs, type DeployTarget } from "../src/resolve-target.js"
 import type { ProjectLink } from "../src/link.js"
 
 /**
@@ -37,13 +37,19 @@ describe("a Cloud project's invoke URL", () => {
     expect(targetFunctions(target).invokeBase).toBe("https://ref123-staging.supatype.dev/functions/v1")
   })
 
-  it("falls back to the project's supatype.dev host when the link holds only the control plane URL", () => {
+  it("is refused, with a pointer to supatype link, when the link holds only the control plane URL", () => {
     const target = cloudTarget({ production: env("production", CLOUD_API) })
-    expect(targetFunctions(target).invokeBase).toBe("https://ref123.supatype.dev/functions/v1")
+    expect(() => targetFunctions(target)).toThrow(/predates.*supatype link/s)
   })
 
-  it("falls back the same way when the link names no such environment", () => {
+  it("is refused the same way when the link names no such environment", () => {
     const target = cloudTarget({}, "production")
-    expect(targetFunctions(target).invokeBase).toBe("https://ref123.supatype.dev/functions/v1")
+    expect(() => targetFunctions(target)).toThrow(/supatype link/)
+  })
+
+
+  it("still lets logs be read from a link that holds no project URL", () => {
+    const target = cloudTarget({ production: env("production", CLOUD_API) })
+    expect(targetLogs(target)).toEqual({ kind: "window" })
   })
 })

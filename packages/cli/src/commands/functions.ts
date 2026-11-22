@@ -37,7 +37,7 @@ import {
 } from "../functions-worker-files.js"
 import { functionsServeKeyPath, sweepStaleServeKeyFiles, writeServiceRoleKeyFileUntilExit } from "../service-role-key-file.js"
 import { loadProjectLink } from "../link.js"
-import { projectRequest, resolveTarget, targetFunctions, type DeployTarget, type TargetStreamPath } from "../resolve-target.js"
+import { projectRequest, resolveTarget, targetFunctions, targetLogs, type DeployTarget, type TargetStreamPath } from "../resolve-target.js"
 import { targetFetch, targetStream, type TargetFetchOptions } from "../target-client.js"
 import { isArrayOf, isJsonObject, isNumber, isShape, isString, isUnknown, nullable, optional, type FunctionDeployBody, type FunctionDeployEntry, type Guard } from "@supatype/shared"
 import {
@@ -418,7 +418,12 @@ async function deploy(cwd: string, opts: { only?: string; env?: string; dryRun?:
   const target = linkedTarget(cwd, opts.env)
   if (target !== null) {
     finishDeploy(fns.length, await deployViaTarget(cwd, target, fns))
-    info(`Invoke: ${targetFunctions(target).invokeBase}/<name>`)
+    // The deploy has already succeeded: an old link with no API address only loses this hint.
+    try {
+      info(`Invoke: ${targetFunctions(target).invokeBase}/<name>`)
+    } catch (err) {
+      info(err instanceof Error ? err.message : String(err))
+    }
     return
   }
 
@@ -640,7 +645,7 @@ async function deleteFunction(cwd: string, name: string): Promise<void> {
  */
 async function functionLogs(cwd: string, name: string, opts: { since: string }): Promise<void> {
   const target = requireLinkedTarget(cwd)
-  const { logs } = targetFunctions(target)
+  const logs = targetLogs(target)
   if (logs.kind === "tail") return tailServerLogs(target, logs.tail, name)
   const subpath = `/functions/${encodeURIComponent(name)}/logs?since=${encodeURIComponent(opts.since)}`
   const lines = await askTarget(target, "Failed to fetch logs", { method: "GET", subpath }, isFunctionLogs)
