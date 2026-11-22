@@ -511,6 +511,24 @@ describe("scaffold()", () => {
     expect(env).toContain("production, your own S3 bucket")
   })
 
+  // Supatype Cloud brings its own storage, so init records no production entry for it, whichever local
+  // storage was picked. Self-host keeps recording it.
+  it("writes no production storage for Supatype Cloud", () => {
+    for (const storageLocal of ["local", "s3"] as const) {
+      scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app", "cloud"), storageLocal, storageProduction: storageLocal })
+      const config = readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")
+      const storageLine = config.split(/\r?\n/).find((line) => line.startsWith("  storage:"))
+      expect(storageLine).toBeDefined()
+      expect(storageLine).not.toContain("production")
+      rmSync(join(tmpRoot, "supatype.config.ts"))
+    }
+  })
+
+  it("still records production storage for self-host", () => {
+    scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app", "self-host"), storageLocal: "s3", storageProduction: "s3" })
+    expect(readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")).toContain('storage: { provider: "s3", production: "s3" }')
+  })
+
   // 0.9.2: the self-host stack reads production storage from the config, so init records the answer
   // there rather than in a comment, and S3_ENDPOINT is written once: local SeaweedFS's address used
   // to come first and a blank production one after it, which a .env reader takes in place of it.
