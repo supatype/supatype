@@ -1519,7 +1519,7 @@ API_EXTERNAL_URL=${initLocalApiUrl(opts)}`,
   // Where the CLI would leave it after taking out a SUPATYPE_MAILER_AUTOCONFIRM an earlier CLI wrote.
   // Written here, a new project never has that done to a line of the developer's own (FF7).
   sections.push(MAILER_AUTOCONFIRM_NOTE)
-  sections.push(storageEnvSections(opts.storageLocal, opts.storageProduction))
+  sections.push(storageEnvSections(opts.storageLocal, opts.storageProduction, opts.productionTarget === "cloud"))
 
   if (opts.adminEmail && opts.adminPassword) {
     sections.push(
@@ -1588,7 +1588,13 @@ SUPATYPE_SMTP_SENDER_NAME=${projectName}`
 function storageEnvSections(
   storageLocal: StorageProvider,
   storageProduction: StorageProvider,
+  cloud: boolean,
 ): string {
+  // Supatype Cloud brings its own storage and no production entry is written, so a bucket of your own
+  // here serves local development only.
+  if (cloud && storageLocal === "s3") {
+    return s3EnvSection("local development only", "Supatype Cloud provides production storage.")
+  }
   if (storageLocal === storageProduction) {
     if (storageLocal === "s3") {
       return s3EnvSection("local development and production", "Use a separate bucket for dev and production.")

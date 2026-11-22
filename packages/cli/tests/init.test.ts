@@ -524,6 +524,24 @@ describe("scaffold()", () => {
     }
   })
 
+  // With no production entry written, the S3 comments must not call the bucket a production one.
+  it("describes an S3 bucket as local-only for Supatype Cloud, and unchanged for self-host and later", () => {
+    scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app", "cloud"), storageLocal: "s3", storageProduction: "s3" })
+    const cloudEnv = readFileSync(join(tmpRoot, ".env"), "utf8")
+    expect(cloudEnv).toContain("# Storage (local development only, your own S3 bucket)")
+    expect(cloudEnv).toContain("Supatype Cloud provides production storage.")
+    expect(cloudEnv).not.toContain("and production")
+    expect(cloudEnv).not.toContain("separate bucket for dev and production")
+    for (const target of ["self-host", "later"] as const) {
+      const root = join(tmpRoot, target)
+      mkdirSync(root, { recursive: true })
+      scaffold(root, { ...defaultScaffoldOptions("my-app", target), storageLocal: "s3", storageProduction: "s3" })
+      const env = readFileSync(join(root, ".env"), "utf8")
+      expect(env).toContain("# Storage (local development and production, your own S3 bucket)")
+      expect(env).toContain("Use a separate bucket for dev and production.")
+    }
+  })
+
   it("still records production storage for self-host", () => {
     scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app", "self-host"), storageLocal: "s3", storageProduction: "s3" })
     expect(readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")).toContain('storage: { provider: "s3", production: "s3" }')
