@@ -5,6 +5,7 @@ import { studioAuthHeaders, usesSessionProxy } from "../lib/studio-auth-headers.
 import { studioGatewayHeaders } from "../lib/studio-gateway-headers.js"
 import type { SupatypeClient } from "@supatype/client"
 import { useAdminClient } from "./useAdminClient.js"
+import { usePlatform } from "./usePlatform.js"
 
 export interface SqlResult {
   rows: Record<string, unknown>[]
@@ -130,32 +131,50 @@ export async function readSqlResponse(res: Response): Promise<SqlResult> {
   }
 }
 
-/** POST a JSON body to `route` on the project proxy, as Studio's session. */
-function postProxy(client: SupatypeClient, route: string, body: object): Promise<Response> {
+/** The header Cloud's project proxy reads to pick the staging or preview data plane. */
+const ENVIRONMENT_HEADER = "X-Supatype-Environment"
+
+/** Where a proxy call goes: the client's proxy URL, and the environment the host says Studio is open on. */
+interface ProxyTarget {
+  client: SupatypeClient
+  /** Absent on a self-host Studio, whose stack is one environment: no header is sent. */
+  environment: string | undefined
+}
+
+/**
+ * POST a JSON body to `route` on the project proxy, as Studio's session. These are raw fetches, which
+ * do not carry the client's own headers, so the environment is sent here or the call is production's.
+ */
+function postProxy({ client, environment }: ProxyTarget, route: string, body: object): Promise<Response> {
   return fetch(`${client.url}${route}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...studioGatewayHeaders(), ...studioAuthHeaders(client) },
+    headers: {
+      "Content-Type": "application/json",
+      ...studioGatewayHeaders(),
+      ...studioAuthHeaders(client),
+      ...(environment !== undefined && { [ENVIRONMENT_HEADER]: environment }),
+    },
     credentials: "include",
     body: JSON.stringify(body),
   })
 }
 
 /** POST one catalogue query to `route` on the project proxy; the server binds its parameters. */
-async function postCatalogue(client: SupatypeClient, route: string, name: string, params: MetadataParams): Promise<SqlResult> {
-  return readSqlResponse(await postProxy(client, route, { name, params }))
+async function postCatalogue(target: ProxyTarget, route: string, name: string, params: MetadataParams): Promise<SqlResult> {
+  return readSqlResponse(await postProxy(target, route, { name, params }))
 }
 
 /** POST one write to an allow-listed `/studio-admin` route; a refusal throws as the SQL route's do. */
-async function postStudioAdmin(client: SupatypeClient, path: string, body: object): Promise<void> {
-  await readSqlResponse(await postProxy(client, `/studio-admin/${path}`, body))
+async function postStudioAdmin(target: ProxyTarget, path: string, body: object): Promise<void> {
+  await readSqlResponse(await postProxy(target, `/studio-admin/${path}`, body))
 }
 
 /** The SQ2 writes: extensions, RLS and auth/storage policies, each on its own audited route. */
-function studioAdminWrites(client: SupatypeClient): Pick<ProjectProxy, "studioExtension" | "studioRls" | "studioPolicy"> {
+function studioAdminWrites(target: ProxyTarget): Pick<ProjectProxy, "studioExtension" | "studioRls" | "studioPolicy"> {
   return {
-    studioExtension: (name, enable) => postStudioAdmin(client, "extensions", { name, enable }),
-    studioRls: (schema, table, enable) => postStudioAdmin(client, "rls", { schema, table, enable }),
-    studioPolicy: (body) => postStudioAdmin(client, "policies", body),
+    studioExtension: (name, enable) => postStudioAdmin(target, "extensions", { name, enable }),
+    studioRls: (schema, table, enable) => postStudioAdmin(target, "rls", { schema, table, enable }),
+    studioPolicy: (body) => postStudioAdmin(target, "policies", body),
   }
 }
 
@@ -203,6 +222,8 @@ export function tablesFromColumns(rows: Array<Record<string, unknown>>): SchemaT
  */
 export function useProjectProxy(): ProjectProxy {
   const client = useAdminClient()
+  const { environment } = usePlatform()
+  const target = useMemo<ProxyTarget>(() => ({ client, environment }), [client, environment])
   const sessionProxy = usesSessionProxy(client)
 
   const sql = useCallback(
@@ -215,24 +236,24 @@ export function useProjectProxy(): ProjectProxy {
           "SQL proxy requires the session proxy, Studio no longer accepts a service role key in the browser",
         )
       }
-      return readSqlResponse(await postProxy(client, "/sql", { query, ...(schema !== undefined && { schema }) }))
+      return readSqlResponse(await postProxy(target, "/sql", { query, ...(schema !== undefined && { schema }) }))
     },
-    [client, sessionProxy],
+    [client, target, sessionProxy],
   )
 
   // RQ3: one named, read-only query from the server's metadata catalogue, its parameters bound
   // server-side. Open to every role with schema view, where `sql` is for the SQL editor's roles.
   const metadata = useCallback(
-    (name: MetadataName, params: MetadataParams = {}): Promise<SqlResult> => postCatalogue(client, "/metadata", name, params),
-    [client],
+    (name: MetadataName, params: MetadataParams = {}): Promise<SqlResult> => postCatalogue(target, "/metadata", name, params),
+    [target],
   )
 
   // A schema's tables and columns, through the catalogue's introspect query on its own route, which
   // every role that may read rows reaches: editors use Data Explorer without holding schema view.
   const introspect = useCallback(async (schema?: string): Promise<SchemaTable[]> => {
-    const result = await postCatalogue(client, "/metadata/introspect", "introspect", { schema: schema ?? "public" })
+    const result = await postCatalogue(target, "/metadata/introspect", "introspect", { schema: schema ?? "public" })
     return tablesFromColumns(result.rows)
-  }, [client])
+  }, [target])
 
   // Schemas that contain at least one base table (hides empty public/extensions/auth shells).
   const schemas = useCallback(async (): Promise<string[]> => {
@@ -240,7 +261,7 @@ export function useProjectProxy(): ProjectProxy {
     return result.rows.map((r) => r["schema_name"]).filter(isString)
   }, [metadata])
 
-  const admin = useMemo(() => studioAdminWrites(client), [client])
+  const admin = useMemo(() => studioAdminWrites(target), [target])
 
   return useMemo(() => ({ sql, metadata, introspect, schemas, ...admin }), [sql, metadata, introspect, schemas, admin])
 }
