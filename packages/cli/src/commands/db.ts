@@ -44,9 +44,10 @@ export function registerDb(program: Command): void {
       const cwd = process.cwd()
       const config = loadConfig(cwd)
       const link = loadProjectLink(cwd)
-      const localConn = resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn
 
       if (!link || link.kind !== "cloud") {
+        // Only a local string needs the local stack: Cloud's comes from the control plane below.
+        const localConn = resolveHostDatabaseUrl(cwd, config, { allowDerived: true }).dsn
         const connStr = opts.transaction ? localConn.replace(/:5432\//, ":6432/") : localConn
         plain(connStr)
         plain()
