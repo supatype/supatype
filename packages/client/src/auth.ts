@@ -464,16 +464,20 @@ export class AuthClient {
   async signInWithPassword(credentials: {
     email: string
     password: string
+    /** `captchaToken` is the provider widget's answer, which a project with captcha on requires. */
+    options?: { captchaToken?: string | undefined } | undefined
   }): Promise<{
     data: { session: Session | null; user: User | null }
     error: SupatypeError | null
   }> {
+    const captchaToken = credentials.options?.captchaToken
     const res = await this.send(`${this.url}/token?grant_type=password`, {
       method: "POST",
       headers: this.baseHeaders,
       body: JSON.stringify({
         email: credentials.email,
         password: credentials.password,
+        ...(captchaToken !== undefined && { supatype_meta_security: { captcha_token: captchaToken } }),
       }),
     })
     return this._parseAuthResponse(res)

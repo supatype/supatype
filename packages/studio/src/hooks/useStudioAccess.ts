@@ -16,7 +16,7 @@ export interface UseStudioAccessOptions {
 export interface UseStudioAccessReturn {
   phase: StudioAccessPhase
   forbiddenMessage: string | null
-  signIn(email: string, password: string): Promise<{ error: SupatypeError | null }>
+  signIn(email: string, password: string, captchaToken?: string): Promise<{ error: SupatypeError | null }>
   signOut(): Promise<void>
   retryVerify(): void
 }
@@ -71,8 +71,12 @@ export function useStudioAccess({ apiBaseUrl, authClient }: UseStudioAccessOptio
   }, [verify, verifyGeneration, user?.id])
 
   const signIn = useCallback(
-    async (email: string, password: string) => {
-      const result = await authClient.auth.signInWithPassword({ email, password })
+    async (email: string, password: string, captchaToken?: string) => {
+      const result = await authClient.auth.signInWithPassword({
+        email,
+        password,
+        ...(captchaToken !== undefined && { options: { captchaToken } }),
+      })
       if (result.error === null) {
         setVerifyGeneration((g) => g + 1)
       }

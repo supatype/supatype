@@ -82,6 +82,12 @@ describe("group settings rendering", () => {
     expect(off["SUPATYPE_SECURITY_CAPTCHA_SECRET"]).toBe("")
   })
 
+  it("renders the captcha site key, which is public, whether or not captcha is on (FF-12)", () => {
+    const on = authSettingsToEnv({ auth: { captcha: { enabled: true, provider: "hcaptcha", siteKey: "10000000-ffff-ffff-ffff-000000000001" } } }, ctx)
+    expect(on["SUPATYPE_SECURITY_CAPTCHA_SITE_KEY"]).toBe("10000000-ffff-ffff-ffff-000000000001")
+    expect(authSettingsToEnv({}, ctx)["SUPATYPE_SECURITY_CAPTCHA_SITE_KEY"]).toBe("")
+  })
+
   it("renders required password characters as the server's colon-separated sets, with nothing a compose file cannot carry", () => {
     const env = authSettingsToEnv({ auth: { password: { minLength: 10, requiredCharacters: ["digit", "lower", "symbol"] } } }, ctx)
     expect(env["SUPATYPE_PASSWORD_MIN_LENGTH"]).toBe("10")

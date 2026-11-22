@@ -73,8 +73,12 @@ export const CAPTCHA_PROVIDERS = ["hcaptcha", "turnstile"] as const
 
 export interface AuthGroupSettings {
   hooks?: AuthHooksSettings
-  /** Bot protection on sign-up, sign-in and recovery. The secret is the provider's server-side key. */
-  captcha?: { enabled?: boolean; provider?: (typeof CAPTCHA_PROVIDERS)[number]; secret?: EnvReference }
+  /**
+   * Bot protection on sign-up, sign-in and recovery. The secret is the provider's server-side key.
+   * The site key is the provider's public one: the server's public settings answer hands it to Studio
+   * and to apps, which render the provider's widget and send its token with the sign-in.
+   */
+  captcha?: { enabled?: boolean; provider?: (typeof CAPTCHA_PROVIDERS)[number]; secret?: EnvReference; siteKey?: string }
   password?: {
     /** Shortest password accepted, 6 to 72. */
     minLength?: number
@@ -197,6 +201,7 @@ const SPECS: readonly Spec[] = [
   ...HOOK_SPECS,
   flag("captcha.enabled", "SUPATYPE_SECURITY_CAPTCHA_ENABLED", false),
   { path: "captcha.provider", env: "SUPATYPE_SECURITY_CAPTCHA_PROVIDER", kind: "choice", fallback: "hcaptcha", choices: CAPTCHA_PROVIDERS },
+  text("captcha.siteKey", "SUPATYPE_SECURITY_CAPTCHA_SITE_KEY"),
   { ...count("password.minLength", "SUPATYPE_PASSWORD_MIN_LENGTH", "0", 6, 72), effective: "6" },
   { path: "password.requiredCharacters", env: "SUPATYPE_PASSWORD_REQUIRED_CHARACTERS", kind: "list", fallback: "" },
   flag("password.leakedPasswordCheck", "SUPATYPE_PASSWORD_HIBP_ENABLED", false),

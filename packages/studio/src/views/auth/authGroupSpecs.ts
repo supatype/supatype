@@ -39,6 +39,7 @@ export function hookSpecs(name: AuthHookName): SettingSpec[] {
 export const CAPTCHA_SPECS: SettingSpec[] = [
   bool("captcha.enabled", "CAPTCHA enabled"),
   spec("captcha.provider", "CAPTCHA provider", "select", { options: CAPTCHA_PROVIDERS }),
+  text("captcha.siteKey", "CAPTCHA site key"),
 ]
 
 export const PASSWORD_SPECS: SettingSpec[] = [

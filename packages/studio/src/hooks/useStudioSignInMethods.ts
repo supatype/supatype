@@ -14,7 +14,7 @@ export interface StudioExternalSignIn {
   /** Leave for the OAuth provider; the auth server brings the browser back to Studio. */
   signInWithProvider(provider: string): Promise<{ error: string | null }>
   /** Leave for the SAML identity provider of the email's domain; it comes back the same way. */
-  signInWithSSO(email: string): Promise<{ error: string | null }>
+  signInWithSSO(email: string, captchaToken?: string): Promise<{ error: string | null }>
 }
 
 /** The project's sign-in methods, providers narrowed by `studio.auth.providers`. */
@@ -77,10 +77,11 @@ export function useStudioSignInMethods(apiBaseUrl: string, anonKey: string, auth
     [authClient],
   )
   const signInWithSSO = useCallback(
-    async (email: string) => {
+    async (email: string, captchaToken?: string) => {
       const domain = ssoDomain(email)
       if (domain === null) return { error: "Enter your work email address, such as you@company.com." }
-      return leaveFor(await authClient.auth.signInWithSSO({ domain, options: { studio: true, skipBrowserRedirect: true } }))
+      const options = { studio: true, skipBrowserRedirect: true, ...(captchaToken !== undefined && { captchaToken }) }
+      return leaveFor(await authClient.auth.signInWithSSO({ domain, options }))
     },
     [authClient],
   )

@@ -24,7 +24,7 @@ function config(auth?: Record<string, unknown>, email?: Record<string, unknown>)
 
 const groups = {
   hooks: { sendEmail: { uri: "https://hooks.example.com/email", secrets: "env(EMAIL_HOOK_SECRETS)" } },
-  captcha: { enabled: true, provider: "turnstile", secret: "env(CAPTCHA_SECRET)" },
+  captcha: { enabled: true, provider: "turnstile", secret: "env(CAPTCHA_SECRET)", siteKey: "0x4AAAAAAAsite" },
   password: { minLength: 10, requiredCharacters: ["lower", "digit"] },
   sessions: { timebox: 86400 },
   rateLimits: { otp: 50 },
@@ -43,6 +43,7 @@ describe("auth settings groups in the compose file", () => {
     expect(lines).toContain('      SUPATYPE_HOOK_SEND_EMAIL_ENABLED: "${SUPATYPE_HOOK_SEND_EMAIL_ENABLED:-true}"\n')
     expect(lines).toContain('      SUPATYPE_HOOK_SEND_EMAIL_SECRETS: "${SUPATYPE_HOOK_SEND_EMAIL_SECRETS:-${EMAIL_HOOK_SECRETS:-}}"\n')
     expect(lines).toContain('      SUPATYPE_SECURITY_CAPTCHA_SECRET: "${SUPATYPE_SECURITY_CAPTCHA_SECRET:-${CAPTCHA_SECRET:-}}"\n')
+    expect(lines).toContain('      SUPATYPE_SECURITY_CAPTCHA_SITE_KEY: "${SUPATYPE_SECURITY_CAPTCHA_SITE_KEY:-0x4AAAAAAAsite}"\n')
     expect(lines).toContain('      SUPATYPE_PASSWORD_MIN_LENGTH: "${SUPATYPE_PASSWORD_MIN_LENGTH:-10}"\n')
     expect(lines).toContain('      SUPATYPE_SESSIONS_TIMEBOX: "${SUPATYPE_SESSIONS_TIMEBOX:-86400s}"\n')
   })

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { readCaptcha, type CaptchaSettings } from "../lib/captcha.js"
 import { isJsonObject } from "../lib/json.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { studioGatewayHeaders } from "../lib/studio-gateway-headers.js"
@@ -17,6 +18,8 @@ export interface AuthSettings {
   sms_provider: string
   saml_enabled: boolean
   passkeys_enabled: boolean
+  /** The captcha in force, with the provider's public site key; null when it is off. */
+  captcha: CaptchaSettings | null
 }
 
 export interface AuthSettingsState {
@@ -43,6 +46,7 @@ export function normaliseAuthSettings(raw: unknown): AuthSettings {
     sms_provider: typeof body["sms_provider"] === "string" ? body["sms_provider"] : "",
     saml_enabled: bool(body["saml_enabled"]),
     passkeys_enabled: bool(body["passkeys_enabled"]),
+    captcha: readCaptcha(body["captcha"]),
   }
 }
 
