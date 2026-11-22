@@ -9,6 +9,7 @@
  */
 import { validateAuthSettings } from "@supatype/types"
 import { UNSAFE_LITERAL, isPlainObject } from "./auth-providers.js"
+import { warn } from "./ui/messages.js"
 
 /** The `auth` keys that are settings groups the shared rules check in full. */
 const GROUP_KEYS = ["hooks", "captcha", "password", "sessions", "security", "mfa", "anonymous", "phone", "rateLimits"] as const
@@ -55,4 +56,33 @@ export function validateAuthConfigFields(cfg: Record<string, unknown>, filename:
   const problems = [...validateAuthSettings(settings, "self-host"), ...unsafeProblems(auth)]
   const [first] = problems
   if (first !== undefined) throw new Error(`${filename}: ${first}`)
+  warnLiteralSecrets(settings.email)
+}
+
+/** The email secrets a self-host config may still hold as a literal, for now. */
+const LITERAL_SECRETS = [
+  { path: "email.smtp.pass", field: "pass", read: (email: Record<string, unknown>) => (isPlainObject(email["smtp"]) ? email["smtp"]["pass"] : undefined) },
+  { path: "email.resend_api_key", field: "resend_api_key", read: (email: Record<string, unknown>) => email["resend_api_key"] },
+] as const
+
+/** Warned once each: a command reads the config more than once. */
+const warnedLiterals = new Set<string>()
+
+/**
+ * Supatype Cloud refuses a literal secret in config, and self-host accepts one for now so existing
+ * configs keep working. Say that the next release refuses it too, and how to change it. The value
+ * is never printed.
+ */
+function warnLiteralSecrets(email: Record<string, unknown> | undefined): void {
+  if (email === undefined) return
+  for (const secret of LITERAL_SECRETS) {
+    const value = secret.read(email)
+    if (typeof value !== "string" || value.trim() === "" || value.trim().startsWith("env(")) continue
+    if (warnedLiterals.has(secret.path)) continue
+    warnedLiterals.add(secret.path)
+    warn(
+      `${secret.path} holds a literal secret, which a config file committed to git should not. ` +
+        `Name an environment variable instead: ${secret.field}: env("NAME"). The next release refuses a literal here, as Supatype Cloud already does.`,
+    )
+  }
 }
