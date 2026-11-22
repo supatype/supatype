@@ -64,6 +64,12 @@ export interface StudioCoreProps {
    * When set, cloud-upsell screens show a CTA button linking here.
    */
   cloudUrl?: string
+  /**
+   * Where the Dashboard's Database Size and Storage cards read their figures (see SizeSource).
+   * Without one Studio reads the project's own `db_stats` and `storage_stats` functions, which
+   * self-host has. Cloud does not expose that schema and passes a source over its metered usage.
+   */
+  sizeSource?: SizeSource
 }
 
 // Re-export config types for convenience
@@ -72,4 +78,6 @@ export type { AdminConfig, ModelConfig, GlobalConfig, FieldConfig, WidgetType } 
 // Forward-declare the client type so consumers don't need @supatype/client
 import type { SupatypeClient } from "@supatype/client"
 import type { AdminConfig } from "./config.js"
+import type { SizeSource } from "./lib/size-source.js"
+export type { SizeFigure, SizeReadout, SizeSource } from "./lib/size-source.js"
 export type { SupatypeClient }

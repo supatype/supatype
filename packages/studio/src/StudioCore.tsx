@@ -10,6 +10,7 @@ import { AdminClientContext, useAdminClient } from "./hooks/useAdminClient.js"
 import { LocaleContext, useLocaleState } from "./hooks/useLocale.js"
 import { CloudUrlContext } from "./hooks/useCloudUrl.js"
 import { PlatformCtx } from "./hooks/usePlatform.js"
+import { SizeSourceCtx } from "./lib/size-source.js"
 import { Sidebar, getPageBreadcrumbs, hiddenNavItems } from "./components/Sidebar.js"
 import { PageError } from "./components/ui.js"
 import { useStudioCapability } from "./hooks/useStudioCapability.js"
@@ -406,7 +407,7 @@ function GlobalGraphQLRoute(): React.ReactElement {
 
 // ─── StudioCore ────────────────────────────────────────────────────────────────
 
-export function StudioCore({ config, client, extensions, demoMode, cloudUrl, platformUrl, projectRef }: StudioCoreProps): React.ReactElement {
+export function StudioCore({ config, client, extensions, demoMode, cloudUrl, platformUrl, projectRef, sizeSource }: StudioCoreProps): React.ReactElement {
   const localeState = useLocaleState(config)
   // A mode an earlier Studio remembered is no longer read; forgetting it once keeps no stale choice.
   useEffect(() => forgetStoredActingModes(), [])
@@ -414,6 +415,7 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
   let content = (
     <CloudUrlContext.Provider value={cloudUrl}>
     <PlatformCtx.Provider value={{ platformUrl, projectRef }}>
+    <SizeSourceCtx.Provider value={sizeSource}>
     <AdminConfigContext.Provider value={config}>
       <AdminClientContext.Provider value={client}>
         <LocaleContext.Provider value={localeState}>
@@ -595,6 +597,7 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
         </LocaleContext.Provider>
       </AdminClientContext.Provider>
     </AdminConfigContext.Provider>
+    </SizeSourceCtx.Provider>
     </PlatformCtx.Provider>
     </CloudUrlContext.Provider>
   )

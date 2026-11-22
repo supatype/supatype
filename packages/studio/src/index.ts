@@ -4,6 +4,7 @@
 
 // Core component
 export { StudioCore } from "./StudioCore.js"
+export { megabytesToFigure } from "./lib/size-source.js"
 
 // Types
 export type {
