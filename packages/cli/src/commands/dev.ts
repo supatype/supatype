@@ -167,6 +167,7 @@ import {
 import { claimPortLock, isPortLock, type PortClaimHeld, type PortLock } from "../native-port-lock.js"
 import { leftoverOwnPostgres, recordNativeDevPid, type NativeDevState } from "../native-leftover-postgres.js"
 import { stopLeftoverServices } from "../native-leftover-services.js"
+import { cleanStaleNativeSession } from "../native-stale-session.js"
 import {
   isPasswordRejected,
   pgClientEnv,
@@ -376,6 +377,9 @@ export function registerDev(program: Command): void {
       const nativeState: NativeDevState = { dataDir: nativeDataDir(config), pidDir: join(nativeStateRoot(config), "pid") }
       let portClaim: NativePortClaim | null = null
       if (provider !== "docker") {
+        // A dev that was force-quit leaves its Valkey container and session file; say what is removed.
+        const cleaned = await cleanStaleNativeSession(cwd)
+        if (cleaned !== null) console.log(`[supatype] ${cleaned}`)
         // The functions worker runs on every native dev (native-worker.ts), so Deno's port is checked too.
         portClaim = await claimNativeDevPorts({
           postgres: pgPort,
@@ -863,6 +867,7 @@ export function registerDev(program: Command): void {
         composePath: selfHostComposePaths(cwd).composePath,
         dbPort: pgPort,
         runEnv: { [DEV_DB_PORT_ENV]: String(pgPort) },
+        ...(cache.sidecar.containerName !== null && { valkeyContainer: cache.sidecar.containerName }),
       }))
 
       // ── 10. Schema watch ──────────────────────────────────────────────────
