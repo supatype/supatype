@@ -12,6 +12,11 @@ const targetSchemaPush = vi.hoisted(() => vi.fn<TargetCall<{ overwriteDrift?: bo
 const askMock = vi.hoisted(() => vi.fn(async () => true))
 const interactive = vi.hoisted(() => ({ value: true }))
 
+// A linked push writes the generated types; what it writes is not under test here.
+vi.mock("../src/type-generation.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/type-generation.js")>()),
+  writeGeneratedTypes: async () => [],
+}))
 vi.mock("../src/config.js", () => ({ loadConfig: () => ({ project: { name: "app" } }), loadSchemaAst: () => ({}) }))
 vi.mock("../src/model-versioning.js", () => ({ withPublishing: (ast: unknown) => ast }))
 vi.mock("../src/model-hooks.js", () => ({

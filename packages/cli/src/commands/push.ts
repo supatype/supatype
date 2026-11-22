@@ -12,6 +12,7 @@ import {
 } from "../model-hooks.js"
 import { rowCacheChangeNote } from "../model-cache.js"
 import { writeAppliedAstArtifacts } from "../applied-ast-artifacts.js"
+import { reloadHooksWorker } from "../hooks-worker-reload.js"
 import { adapterEntry, readHookUpload, type HookFailure } from "../hook-upload.js"
 import { checkServiceRoleRoutes, serviceRoleProblemLines } from "../service-role-check.js"
 import { fatalError } from "../ui/fatal.js"
@@ -342,11 +343,26 @@ async function pushViaTarget(
   // A linked self-host server runs the same compose stack, with the same PostgREST to wait for.
   if (target.mode === "self-host") await waitForRestReady(target.apiBaseUrl, undefined)
 
+  await finishTargetPush({ cwd, config, target, ast }, pushResult, hooksFailed)
+}
+
+/**
+ * How a push ends once the schema is applied: the project's own stack and databases finish locally,
+ * a linked target reports what it did.
+ */
+export async function finishTargetPush(
+  push: { cwd: string; config: SupatypeProjectConfig; target: DeployTarget; ast: unknown },
+  pushResult: Awaited<ReturnType<typeof targetSchemaPush>>,
+  hooksFailed: boolean,
+): Promise<void> {
+  const { cwd, config, target, ast } = push
   if (target.mode === "direct" || target.mode === "local") {
     await finishLocalPush(cwd, config, target, ast)
     return
   }
-
+  // A linked push writes what the project's own one does: types, client and seed builder describe
+  // the schema just applied, and the next seed is refused when they describe an older one.
+  await generateTypesLocal(cwd, ast, config, false)
   reportTargetPush(target, pushResult, hooksFailed)
 }
 
@@ -468,8 +484,10 @@ async function finishLocalPush(cwd: string, config: SupatypeProjectConfig, targe
   if (target.databaseUrl) {
     await ensureFirstAdminUser(target.databaseUrl, { cwd, studioUrl })
   }
-  await generateTypesLocal(ast, config, isProjectDatabase(cwd, config, target.databaseUrl))
+  const written = await generateTypesLocal(cwd, ast, config, isProjectDatabase(cwd, config, target.databaseUrl))
   if (stackUrl !== undefined && resolveRuntimeProvider(config) === "docker") {
+    // The stack's worker started before this file existed on a first push, and loads handlers once.
+    reloadHooksWorker(cwd, config, written)
     // A push to the running stack's database can change its tier, and PostgREST follows.
     const { followRecordedTier } = await import("../dev-compose.js")
     await followRecordedTier(cwd, config, { recreate: true })
@@ -665,14 +683,18 @@ function readGeneratedAdapter(hooksDir: string): { name: string; source: string 
   return adapterEntry(readFileSync(file, "utf8"))
 }
 
-async function generateTypesLocal(ast: unknown, config: SupatypeProjectConfig, ownDatabase: boolean): Promise<void> {
+async function generateTypesLocal(
+  cwd: string,
+  ast: unknown,
+  config: SupatypeProjectConfig,
+  ownDatabase: boolean,
+): Promise<{ hooksModuleWritten: boolean }> {
   // Independent of `output`: a project with hooks needs its handler types whether or not it asked
   // for client types, and the module is written next to the functions that import it.
-  const cwd = process.cwd()
   // The row cache is configured at postmaster start, so this is the one cache setting a push
   // cannot make take effect on its own. Only for the project's own database: `.env` configures that
   // container, and a push to any other database has no container to recreate (A2-N4).
-  const { lines, rowCache } = writeAppliedAstArtifacts(cwd, config, ast, { rowCacheEnv: ownDatabase })
+  const { lines, rowCache, hooksModuleWritten } = writeAppliedAstArtifacts(cwd, config, ast, { rowCacheEnv: ownDatabase })
   for (const line of lines) info(line)
   if (rowCache !== null) {
     info(
@@ -688,6 +710,7 @@ async function generateTypesLocal(ast: unknown, config: SupatypeProjectConfig, o
     writeGeneratedTypes({ cwd, ast, ...projectOutputPaths(config.output) }),
   )
   for (const message of written) info(message)
+  return { hooksModuleWritten }
 }
 
 /** Create the schema's buckets on the project's own stack at `baseUrl`. */
