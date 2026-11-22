@@ -23,6 +23,11 @@ export interface ProcessOptions {
   cwd?: string
   /** Environment variables to merge with process.env. */
   env?: Record<string, string>
+  /**
+   * Which of this CLI's own environment variables the process starts with, all of them unless
+   * given. `env` is applied over them either way.
+   */
+  inheritEnv?: (name: string) => boolean
   /** Initial restart backoff in ms. Doubles each crash up to maxBackoffMs. */
   initialBackoffMs?: number
   /** Maximum restart backoff cap in ms. */
@@ -68,6 +73,12 @@ const RESET = "\x1b[0m"
 export const FAST_CRASH_LIMIT = 5
 
 type OutputStream = "stdout" | "stderr"
+
+/** This CLI's environment, narrowed to the names `keep` accepts when it is given. */
+function inheritedEnv(keep: ((name: string) => boolean) | undefined): NodeJS.ProcessEnv {
+  if (keep === undefined) return process.env
+  return Object.fromEntries(Object.entries(process.env).filter(([name]) => keep(name)))
+}
 
 /**
  * Drops the carriage return that ends a CRLF line. A line redrawn with bare carriage returns (a
@@ -213,7 +224,7 @@ export class ProcessManager {
     if (this.stopped) return
 
     const child = spawn(this.bin, this.args, {
-      env: { ...process.env, ...this.opts.env } as NodeJS.ProcessEnv,
+      env: { ...inheritedEnv(this.opts.inheritEnv), ...this.opts.env },
       cwd: this.opts.cwd,
       stdio: "pipe",
       ...(this.opts.shell ? { shell: true } : {}),

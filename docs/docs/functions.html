@@ -212,7 +212,7 @@
   },
 })</pre></div>
 <p><code>supatype push</code> refuses a name that matches no function, so a typo cannot silently grant nothing. <code>supatype doctor</code> lists the current grants.</p>
-<div class="callout warn"><span class="callout-label">LOCAL DEV</span><p>The local router does not apply this list. Under <code>supatype dev</code> every function receives <code>ctx.serviceRoleKey</code>, and under <code>supatype functions serve</code> every function does when <code>SUPATYPE_SERVICE_ROLE_KEY</code> is set in your shell. Test that a function works without the key on a self-hosted stack.</p></div>
+<p>Local dev applies the same list, so a function that relies on the key without being named fails there first. Under <code>supatype functions serve</code> no function receives the key unless <code>SUPATYPE_SERVICE_ROLE_KEY</code> is set in your shell, and then only the functions the list names.</p>
 
 <h2 id="env">Environment and secrets</h2>
 <p>Variables for functions live in env files inside the functions directory:</p>
@@ -222,6 +222,7 @@
 </ul>
 <p>Read them from <code>ctx.env</code>. The files are read on each call, so a changed value takes effect without a restart. Keep them out of git.</p>
 <p>Every value set with <code>supatype functions env set</code>, in <code>.env.local</code> or in <code>.env.&lt;name&gt;.local</code> arrives in <code>ctx.env</code> on each call, never in <code>Deno.env</code>: <code>Deno.env</code> is the worker's one process environment, shared by every call running at the same time, so a value put there for one function would reach every other. <code>Deno.env.get("RESEND_API_KEY")</code> finds nothing.</p>
+<p><code>Deno.env</code> holds only the worker's own settings (such as <code>SUPATYPE_URL</code>, <code>SUPATYPE_PUBLIC_URL</code> and <code>SUPATYPE_ANON_KEY</code>, which also arrive as <code>ctx</code> fields), Deno's <code>DENO_*</code> variables and what the operating system needs, such as <code>PATH</code> and the temporary directory. Before any function is imported the worker deletes everything else, so the stack's secrets and the variables in your shell never reach function code, under <code>supatype dev</code> and <code>supatype functions serve</code> as on a deployed stack. A self-hosted worker also keeps <code>STRIPE_SECRET_KEY</code>, <code>STRIPE_WEBHOOK_SECRET</code> and <code>SITE_URL</code> when Compose passes them.</p>
 <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre>$ npx supatype functions env set RESEND_API_KEY=re_123
 $ npx supatype functions env list

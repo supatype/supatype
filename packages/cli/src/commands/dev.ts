@@ -141,6 +141,7 @@ import {
   nativeKeyspaceServerEnv,
   nativeServerCoreEnv,
   nativeServerDotEnvLayer,
+  nativeServerInheritsEnv,
   type NativeCache,
 } from "../native-dev-env.js"
 import { ensureValkeySidecar, externalValkey, type RespCredentials } from "../valkey-sidecar.js"
@@ -720,6 +721,8 @@ export function registerDev(program: Command): void {
         pidDir,
         colour: "\x1b[32m",
         env: serverEnv,
+        // Not the whole shell: an older server passes all it has on to the Deno that runs functions.
+        inheritEnv: nativeServerInheritsEnv,
       })
       serverProc.start()
       pushStartUndo(() => serverProc.stop())

@@ -27,6 +27,11 @@ External Deno runtime for edge functions. **supatype-server** proxies `/function
 
 Per-function env files: `{root}/.env.{name}.local`; shared: `{root}/.env.local`.
 
+Before any function is imported the worker deletes every other variable from its environment, so
+function code finds only the worker's settings, `DENO_*` and what the OS needs (the list is
+`env-allowlist.ts`). A launcher that passes more, as native `supatype dev` once passed the server's
+whole environment, cannot widen what a function reads through `Deno.env`.
+
 Tests: `deno task test` starts this worker as the image does and reads a function's context back over HTTP.
 
 ## Direct database access (`ctx.dbUrl`)

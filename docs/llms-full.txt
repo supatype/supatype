@@ -2668,7 +2668,7 @@ export default defineConfig({
 
 `supatype push` refuses a name that matches no function, so a typo cannot silently grant nothing. `supatype doctor` lists the current grants.
 
-> **LOCAL DEV:** The local router does not apply this list. Under `supatype dev` every function receives `ctx.serviceRoleKey`, and under `supatype functions serve` every function does when `SUPATYPE_SERVICE_ROLE_KEY` is set in your shell. Test that a function works without the key on a self-hosted stack.
+Local dev applies the same list, so a function that relies on the key without being named fails there first. Under `supatype functions serve` no function receives the key unless `SUPATYPE_SERVICE_ROLE_KEY` is set in your shell, and then only the functions the list names.
 
 ### Environment and secrets
 
@@ -2680,6 +2680,8 @@ Variables for functions live in env files inside the functions directory:
 Read them from `ctx.env`. The files are read on each call, so a changed value takes effect without a restart. Keep them out of git.
 
 Every value set with `supatype functions env set`, in `.env.local` or in `.env.<name>.local` arrives in `ctx.env` on each call, never in `Deno.env`: `Deno.env` is the worker's one process environment, shared by every call running at the same time, so a value put there for one function would reach every other. `Deno.env.get("RESEND_API_KEY")` finds nothing.
+
+`Deno.env` holds only the worker's own settings (such as `SUPATYPE_URL`, `SUPATYPE_PUBLIC_URL` and `SUPATYPE_ANON_KEY`, which also arrive as `ctx` fields), Deno's `DENO_*` variables and what the operating system needs, such as `PATH` and the temporary directory. Before any function is imported the worker deletes everything else, so the stack's secrets and the variables in your shell never reach function code, under `supatype dev` and `supatype functions serve` as on a deployed stack. A self-hosted worker also keeps `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` and `SITE_URL` when Compose passes them.
 
 ```sh
 $ npx supatype functions env set RESEND_API_KEY=re_123

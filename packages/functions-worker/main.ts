@@ -5,6 +5,7 @@
  */
 
 import { parseEnvText } from "./dotenv.ts"
+import { scrubProcessEnv } from "./env-allowlist.ts"
 import { FUNCTION_ENTRY_FILE, functionRouteName, isHookName } from "./routes.ts"
 import { exitOnStop } from "./stop.ts"
 import {
@@ -344,8 +345,9 @@ function jsonError(code: string, message: string, status: number, extra: Record<
 }
 
 const port = parseInt(Deno.env.get("PORT") ?? "8001", 10)
-// Order matters: withhold, then import. See withholdServiceRoleKey.
+// Order matters: withhold and scrub, then import. See withholdServiceRoleKey and env-allowlist.ts.
 const serviceRoleKey = await withholdServiceRoleKey()
+scrubProcessEnv()
 const root = functionsRoot()
 const routes = root ? await discoverRoutes(root) : []
 const handlers = await loadHandlers(routes)
@@ -463,10 +465,11 @@ function installHookDepthPropagation(): void {
 
 /**
  * The database URL a function may use, when the deployment gave the worker one: off unless the
- * operator set SUPATYPE_FUNCTIONS_DB_URL (see `FunctionContext.dbUrl`).
+ * operator set SUPATYPE_FUNCTIONS_DB_URL (see `FunctionContext.dbUrl`). Never `DATABASE_URL`: that
+ * is the stack's own connection, and the scrub removes it before any function loads.
  */
 function dbUrlForFunctions(): string | undefined {
-  const raw = Deno.env.get("SUPATYPE_DB_URL") ?? Deno.env.get("DATABASE_URL")
+  const raw = Deno.env.get("SUPATYPE_DB_URL")
   return raw === undefined || raw.trim() === "" ? undefined : raw
 }
 
