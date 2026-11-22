@@ -130,6 +130,7 @@ import {
 } from "../native-storage.js"
 import { keepsObjectsLocally, serverStoreRoot } from "../local-storage.js"
 import { writeAppliedAstArtifacts } from "../applied-ast-artifacts.js"
+import { cacheSeedingNotes } from "../api-config-cache.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
 import { nativeAuthProviderEnv, warnMissingAuthProviderSecrets } from "../auth-providers.js"
 import { warnSmtpWithoutHost } from "../config-mailer-env.js"
@@ -1623,8 +1624,11 @@ function ensureProjectDatabase(db: ProjectDatabase): void {
  * only go into one that exists, and the first push runs before native dev records its functions,
  * which switches functions (`services.functions`) before the server reads it.
  */
-function writeNativeAppliedAst(cwd: string, config: SupatypeProjectConfig, ast: unknown): void {
+export function writeNativeAppliedAst(cwd: string, config: SupatypeProjectConfig, ast: unknown): void {
   const manifestPath = join(cwd, ".supatype", "manifest.json")
   if (!existsSync(manifestPath)) patchRouteManifest(manifestPath, {})
   for (const line of writeAppliedAstArtifacts(cwd, config, ast, { rowCacheEnv: false }).lines) console.log(`[supatype] ${line}`)
+  // The declaration is a ceiling and the allowlist is what is on: only a push seeded the allowlist, so
+  // a declared `.cache({ server: true })` answered BYPASS under native dev (S-24).
+  for (const note of cacheSeedingNotes(cwd, ast)) console.log(`[supatype] ${note}`)
 }
