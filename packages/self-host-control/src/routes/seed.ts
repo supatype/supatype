@@ -4,6 +4,7 @@ import { isJsonObject } from "@supatype/shared"
 import {
   REMOTE_SEED_MAX_BODY_BYTES,
   REMOTE_SEED_MAX_FILES,
+  REMOTE_SEED_MESSAGES,
   parseRemoteSeedRequest,
   type RemoteSeedRefusal,
   type RemoteSeedRequest,
@@ -55,7 +56,7 @@ function targetEnvironment(req: IncomingMessage): string {
 /** The request body as the contract reads it, or the refusal that names what is wrong with it. */
 function readRequest(body: unknown): RemoteSeedRequest {
   if (isJsonObject(body) && Array.isArray(body["irDocuments"]) && body["irDocuments"].length > REMOTE_SEED_MAX_FILES) {
-    throw new HttpError(413, "payload_too_large", `At most ${REMOTE_SEED_MAX_FILES} seed files can be sent at once.`)
+    throw new HttpError(413, "payload_too_large", REMOTE_SEED_MESSAGES.payload_too_large({ maxFiles: REMOTE_SEED_MAX_FILES }))
   }
   const parsed = parseRemoteSeedRequest(body)
   if ("invalid" in parsed) throw new HttpError(400, "validation_error", parsed.invalid)
@@ -68,14 +69,14 @@ function refusalFor(request: RemoteSeedRequest, environment: string): Refusal | 
     return {
       status: 400,
       error: "environment_mismatch",
-      message: `--environment ${request.environment} does not match the target environment ${environment}.`,
+      message: REMOTE_SEED_MESSAGES.environment_mismatch({ requested: request.environment, target: environment }),
     }
   }
   if (environment === "production" && !request.confirmProduction) {
     return {
       status: 409,
       error: "production_confirmation_required",
-      message: "Seeding production needs confirmProduction: true.",
+      message: REMOTE_SEED_MESSAGES.production_confirmation_required(),
     }
   }
   return undefined
@@ -86,15 +87,13 @@ function refusalFor(request: RemoteSeedRequest, environment: string): Refusal | 
  * The engine's diff compares that schema with the live database, so a schema edited and not pushed
  * is refused here, before anything is written, instead of failing part way through the run.
  */
-async function schemaRefusal(databaseUrl: string, ast: unknown): Promise<Refusal | undefined> {
+async function schemaRefusal(databaseUrl: string, ast: unknown, environment: string): Promise<Refusal | undefined> {
   const { operations } = await runEngineDiff(databaseUrl, ast)
   if (operations.length === 0) return undefined
   return {
     status: 409,
     error: "schema_not_pushed",
-    message:
-      `The database does not have the schema in this seed yet (${operations.length} change(s) to push). ` +
-      "Run `supatype push` first.",
+    message: REMOTE_SEED_MESSAGES.schema_not_pushed({ environment, changes: operations.length }),
   }
 }
 
@@ -165,7 +164,7 @@ async function apply(res: ServerResponse, request: RemoteSeedRequest, environmen
   const databaseUrl = databaseUrlFromEnv()
   const detail = runDetail(request, environment, runId)
   try {
-    const refusal = await schemaRefusal(databaseUrl, request.ast)
+    const refusal = await schemaRefusal(databaseUrl, request.ast, environment)
     if (refusal !== undefined) return await refuse(res, request, environment, refusal)
     const data = await runEngineSeed(databaseUrl, request.ast, request.irDocuments, {
       atomic: request.atomic,
@@ -201,7 +200,7 @@ async function handleSeed(ctx: Parameters<RouteHandler>[0]): Promise<void> {
     return refuse(ctx.res, request, environment, {
       status: 409,
       error: "seed_busy",
-      message: "Another seed is running on this project. Try again when it has finished.",
+      message: REMOTE_SEED_MESSAGES.seed_busy(),
     })
   }
   seeding = true
