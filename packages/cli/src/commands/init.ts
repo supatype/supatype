@@ -1529,7 +1529,9 @@ SUPATYPE_ADMIN_PASSWORD=${opts.adminPassword}`,
     )
   }
 
-  sections.push(selfHostPortsEnvSection(opts.storageProduction))
+  // Those ports belong to the self-host compose stack, which a Cloud project never runs; its local
+  // gateway port is written above.
+  if (opts.productionTarget !== "cloud") sections.push(selfHostPortsEnvSection(opts.storageProduction))
 
   return sections.join("\n\n") + "\n"
 }
@@ -1592,8 +1594,12 @@ function storageEnvSections(
 ): string {
   // Supatype Cloud brings its own storage and no production entry is written, so a bucket of your own
   // here serves local development only.
-  if (cloud && storageLocal === "s3") {
-    return s3EnvSection("local development only", "Supatype Cloud provides production storage.")
+  if (cloud) {
+    return storageLocal === "s3"
+      ? s3EnvSection("local development only", "Supatype Cloud provides production storage.")
+      : `${localStorageEnvSection(storageLocal)}
+
+# Production storage: Supatype Cloud provides it, no configuration needed.`
   }
   if (storageLocal === storageProduction) {
     if (storageLocal === "s3") {

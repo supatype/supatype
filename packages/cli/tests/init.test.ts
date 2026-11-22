@@ -542,6 +542,16 @@ describe("scaffold()", () => {
     }
   })
 
+  it("says Cloud provides production storage for local SeaweedFS, and writes no self-host ports", () => {
+    scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app", "cloud"), storageLocal: "local", storageProduction: "local" })
+    const env = readFileSync(join(tmpRoot, ".env"), "utf8")
+    expect(env).toContain("# Storage (local development, SeaweedFS)")
+    expect(env).toContain("Production storage: Supatype Cloud provides it")
+    expect(env).not.toContain("SeaweedFS on your server")
+    expect(env).not.toContain("Self-host stack ports")
+    expect(env).not.toContain("SUPATYPE_PUBLISH_ADDRESS")
+  })
+
   it("still records production storage for self-host", () => {
     scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app", "self-host"), storageLocal: "s3", storageProduction: "s3" })
     expect(readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")).toContain('storage: { provider: "s3", production: "s3" }')
