@@ -105,6 +105,27 @@ function formatCacheApiError(
   return `${operation} failed (${status}): ${trimmed || "(empty body)"}`
 }
 
+/** How long a push waits to learn whether the server has a keyspace: it is a note, not a gate. */
+const KEYSPACE_PROBE_TIMEOUT_MS = 5_000
+
+/**
+ * Whether the server this project's API address reaches has a keyspace to cache in, from its
+ * `/admin/v1/cache` answer: 503 "keyspace not configured" is no, any answer that lists is yes.
+ * Null when that cannot be told: a plan that does not offer the cache, no service-role key, or a
+ * server that did not answer.
+ */
+export async function keyspaceConnected(cwd: string): Promise<boolean | null> {
+  try {
+    const url = `${resolveProjectApiUrl(cwd)}/admin/v1/cache?limit=1`
+    const res = await fetch(url, { headers: adminHeaders(cwd), signal: AbortSignal.timeout(KEYSPACE_PROBE_TIMEOUT_MS) })
+    if (res.ok) return true
+    const body = await res.text()
+    return res.status === 503 && /keyspace|valkey/.test(body) ? false : null
+  } catch {
+    return null
+  }
+}
+
 function normalizeListResponse(data: {
   entries?: RestCacheEntrySummary[] | null
   cursor?: string | null

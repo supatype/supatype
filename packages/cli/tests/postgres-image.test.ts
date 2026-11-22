@@ -262,3 +262,34 @@ describe("dockerTagCheck asks the local image store first, then the registry", (
     })
   }
 })
+
+/**
+ * Compose runs `${SUPATYPE_POSTGRES_IMAGE:-<resolved>}`, so a value in the shell or the project's
+ * `.env` is the image that runs. The cache provider and the keyspace password followed the config
+ * alone, so a project whose `.env` named a keyspace-capable image got a Valkey sidecar it did not
+ * run beside, and the reverse.
+ */
+describe("SUPATYPE_POSTGRES_IMAGE", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    setPostgresTagCheck(undefined)
+  })
+
+  it("is the image that runs, and the keyspace follows it", async () => {
+    const { postgresImageFor } = await import("../src/postgres-image.js")
+    setPostgresTagCheck(() => "local")
+    const config = pinned("17.2.8")
+    expect(postgresImageFor(config).ref).toBe("supatype/postgres:17.2.8")
+    expect(cacheProvider(config)).toBe("valkey")
+    vi.stubEnv("SUPATYPE_POSTGRES_IMAGE", "supatype/postgres:17.2.15")
+    expect(postgresImageFor(config)).toMatchObject({ ref: "supatype/postgres:17.2.15", keyspace: true, keyspaceAuth: true })
+    expect(cacheProvider(config)).toBe("pg_keyspace")
+  })
+
+  it("is ignored when blank", async () => {
+    const { postgresImageFor } = await import("../src/postgres-image.js")
+    setPostgresTagCheck(() => "local")
+    vi.stubEnv("SUPATYPE_POSTGRES_IMAGE", "  ")
+    expect(postgresImageFor(pinned("17.2.8")).ref).toBe("supatype/postgres:17.2.8")
+  })
+})

@@ -53,7 +53,7 @@ import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import { ensureFirstAdminUser } from "./admin.js"
 import { withAdminRoles } from "../studio-admin-roles.js"
 import { restoreSystemRelationTargets } from "../restore-system-relation-targets.js"
-import { cacheSeedingNotes, freeTierCacheNote } from "../api-config-cache.js"
+import { cacheKeyspaceNotes, cacheSeedingNotes, freeTierCacheNote } from "../api-config-cache.js"
 import { waitForRestReady } from "../rest-ready.js"
 import type { SupatypeProjectConfig } from "../project-config.js"
 import {
@@ -77,7 +77,7 @@ import {
   cacheSchemaSourcesLocally,
 } from "../schema-sources.js"
 import { confirm, logSkippedConfirm } from "../ui/confirm.js"
-import { error, info, plain } from "../ui/messages.js"
+import { error, info, plain, warn } from "../ui/messages.js"
 import { withSpinner } from "../ui/progress.js"
 import { projectOutputPaths, writeGeneratedTypes } from "../type-generation.js"
 import { isInteractive } from "../ui/interactive.js"
@@ -478,7 +478,7 @@ async function finishLocalPush(cwd: string, config: SupatypeProjectConfig, targe
   if (stackUrl !== undefined && resolveRuntimeProvider(config) === "docker") {
     await waitForRestReady(stackUrl, devApiKeys(cwd).anonKey)
   }
-  reportCacheSeeding(cwd, ast)
+  await reportCacheSeeding(cwd, ast)
   reportLocalPush(target, studioUrl, storageFailed)
 }
 
@@ -654,8 +654,9 @@ function emptyDeploy(body: HookDeployBody): boolean {
  *
  * Never an error, and never a rewrite of an entry that already exists. See `seedApiConfigCache`.
  */
-function reportCacheSeeding(cwd: string, ast: unknown): void {
+async function reportCacheSeeding(cwd: string, ast: unknown): Promise<void> {
   for (const note of cacheSeedingNotes(cwd, ast)) info(note)
+  for (const note of await cacheKeyspaceNotes(cwd, ast)) warn(note)
 }
 
 /** The generated adapter, flattened to the name handlers were rewritten to import. */
