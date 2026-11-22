@@ -123,7 +123,8 @@ export function syncDatabaseUrlPort(cwd: string, devLocal: boolean, shell: NodeJ
     writeCliDatabaseUrl(cwd, moved.url, {}, state)
     return sync
   }
-  return setCliDatabaseUrlForRun(state, moved.url, shell) ? { ...sync, runOnly: true } : null
+  const portFrom = shellEnvInt(envKey, shell) === null ? ".env" : "shell"
+  return setCliDatabaseUrlForRun(state, moved.url, shell) ? { ...sync, runOnly: true, portFrom } : null
 }
 
 /**

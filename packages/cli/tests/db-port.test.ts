@@ -149,7 +149,7 @@ describe("syncDatabaseUrlPort follows the stack's own layout", () => {
 
   it("moves a dev-port URL to the self-host port for the run and names SUPATYPE_DB_PORT", () => {
     writeEnv(both.replace(":54390/", ":54329/"))
-    expect(syncDatabaseUrlPort(dir, false, {})).toEqual({ from: "54329", to: "54390", envKey: "SUPATYPE_DB_PORT", runOnly: true })
+    expect(syncDatabaseUrlPort(dir, false, {})).toEqual({ from: "54329", to: "54390", envKey: "SUPATYPE_DB_PORT", runOnly: true, portFrom: ".env" })
   })
 
   it("names SUPATYPE_DEV_DB_PORT when a dev stack moves it", () => {
@@ -176,6 +176,7 @@ describe("syncDatabaseUrlPort with a port given in the shell", () => {
       to: "54339",
       envKey: "SUPATYPE_DEV_DB_PORT",
       runOnly: true,
+      portFrom: "shell",
     })
     expect(process.env["DATABASE_URL"]).toBe("postgresql://u:p@127.0.0.1:54339/acme")
     expect(envText()).toContain("127.0.0.1:54329/acme")
