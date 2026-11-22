@@ -343,6 +343,19 @@ export interface TargetStreamPath {
 }
 
 /**
+ * The URL a Cloud project is served on: the environment's own URL as the link recorded it from the
+ * control plane. A link that holds only the control plane's URL for the environment (the default
+ * before the control plane was asked) has no project URL, so the project's `supatype.dev` host
+ * stands in.
+ */
+function cloudProjectUrl(target: DeployTarget): string {
+  const recorded = target.link?.environments[target.environment]?.apiUrl.replace(/\/$/, "")
+  const controlPlane = (target.link?.cloudApiUrl ?? target.apiBaseUrl).replace(/\/$/, "")
+  if (recorded !== undefined && recorded !== "" && recorded !== controlPlane) return recorded
+  return `https://${target.projectRef}.supatype.dev`
+}
+
+/**
  * The target's functions: Supatype Cloud serves them on the project's own host and keeps past log
  * lines; a self-hosted or local server serves them under its API and relays a live tail from its
  * admin API. An authenticated invoke carries the Cloud session, or a local link's key; a
@@ -350,8 +363,7 @@ export interface TargetStreamPath {
  */
 export function targetFunctions(target: DeployTarget): TargetFunctions {
   if (target.mode === "cloud") {
-    const invokeBase = `https://${target.projectRef}.supatype.dev/functions/v1`
-    return { invokeBase, invokeToken: target.token, logs: { kind: "window" } }
+    return { invokeBase: `${cloudProjectUrl(target)}/functions/v1`, invokeToken: target.token, logs: { kind: "window" } }
   }
   // A local link is this machine's own server, and its key goes with an authenticated invoke there.
   // A self-hosted link's service-role key is not handed to a function.
