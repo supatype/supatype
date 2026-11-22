@@ -11,6 +11,7 @@ import { validateStudioAuth, type StudioConfig } from "./studio-auth-config.js"
 import { STUDIO_ROLES, type StudioRole } from "./studio-roles.js"
 import { isJsonObject, isString } from "@supatype/shared"
 import { objectAt } from "./ast-read.js"
+import { warn } from "./ui/messages.js"
 
 // ---------------------------------------------------------------------------
 // Config schema (single canonical shape; loaded from supatype.config.ts)
@@ -678,6 +679,7 @@ export function validateProjectConfig(raw: unknown, filename: string): SupatypeP
   validateCorsOrigins(cfg, filename)
   validateStudioAuth(cfg, filename)
   validatePublicEnv(cfg, filename)
+  warnUnknownServerKeys(cfg)
 
   if (!isProjectConfig(cfg)) throw new Error(`${filename}: not a project config`)
   return cfg
@@ -690,6 +692,40 @@ export function validateProjectConfig(raw: unknown, filename: string): SupatypeP
  */
 export function publicEnvServerEnv(cfg: SupatypeProjectConfig): Record<string, string> {
   return cfg.server.public_env === false ? { SUPATYPE_PUBLIC_ENV: "false" } : {}
+}
+
+/**
+ * Every key `server` defines. Typed over the section, so a key added to it does not compile until it
+ * is listed here and stops being called unknown.
+ */
+const SERVER_KEYS: { [K in keyof SupatypeProjectConfig["server"]]-?: true } = {
+  mode: true,
+  port: true,
+  postgrestPort: true,
+  realtimePort: true,
+  public_env: true,
+  domain: true,
+  tls: true,
+}
+
+/** Warned once: a command reads the config more than once. */
+const warnedServerKeys = new Set<string>()
+
+/**
+ * A key under `server` the config does not define was dropped without a word, so a typo or another
+ * product's setting did nothing and nobody was told. Name each one; the next release refuses them.
+ */
+function warnUnknownServerKeys(cfg: Readonly<Record<string, unknown>>): void {
+  const server = objectAt(cfg, "server")
+  if (server === undefined) return
+  const unknown = Object.keys(server).filter((key) => !Object.hasOwn(SERVER_KEYS, key))
+  const named = unknown.map((key) => `server.${key}`).join(", ")
+  if (unknown.length === 0 || warnedServerKeys.has(named)) return
+  warnedServerKeys.add(named)
+  warn(
+    `${named} ${unknown.length === 1 ? "is not a setting" : "are not settings"} the config defines, so ${unknown.length === 1 ? "it does" : "they do"} nothing. ` +
+      "Check the spelling against the server section of the config reference. The next release refuses an unknown server key.",
+  )
 }
 
 /** `server.public_env`, when set, is a boolean: a string "false" would read as on. */
