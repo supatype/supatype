@@ -115,7 +115,26 @@ function normalizeListResponse(data: {
   }
 }
 
+/** The most empty pages one list follows before it gives up and hands back the cursor. */
+const MAX_EMPTY_PAGES = 200
+
+/**
+ * A page of entries. A SCAN page may be empty while the scan is not over, so an empty page with a
+ * cursor is followed to the next rather than reported as "no entries" (S-25); the cursor is
+ * returned once it has entries, or once the scan ends, or after {@link MAX_EMPTY_PAGES} empty ones.
+ */
 export async function listRestCacheEntries(
+  cwd: string,
+  opts?: { table?: string | undefined; cursor?: string | undefined; limit?: number | undefined },
+): Promise<RestCacheListResponse> {
+  let page = await listRestCachePage(cwd, opts)
+  for (let hops = 0; page.entries.length === 0 && page.cursor !== "0" && hops < MAX_EMPTY_PAGES; hops++) {
+    page = await listRestCachePage(cwd, { ...opts, cursor: page.cursor })
+  }
+  return page
+}
+
+async function listRestCachePage(
   cwd: string,
   opts?: { table?: string | undefined; cursor?: string | undefined; limit?: number | undefined },
 ): Promise<RestCacheListResponse> {
