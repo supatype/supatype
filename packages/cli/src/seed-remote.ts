@@ -15,6 +15,7 @@ import { loadSchemaAst, type SupatypeConfig } from "./config.js"
 import { seedUnsupportedByPinnedEngine } from "./engine-floor.js"
 import { errorMessage } from "./error-message.js"
 import { loadProjectLink } from "./link.js"
+import { withPublishing } from "./model-versioning.js"
 import { schemaPathFromProject } from "./project-config.js"
 import { pushAuditFields } from "./push-audit.js"
 import {
@@ -174,7 +175,8 @@ function requestFor(
   cwd: string,
 ): RemoteSeedRequest | undefined {
   try {
-    const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
+    // With the publishing config, as a push sends it: the engine refuses a versioned schema without it.
+    const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
     return {
       ast,
       irDocuments: seedDocuments(prepared, ast),

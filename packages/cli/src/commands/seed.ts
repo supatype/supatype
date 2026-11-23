@@ -22,6 +22,7 @@ import { loadConfig, loadSchemaAst, type SupatypeConfig } from "../config.js"
 import type { ComposeEngine } from "../engine-client.js"
 import { engineRequestIn, stackEngine } from "../stack-engine.js"
 import { seedUnsupportedByPinnedEngine } from "../engine-floor.js"
+import { withPublishing } from "../model-versioning.js"
 import { pgSchema, schemaPathFromProject } from "../project-config.js"
 import { redact, resolveHostDatabaseUrl } from "../host-database.js"
 import { requireLocalStack } from "../local-stack-guard.js"
@@ -194,7 +195,7 @@ interface ApplyOptions {
 
 async function apply(prepared: Prepared[], options: ApplyOptions): Promise<number> {
   const { cwd, config, dsn, opts, engine } = options
-  const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
+  const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
   let documents: string[]
   try {
     documents = seedDocuments(prepared, ast)

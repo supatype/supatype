@@ -13,6 +13,7 @@ import { projectConfig } from "./support/project-config.js"
 const said = vi.hoisted(() => ({ errors: [] as string[], infos: [] as string[], successes: [] as string[] }))
 const local = vi.hoisted(() => ({ requests: [] as Array<Record<string, unknown>> }))
 const terminal = vi.hoisted(() => ({ interactive: false, typed: "" }))
+const schema = vi.hoisted(() => ({ ast: { models: [] } as Record<string, unknown> }))
 
 vi.mock("../src/ui/messages.js", () => ({
   error: (m: string) => said.errors.push(m),
@@ -25,7 +26,7 @@ vi.mock("../src/ui/prompts.js", () => ({ promptText: async () => terminal.typed 
 vi.mock("../src/config.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/config.js")>()),
   loadConfig: () => projectConfig(),
-  loadSchemaAst: () => ({ models: [] }),
+  loadSchemaAst: () => schema.ast,
 }))
 vi.mock("../src/stack-engine.js", () => ({
   stackEngine: async () => undefined,
@@ -184,6 +185,24 @@ describe("seeding a linked project", () => {
       ast: { models: [] },
       pushedFrom: expect.any(String),
     })
+  })
+})
+
+describe("a schema with a versioned model", () => {
+  // The engine refuses a versioned schema that carries no publishing config, so a remote seed has
+  // to send it the way a push does.
+  it("sends the publishing config beside the ast, as a push does", async () => {
+    schema.ast = { models: [{ name: "Article", options: { versions: { drafts: false } } }] }
+    expect(await runSeed(undefined, flags({ env: "staging" }))).toBe(0)
+    const sent = seedPosts()[0]?.body as RemoteSeedRequest
+    expect(sent.ast).toMatchObject({ publishing: { draftVisibility: expect.any(Array) } })
+  })
+
+  it("sends the same ast the local path sends the engine", async () => {
+    schema.ast = { models: [{ name: "Article", options: { versions: { drafts: false } } }] }
+    await runSeed(undefined, flags({ env: "staging" }))
+    await runSeed(undefined, flags({ local: true }))
+    expect((seedPosts()[0]?.body as RemoteSeedRequest).ast).toEqual(local.requests[0]?.["ast"])
   })
 })
 
