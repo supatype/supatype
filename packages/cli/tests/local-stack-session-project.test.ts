@@ -31,6 +31,7 @@ function answer(status: number, stdout: string): DockerAnswer {
 vi.mock("../src/docker-exec.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/docker-exec.js")>()),
   askDockerSync: (args: readonly string[]) => fakeDocker(args),
+  askDockerState: (args: readonly string[]) => fakeDocker(args),
 }))
 
 const { enterLocalStack, devSessionLockFor, devSessionLockPath, localStackComposeProject, writeDevSessionLock } = await import(

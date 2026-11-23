@@ -197,3 +197,68 @@ export function spawnDocker(args: readonly string[], options: SpawnOptions): Chi
 export function dockerHasImage(image: string): boolean {
   return askDockerSync(["image", "inspect", image], { stdio: "ignore", timeoutMs: DOCKER_QUERY_TIMEOUT_MS }).status === 0
 }
+
+/**
+ * How long a question about the stack's state is waited on: one limit per attempt, so a Docker
+ * that is only slow (a daemon still starting, a loaded machine) gets time, and one that is hung
+ * costs at most their sum.
+ */
+export const DOCKER_STATE_ATTEMPT_TIMEOUTS_MS: readonly number[] = [15_000, 30_000, 60_000]
+
+/** The pause between attempts. */
+const DOCKER_STATE_PAUSE_MS = 1_000
+
+/** Docker did not answer a question about the stack, which says nothing about whether it runs. */
+export class DockerNotResponding extends Error {
+  constructor(readonly reason: string) {
+    super(
+      `Docker did not respond (${reason}), so whether the local stack is running could not be checked. ` +
+        "Check that Docker is running and responsive (`docker ps`), then run this again.",
+    )
+    this.name = "DockerNotResponding"
+  }
+}
+
+/** Blocks the thread for `ms`; the callers of {@link askDockerState} are synchronous. */
+function pause(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
+/** What the Docker CLI says when it cannot reach its daemon, on Linux, macOS and Windows. */
+const DAEMON_UNREACHABLE = /cannot connect to the docker daemon|error during connect|is the docker daemon running|docker_engine|docker daemon is not running|request returned 5[0-9][0-9]/i
+
+/**
+ * Whether Docker failed to answer, as opposed to answering with an error about the question (a
+ * compose file that does not exist, an unknown service). The second is an answer.
+ */
+function unanswered(answer: DockerAnswer): boolean {
+  return answer.timedOut || answer.missing || (answer.status !== 0 && DAEMON_UNREACHABLE.test(answer.stderr))
+}
+
+/** Why an answer is not one: what to say Docker did instead. */
+function unansweredReason(answer: DockerAnswer): string {
+  if (answer.missing) return "docker was not found"
+  if (answer.timedOut) return "it timed out"
+  const detail = answer.stderr.trim().split(/\r?\n/)[0] ?? ""
+  return detail === "" ? `it exited with status ${String(answer.status)}` : detail
+}
+
+/**
+ * A synchronous question about what is running, answered or thrown as {@link DockerNotResponding}.
+ *
+ * `docker ps` with nothing to list exits 0 with no output, so a timeout, a daemon that is down or
+ * a failed call is never "nothing runs": reading it that way told a developer their stack was
+ * stopped when Docker was only slow. A call that did not finish, or whose daemon could not be
+ * reached, is tried again with a longer limit; a missing `docker` is not (waiting will not install
+ * it). Any other answer, an error about the question included, is returned for the caller to read.
+ */
+export function askDockerState(args: readonly string[], call: Omit<DockerCall, "timeoutMs"> = {}): DockerAnswer {
+  let last: DockerAnswer | undefined
+  for (const [attempt, timeoutMs] of DOCKER_STATE_ATTEMPT_TIMEOUTS_MS.entries()) {
+    if (attempt > 0) pause(DOCKER_STATE_PAUSE_MS)
+    last = askDockerSync(args, { ...call, timeoutMs })
+    if (!unanswered(last)) return last
+    if (last.missing) break
+  }
+  throw new DockerNotResponding(unansweredReason(last ?? TIMED_OUT))
+}
