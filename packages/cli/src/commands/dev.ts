@@ -82,6 +82,8 @@ import {
   describeActiveOverrides,
   postgresArchiveTag,
   pinnedVersion,
+  download,
+  type PlatformId,
 } from "../binary-cache.js"
 import { assertEngineSupportsSchema } from "../engine-floor.js"
 import { ensureBinary } from "../ensure-binary.js"
@@ -130,6 +132,7 @@ import {
 } from "../native-storage.js"
 import { keepsObjectsLocally, serverStoreRoot } from "../local-storage.js"
 import { writeAppliedAstArtifacts } from "../applied-ast-artifacts.js"
+import { cacheSeedingNotes } from "../api-config-cache.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
 import { nativeAuthProviderEnv, warnMissingAuthProviderSecrets } from "../auth-providers.js"
 import { nativeAuthGroupsEnv } from "../auth-groups-env.js"
@@ -1332,21 +1335,19 @@ async function resolvePgInstall(config: Awaited<ReturnType<typeof loadConfig>>):
   return { binDir: join(extractedDir, "bin"), version }
 }
 
-async function extractPostgresArchive(
+/** Unpacks the cached Postgres archive for `version`, fetching it first when this machine has none. */
+export async function extractPostgresArchive(
   pgCacheDir: string,
   version: string,
-  platform: { os: string; arch: string },
+  platform: PlatformId,
   extractDir: string,
 ): Promise<void> {
   const ext = platform.os === "windows" ? ".zip" : ".tar.gz"
   const archiveName = `supatype-pg-${postgresArchiveTag(version)}-${platform.os}-${platform.arch}${ext}`
   const archivePath = join(pgCacheDir, archiveName)
 
-  if (!existsSync(archivePath)) {
-    throw new Error(
-      `Postgres ${version} archive not found. Run: supatype update`,
-    )
-  }
+  // Fetched like the engine, server and PostgREST are: a first `dev` on a clean home needs no `update`.
+  if (!existsSync(archivePath)) await download("postgres", version, platform)
 
   extractArchive(archivePath, extractDir)
 }
@@ -1639,8 +1640,11 @@ function ensureProjectDatabase(db: ProjectDatabase): void {
  * only go into one that exists, and the first push runs before native dev records its functions,
  * which switches functions (`services.functions`) before the server reads it.
  */
-function writeNativeAppliedAst(cwd: string, config: SupatypeProjectConfig, ast: unknown): void {
+export function writeNativeAppliedAst(cwd: string, config: SupatypeProjectConfig, ast: unknown): void {
   const manifestPath = join(cwd, ".supatype", "manifest.json")
   if (!existsSync(manifestPath)) patchRouteManifest(manifestPath, {})
   for (const line of writeAppliedAstArtifacts(cwd, config, ast, { rowCacheEnv: false }).lines) console.log(`[supatype] ${line}`)
+  // The declaration is a ceiling and the allowlist is what is on: only a push seeded the allowlist, so
+  // a declared `.cache({ server: true })` answered BYPASS under native dev (S-24).
+  for (const note of cacheSeedingNotes(cwd, ast)) console.log(`[supatype] ${note}`)
 }

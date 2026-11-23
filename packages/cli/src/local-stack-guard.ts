@@ -11,7 +11,9 @@ import { loadConfig, rethrowIfConfigBroken } from "./config.js"
 import { isLocalDatabaseUrl } from "./db-port.js"
 import { NoStackRunning } from "./host-database.js"
 import { loadProjectLink } from "./link.js"
-import { resolveRuntimeProvider, usesExternalDatabase, type SupatypeProjectConfig } from "./project-config.js"
+import { nativeDataDir, resolveRuntimeProvider, usesExternalDatabase, type SupatypeProjectConfig } from "./project-config.js"
+import { pidAlive } from "./parent-watch.js"
+import { readPostmasterPid } from "./postgres-ctl.js"
 import { developerApiUrl } from "./resolve-api-url.js"
 import { enterLocalStack } from "./dev-session-lock.js"
 import { selfHostComposePaths } from "./self-host-compose.js"
@@ -35,6 +37,24 @@ export function reachesLocalStack(config: SupatypeProjectConfig, connection?: st
   return shell === undefined || shell === "" || isLocalDatabaseUrl(shell)
 }
 
+/** Whether a command run with `connection` works on this project's own native Postgres. */
+function reachesNativeDatabase(config: SupatypeProjectConfig, connection?: string): boolean {
+  if (resolveRuntimeProvider(config) !== "native" || usesExternalDatabase(config)) return false
+  if (connection?.trim() || config.connection?.trim()) return false
+  const shell = process.env["DATABASE_URL"]?.trim()
+  return shell === undefined || shell === "" || isLocalDatabaseUrl(shell)
+}
+
+/**
+ * Whether native Postgres runs for this project: its data directory's `postmaster.pid` names a live
+ * process. Read from the file, not by connecting: a connection to a server that is not there waited
+ * out the pool's timeout, 42 to 96 s, and then said `pool timed out` (S-26).
+ */
+function nativeDatabaseRunning(config: SupatypeProjectConfig): boolean {
+  const pid = readPostmasterPid(nativeDataDir(config))?.pid ?? 0
+  return pid > 0 && pidAlive(pid)
+}
+
 /**
  * Refuse `supatype <command>` with {@link NoStackRunning} when it would reach the project's local
  * stack and no stack runs for it: no `supatype dev` session and no server container, or a stack
@@ -44,6 +64,10 @@ export function reachesLocalStack(config: SupatypeProjectConfig, connection?: st
 export function requireLocalStack(cwd: string, config: SupatypeProjectConfig, command: string, route: StackRoute = {}): void {
   const named = Boolean(route.connection?.trim())
   if (loadProjectLink(cwd) !== null && route.direct !== true && !named) return
+  if (reachesNativeDatabase(config, route.connection)) {
+    if (!nativeDatabaseRunning(config)) throw new NoStackRunning(command)
+    return
+  }
   if (!reachesLocalStack(config, route.connection)) return
   if (runningStackMode(cwd, config.project.name) === undefined) throw new NoStackRunning(command)
   requireStackDatabase(cwd, config, command)
@@ -82,4 +106,21 @@ export function projectConfigIfAny(cwd: string): SupatypeProjectConfig | undefin
     rethrowIfConfigBroken(err)
     return undefined
   }
+}
+
+/**
+ * Refuse `supatype <command>` in a folder linked to a Supatype Cloud project, naming the link. The
+ * command works on this machine's own database or stack, and Cloud's database is not one this
+ * machine can reach: without this it went on to the local stack and said that was not running, as
+ * if the link were not there. Running it through Cloud's API is not built yet. A folder with no
+ * Cloud link is not refused.
+ */
+export function refuseOnCloudLink(cwd: string, command: string, instead: string): void {
+  const link = loadProjectLink(cwd)
+  if (link?.kind !== "cloud") return
+  const apiUrl = link.environments[link.defaultEnvironment]?.apiUrl ?? link.cloudApiUrl
+  const where = apiUrl === undefined ? "" : ` (${apiUrl})`
+  throw new Error(
+    `supatype ${command} does not work on a Supatype Cloud link yet: this folder is linked to the Supatype Cloud project "${link.projectRef}"${where}. ${instead}`,
+  )
 }

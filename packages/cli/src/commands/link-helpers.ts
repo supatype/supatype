@@ -58,6 +58,20 @@ function nonBlank(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined
 }
 
+/**
+ * The project the self-host server at `apiUrl` serves. It answers requests addressed to that ref
+ * only, and a second folder is not called what the server's project is, so this folder's own name
+ * is the fallback only for a server too old to say (`GET /project`).
+ */
+async function serverProjectRef(apiUrl: string, token: string, fallback: string): Promise<string> {
+  try {
+    const answer = await targetFetch(apiUrl, "/platform/v1", { method: "GET", path: "/project", token }, isShape({ ref: isString }))
+    return answer.ref === "" ? fallback : answer.ref
+  } catch {
+    return fallback
+  }
+}
+
 async function probeSelfHostLink(apiUrl: string, projectRef: string, token: string): Promise<void> {
   await targetFetch(apiUrl, "/platform/v1", {
     method: "GET",
@@ -261,9 +275,10 @@ export async function runLinkAction(opts: {
       process.exit(1)
     }
     const apiUrl = trimApiUrl(url)
-    await probeSelfHostLink(apiUrl, projectRef, token)
+    const serverRef = await serverProjectRef(apiUrl, token, projectRef)
+    await probeSelfHostLink(apiUrl, serverRef, token)
     const link = createSelfHostLink({
-      projectRef,
+      projectRef: serverRef,
       apiUrl,
       token,
       envName,

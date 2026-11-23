@@ -14,6 +14,11 @@ const interactive = vi.hoisted(() => ({ value: true }))
 // The operations the pre-push diff plans; none unless a test says otherwise.
 const planned = vi.hoisted(() => ({ operations: [] as Array<{ type: string; description: string; risk: string }> }))
 
+// A linked push writes the generated types; what it writes is not under test here.
+vi.mock("../src/type-generation.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/type-generation.js")>()),
+  writeGeneratedTypes: async () => [],
+}))
 vi.mock("../src/config.js", () => ({ loadConfig: () => ({ project: { name: "app" } }), loadSchemaAst: () => ({}) }))
 vi.mock("../src/model-versioning.js", () => ({ withPublishing: (ast: unknown) => ast }))
 vi.mock("../src/model-hooks.js", () => ({

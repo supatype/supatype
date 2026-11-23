@@ -104,14 +104,16 @@ export interface DbPortSync {
   to: string
   /** The variable the new port was read from, which is what the report must name. */
   envKey: ComposeDbPublish["envKey"]
-  /** The port came from the shell, so the URL changed for this run only and `.env` did not. */
+  /** The URL changed for this run only, and `.env` did not. */
   runOnly?: true
+  /** Where the port was read from, so the report does not blame the shell for a value in `.env`. */
+  portFrom?: "shell" | ".env"
 }
 
 /** The line every caller prints for a {@link DbPortSync}, naming the variable it read. */
 export function databaseUrlSyncMessage(sync: DbPortSync): string {
   return sync.runOnly === true
-    ? `DATABASE_URL port ${sync.from} -> ${sync.to} for this run, to match ${sync.envKey} in your shell. .env is unchanged.`
+    ? `DATABASE_URL port ${sync.from} -> ${sync.to} for this run, to match ${sync.envKey} in ${sync.portFrom === ".env" ? ".env" : "your shell"}. .env's DATABASE_URL is unchanged.`
     : `DATABASE_URL port ${sync.from} -> ${sync.to} in .env, to match ${sync.envKey}.`
 }
 

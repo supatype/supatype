@@ -41,8 +41,11 @@ export function bodyReason(body: unknown): string | undefined {
   return [body["message"], body["error"]].find((said): said is string => typeof said === "string" && said.trim() !== "")
 }
 
-/** The most of a response body a failure line quotes. */
+/** The most of a response body that is not a reason (an error page, say) a failure line quotes. */
 const BODY_QUOTE_LIMIT = 300
+
+/** The most of a reason the server wrote a failure line quotes: sentences, not a page. */
+const REASON_QUOTE_LIMIT = 4000
 
 /**
  * Why an HTTP request failed, never blank: its status, its status text when it has one, then what
@@ -53,9 +56,11 @@ const BODY_QUOTE_LIMIT = 300
 export function httpFailureText(status: number, statusText: string, body: string): string {
   const head = statusText.trim() === "" ? `HTTP ${status}` : `HTTP ${status} ${statusText.trim()}`
   const parsed = parseJsonObject(body)
-  const said = ((parsed.ok ? bodyReason(parsed.value) : undefined) ?? body).trim().replace(/\s+/g, " ")
+  const reason = parsed.ok ? bodyReason(parsed.value) : undefined
+  const said = (reason ?? body).trim().replace(/\s+/g, " ")
   if (said === "") return `${head}, with an empty body`
-  return `${head}: ${said.length > BODY_QUOTE_LIMIT ? `${said.slice(0, BODY_QUOTE_LIMIT)}...` : said}`
+  const limit = reason === undefined ? BODY_QUOTE_LIMIT : REASON_QUOTE_LIMIT
+  return `${head}: ${said.length > limit ? `${said.slice(0, limit)}...` : said}`
 }
 
 /** {@link httpFailureText} for a response whose body has not been read yet. */

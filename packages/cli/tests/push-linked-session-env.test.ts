@@ -16,6 +16,11 @@ import { projectConfig } from "./support/project-config.js"
 const config = projectConfig({ project: { name: "acme" }, provider: "docker", database: { provider: "docker" } })
 const sent = vi.hoisted(() => ({ calls: [] as unknown[] }))
 
+// A linked push writes the generated types; what it writes is not under test here.
+vi.mock("../src/type-generation.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/type-generation.js")>()),
+  writeGeneratedTypes: async () => [],
+}))
 vi.mock("../src/config.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/config.js")>()),
   loadConfig: () => config,

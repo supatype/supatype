@@ -28,16 +28,20 @@ export function discoverSeedsDir(cwd: string, seedsDir: string): string[] {
   return names.map((n) => join(seedsDir, n))
 }
 
-/** The seed files a run uses: `file` when given, else every `seeds/*.ts`, else `seed.ts`. */
-export function seedPaths(file: string | undefined, cwd: string, config: SupatypeConfig): string[] {
-  if (file !== undefined && file.trim() !== "") return [resolve(cwd, file)]
+/** The seed files a run names: one, several in the order given, or none (the project's own). */
+export type SeedFiles = string | readonly string[]
+
+/** The seed files a run uses: the ones named, in that order, else every `seeds/*.ts`, else `seed.ts`. */
+export function seedPaths(file: SeedFiles | undefined, cwd: string, config: SupatypeConfig): string[] {
+  const named = (typeof file === "string" ? [file] : [...(file ?? [])]).filter((name) => name.trim() !== "")
+  if (named.length > 0) return named.map((name) => resolve(cwd, name))
   const root = projectRootFromConfig(config, cwd)
   const fromDir = discoverSeedsDir(cwd, join(root, "seeds"))
   return fromDir.length > 0 ? fromDir : [resolve(root, "seed.ts")]
 }
 
 /** {@link seedPaths}, or undefined after reporting the ones that do not exist. */
-export function existingSeedPaths(file: string | undefined, cwd: string, config: SupatypeConfig): string[] | undefined {
+export function existingSeedPaths(file: SeedFiles | undefined, cwd: string, config: SupatypeConfig): string[] | undefined {
   const paths = seedPaths(file, cwd, config)
   const missing = paths.filter((p) => !existsSync(p))
   if (missing.length === 0) return paths

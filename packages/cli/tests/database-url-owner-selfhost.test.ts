@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { syncDatabaseUrlPort } from "../src/database-url-owner.js"
+import { databaseUrlSyncMessage } from "../src/db-port.js"
 import { MANAGED_MARKER } from "../src/env-file.js"
 
 /**
@@ -44,7 +45,7 @@ describe("syncDatabaseUrlPort for a self-host stack", () => {
   it("moves a URL the CLI wrote to SUPATYPE_DB_PORT for this run, leaving .env as dev wrote it", () => {
     writeEnv([MANAGED_MARKER, "DATABASE_URL=postgresql://supatype_admin:pw@localhost:5432/acme"])
     const shell: NodeJS.ProcessEnv = {}
-    expect(syncDatabaseUrlPort(dir, false, shell)).toEqual({ from: "5432", to: "5433", envKey: "SUPATYPE_DB_PORT", runOnly: true })
+    expect(syncDatabaseUrlPort(dir, false, shell)).toEqual({ from: "5432", to: "5433", envKey: "SUPATYPE_DB_PORT", runOnly: true, portFrom: ".env" })
     expect(shell["DATABASE_URL"]).toBe("postgresql://supatype_admin:pw@localhost:5433/acme")
     expect(envUrl()).toBe("postgresql://supatype_admin:pw@localhost:5432/acme")
   })
@@ -55,5 +56,22 @@ describe("syncDatabaseUrlPort for a self-host stack", () => {
     syncDatabaseUrlPort(dir, false, shell)
     expect(shell["DATABASE_URL"]).toBe("postgresql://supatype_admin:pw@localhost:5433/acme")
     expect(envUrl()).toBe("postgresql://supatype_admin:pw@localhost:5432/acme")
+  })
+})
+
+// S-16: the one-run note said the port came "from your shell" when SUPATYPE_DB_PORT sat in `.env`.
+describe("the note for a port moved for this run", () => {
+  const managed = [MANAGED_MARKER, "DATABASE_URL=postgresql://supatype_admin:pw@localhost:5432/acme"]
+
+  it("names .env when the port is there", () => {
+    writeEnv(managed)
+    const sync = syncDatabaseUrlPort(dir, false, {})
+    expect(sync === null ? "" : databaseUrlSyncMessage(sync)).toContain("to match SUPATYPE_DB_PORT in .env")
+  })
+
+  it("names the shell when the shell gives the port", () => {
+    writeEnv(managed)
+    const sync = syncDatabaseUrlPort(dir, false, { SUPATYPE_DB_PORT: "5444" })
+    expect(sync === null ? "" : databaseUrlSyncMessage(sync)).toContain("in your shell")
   })
 })

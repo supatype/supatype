@@ -192,7 +192,7 @@ export function defaultScaffoldOptions(
 
 // ─── Registration ──────────────────────────────────────────────────────────--
 
-interface InitCliOptions {
+export interface InitCliOptions {
   mode: string
   defaults?: boolean
   install: boolean
@@ -316,10 +316,14 @@ async function createProject(args: CreateProjectArgs): Promise<void> {
 }
 
 /** `--no-admin`, or `--admin-email` with `--admin-password`, over the answers. */
-function applyAdminFlags(result: WizardResult, opts: InitCliOptions): void {
+export function applyAdminFlags(result: WizardResult, opts: InitCliOptions): void {
   if (opts.admin === false) {
     delete result.adminEmail
     delete result.adminPassword
+  } else if (Boolean(opts.adminEmail) !== Boolean(opts.adminPassword)) {
+    // An admin needs both. One alone used to write nothing and say nothing.
+    error(`${opts.adminEmail ? "--admin-email" : "--admin-password"} needs ${opts.adminEmail ? "--admin-password" : "--admin-email"} too. Give both, or neither and create the admin later.`)
+    process.exit(1)
   } else if (opts.adminEmail && opts.adminPassword) {
     refuseAdminFlags(opts.adminEmail, opts.adminPassword)
     result.adminEmail = opts.adminEmail.trim()
@@ -457,8 +461,9 @@ export async function collectWizardAnswers(context: WizardContext): Promise<Wiza
       }),
     )
 
-    // No production to store for yet: production storage is chosen with the production target.
-    const storageProduction = productionTarget === "later" ? storageLocal : await promptProductionStorage()
+    // Not asked when there is no production to store for yet, nor on Supatype Cloud, which brings its
+    // own storage: an own bucket is set in the config later.
+    const storageProduction = productionTarget === "self-host" ? await promptProductionStorage() : storageLocal
 
     const helloFunction = ensureNotCancelled(
       await p.confirm({
@@ -1182,7 +1187,7 @@ function tsConfigTemplate(opts: ScaffoldOptions): string {
   )
   lines.push(`  // versions: { engine: "0.1.2", server: "1.0.5", postgres: "17.2", deno: "2.9.8" },`)
   lines.push(`  email: { provider: "${opts.email}" },`)
-  lines.push(...storageConfigLines(opts.storageLocal, opts.storageProduction))
+  lines.push(...storageConfigLines(opts.storageLocal, opts.productionTarget === "cloud" ? undefined : opts.storageProduction))
   lines.push(`  schema: { path: "${opts.schemaPath}", pg_schema: "public" },`)
   lines.push(`  // Broadcast and presence on a channel no Channel<> declares are refused. "open" allows them.`)
   lines.push(`  realtime: { channels: "declared" },`)
@@ -1487,11 +1492,15 @@ ${reactPlugin}${build}  server: {
 
 function storageConfigLines(
   storageLocal: StorageProvider,
-  storageProduction: StorageProvider,
+  storageProduction: StorageProvider | undefined,
 ): string[] {
   // provider is dev's, production the self-host stack's; S3_* in .env name the bucket for either.
+  // No production entry (undefined) on Supatype Cloud, which brings its own storage.
   const dev = storageLocal === "s3" ? `provider: "s3"` : `provider: "local", local_path: ".supatype/storage"`
-  const production = storageLocal === "local" && storageProduction === "local" ? "" : `, production: "${storageProduction}"`
+  const production =
+    storageProduction === undefined || (storageLocal === "local" && storageProduction === "local")
+      ? ""
+      : `, production: "${storageProduction}"`
   return [`  storage: { ${dev}${production} },`]
 }
 
@@ -1617,7 +1626,7 @@ API_EXTERNAL_URL=${initLocalApiUrl(opts)}`,
   // Where the CLI would leave it after taking out a SUPATYPE_MAILER_AUTOCONFIRM an earlier CLI wrote.
   // Written here, a new project never has that done to a line of the developer's own (FF7).
   sections.push(MAILER_AUTOCONFIRM_NOTE)
-  sections.push(storageEnvSections(opts.storageLocal, opts.storageProduction))
+  sections.push(storageEnvSections(opts.storageLocal, opts.storageProduction, opts.productionTarget === "cloud"))
 
   if (opts.adminEmail && opts.adminPassword) {
     sections.push(
@@ -1627,7 +1636,9 @@ SUPATYPE_ADMIN_PASSWORD=${opts.adminPassword}`,
     )
   }
 
-  sections.push(selfHostPortsEnvSection(opts.storageProduction))
+  // Those ports belong to the self-host compose stack, which a Cloud project never runs; its local
+  // gateway port is written above.
+  if (opts.productionTarget !== "cloud") sections.push(selfHostPortsEnvSection(opts.storageProduction))
 
   return sections.join("\n\n") + "\n"
 }
@@ -1689,7 +1700,17 @@ SUPATYPE_SMTP_SENDER_NAME=${projectName}`
 function storageEnvSections(
   storageLocal: StorageProvider,
   storageProduction: StorageProvider,
+  cloud: boolean,
 ): string {
+  // Supatype Cloud brings its own storage and no production entry is written, so a bucket of your own
+  // here serves local development only.
+  if (cloud) {
+    return storageLocal === "s3"
+      ? s3EnvSection("local development only", "Supatype Cloud provides production storage.")
+      : `${localStorageEnvSection(storageLocal)}
+
+# Production storage: Supatype Cloud provides it, no configuration needed.`
+  }
   if (storageLocal === storageProduction) {
     if (storageLocal === "s3") {
       return s3EnvSection("local development and production", "Use a separate bucket for dev and production.")

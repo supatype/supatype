@@ -27,6 +27,13 @@ export const CHANGED_WHILE_STARTING = "The schema changed while dev was starting
 export const CHANGED_ON_DISK = "Change detected in the schema"
 
 /**
+ * How often the schema on disk is compared with the one the last push read, whatever the watch
+ * reported. On Linux a recursive watch is a set of inotify watches on directories, and an atomic
+ * save can leave it reporting nothing for the rest of the session (FF-35).
+ */
+export const SCHEMA_RECHECK_MS = 5000
+
+/**
  * Watch `dir` and push once per burst of events, and once now if the schema was saved after the
  * first push read it.
  *
@@ -47,8 +54,11 @@ export function watchDevSchema(opts: DevSchemaWatchOptions, watch: WatchFn = fsW
     settle.trigger()
   })
   void pushIfChanged(opts, CHANGED_WHILE_STARTING)
+  const recheck = setInterval(() => void pushIfChanged(opts, CHANGED_ON_DISK), SCHEMA_RECHECK_MS)
+  recheck.unref()
   return {
     close: () => {
+      clearInterval(recheck)
       settle.cancel()
       watcher.close()
     },

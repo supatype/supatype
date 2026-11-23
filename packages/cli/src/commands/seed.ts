@@ -59,9 +59,9 @@ export interface SeedFlags {
 
 export function registerSeed(program: Command): void {
   program
-    .command("seed [file]")
+    .command("seed [files...]")
     .description(
-      "Run database seeds: optional single file; else all seeds/*.ts (alphabetical); else seed.ts",
+      "Run database seeds: the files named, in that order; else all seeds/*.ts (alphabetical); else seed.ts",
     )
     .option(
       "--force",
@@ -78,8 +78,8 @@ export function registerSeed(program: Command): void {
     .option("--env <name>", "Environment to seed on a linked project (default: the linked default)")
     .option("--local", "Seed the local stack even when the project is linked", false)
     .option("--confirm-production", "Seed a linked project's production environment without the prompt", false)
-    .action(async (file: string | undefined, opts: SeedFlags) => {
-      const code = await runSeed(file, opts)
+    .action(async (files: string[], opts: SeedFlags) => {
+      const code = await runSeed(files, opts)
       if (code !== 0) process.exit(code)
     })
 }
@@ -90,7 +90,7 @@ export function registerSeed(program: Command): void {
  * `0` applied, `1` a seed failed, `2` the run could not start. The split is what lets CI
  * retry one and not the other.
  */
-export async function runSeed(file: string | undefined, opts: SeedFlags): Promise<number> {
+export async function runSeed(file: SeedFiles | undefined, opts: SeedFlags): Promise<number> {
   const cwd = process.cwd()
   const config = loadConfig(cwd)
 
@@ -123,7 +123,7 @@ function linkedProject(cwd: string, config: SupatypeConfig, opts: SeedFlags): Re
 
 /** The engine here, against the local stack or the database `--connection` names. */
 async function runLocalSeed(
-  file: string | undefined,
+  file: SeedFiles | undefined,
   opts: SeedFlags,
   cwd: string,
   config: SupatypeConfig,
@@ -164,7 +164,7 @@ function localDatabaseUrl(cwd: string, config: SupatypeConfig, opts: SeedFlags):
 }
 
 /** The files' collected documents, or the exit code of a run that could not collect them. */
-function collectLocal(file: string | undefined, opts: SeedFlags, cwd: string, config: SupatypeConfig): Prepared[] | number {
+function collectLocal(file: SeedFiles | undefined, opts: SeedFlags, cwd: string, config: SupatypeConfig): Prepared[] | number {
   const paths = existingSeedPaths(file, cwd, config)
   if (paths === undefined) return 2
   const builderPath = locateBuilder(cwd, config)

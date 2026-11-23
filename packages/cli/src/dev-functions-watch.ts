@@ -149,8 +149,9 @@ export async function waitForWorkerHealth(
 export async function restartComposeFunctionsWorker(
   target: ComposeWorkerTarget,
   deps: WorkerHealthDeps = liveHealthDeps,
+  reason = "Function source changed",
 ): Promise<void> {
-  console.log("\n[supatype] Function source changed, restarting the functions worker...")
+  console.log(`\n[supatype] ${reason}, restarting the functions worker...`)
   const status = runDockerCompose(target.composePath, ["restart", "functions-worker"], target.cwd, target.project, {
     quiet: true,
   })

@@ -184,7 +184,9 @@ Commands that reach the local stack's database or API need that stack running: `
 
 `build` takes each value from the first of: the environment (`SUPATYPE_URL`, `SUPATYPE_ANON_KEY` or any framework's name), the `/supatype-env.json` of the server the environment's URL names (for the anon key only, so CI can set just `SUPATYPE_URL`), the linked environment, and a `.env` that records a deployment (`PUBLIC_SUPATYPE_URL` or `API_EXTERNAL_URL`, and `ANON_KEY`). An anon key counts only for the URL being built for; one a source holds for another deployment is listed as skipped. It refuses a local address unless you pass `--allow-local`, never gives the build the service role key, writes no file, and exits with the build's own code. A package.json build script that is itself `supatype build` is refused rather than run again. `deploy` builds the app the same way. See [Deploy your frontend](/docs/deploying-your-frontend.html).
 
-For a self-hosted stack, `link --url` takes the stack's gateway URL and `--token` its `SERVICE_ROLE_KEY`. The full walkthrough is in [Self-host](/docs/#self-host) and [Deploy to a VM with GitHub Actions](/docs/guides/deploy-vm-github-actions.html).
+For a self-hosted stack, `link --url` takes the stack's gateway URL and `--token` its `SERVICE_ROLE_KEY`. The link is made to the project the server says it serves, whatever this folder is called.
+
+A folder holds one link, to Supatype Cloud or to a self-hosted server: linking the other replaces it, and `envs use` chooses between environments of that one link. To work against both, keep a folder for each (a second clone or a `git worktree`) and link each to its own host. The full walkthrough is in [Self-host](/docs/#self-host) and [Deploy to a VM with GitHub Actions](/docs/guides/deploy-vm-github-actions.html).
 
 <h2 id="cloud">Supatype Cloud</h2>
 

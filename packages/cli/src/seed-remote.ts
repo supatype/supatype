@@ -34,6 +34,7 @@ import {
   runOnceForAll,
   seedDocuments,
   seedLabel,
+  type SeedFiles,
   type Prepared,
 } from "./seed-prepare.js"
 import { isSeedResult, isSeedStatus, report, reportSeedStatus } from "./seed-report.js"
@@ -59,7 +60,7 @@ function describe(target: DeployTarget): string {
 
 /** Apply (or, with `--status`, report) the project's seeds through `target`. The exit code. */
 export async function runRemoteSeed(
-  file: string | undefined,
+  file: SeedFiles | undefined,
   opts: SeedFlags,
   target: DeployTarget,
   config: SupatypeConfig,
@@ -117,7 +118,7 @@ async function remoteStatus(target: DeployTarget): Promise<number> {
 }
 
 async function remoteApply(
-  file: string | undefined,
+  file: SeedFiles | undefined,
   opts: SeedFlags,
   target: DeployTarget,
   config: SupatypeConfig,
