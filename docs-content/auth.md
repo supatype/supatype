@@ -273,7 +273,7 @@ email: {
 `console`, the default, logs that a message would have been sent but leaves out the body, so the link is not in the log. To try magic links or password reset, configure a real provider.
 :::
 
-On a self-hosted stack, for Resend set `SUPATYPE_RESEND_API_KEY` and `SUPATYPE_RESEND_FROM` in `.env`. For SES set `SUPATYPE_SES_FROM`; credentials come from the environment's AWS configuration.
+On a self-hosted stack, for Resend set `email.resend_api_key` and `email.resend_from` in the `email` block above (a value set by hand in `.env` is replaced from `supatype.config.ts`). For SES set `email.ses_from`; credentials come from the environment's AWS configuration.
 
 On Supatype Cloud there is no `.env` and no ambient AWS configuration, so SES takes all of its settings from the `email` block, and a push that leaves one out is refused:
 

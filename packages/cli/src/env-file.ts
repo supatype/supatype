@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { parseEnvText, splitAssignment } from "./dotenv-parse.js"
 import { assertEnvValues } from "./env-value.js"
+import { redact } from "./error-message.js"
 
 export { parseEnvText }
 
@@ -88,6 +89,43 @@ export interface UpsertOptions {
   noteAt?: { key: string; text: string }
   /** The file in `cwd` to merge into: `.env` unless given, `.env.development.local` for instance. */
   file?: string
+  /**
+   * Called with the `managed` keys whose value was written by hand and is now replaced by a
+   * different one. A blank value (a scaffold to fill in) and a line the CLI wrote are not hand edits.
+   * See {@link warnHandEditedValues}.
+   */
+  onHandEdited?: (changes: readonly HandEditedValue[]) => void
+}
+
+/** A value someone set in `.env` by hand that the CLI replaced with what `supatype.config.ts` gives. */
+export interface HandEditedValue {
+  key: string
+  from: string
+  to: string
+}
+
+/** Names whose value is not printed: a password, key, token or secret. */
+const SECRET_NAME = /PASS|SECRET|KEY|TOKEN|PWD|CREDENTIAL/i
+
+/** `value` as it may be printed under `key`: hidden for a secret-looking name, a connection string's password removed. */
+function printable(key: string, value: string): string {
+  return SECRET_NAME.test(key) ? "***" : redact(value)
+}
+
+/**
+ * Tell the developer which `.env` values the CLI just replaced from `supatype.config.ts`, each with
+ * what it was and what it is now, and where to set it so it stays. The config is the one source, so
+ * the hand-written value is not kept.
+ */
+export function warnHandEditedValues(changes: readonly HandEditedValue[]): void {
+  if (changes.length === 0) return
+  const lines = changes.map((c) => `  ${c.key}: ${printable(c.key, c.from)} -> ${printable(c.key, c.to)}`)
+  console.warn(
+    "[supatype] .env is written from supatype.config.ts, so these values set by hand in .env were replaced. " +
+      "Set them in supatype.config.ts to keep them:" +
+      "\n" +
+      lines.join("\n"),
+  )
 }
 
 /** The older form of `upsertEnvFile`'s options: a list of keys, where options are an object. */
@@ -118,7 +156,7 @@ export function upsertEnvFile(
   const plan = upsertPlan(updates, opts)
   const envPath = join(cwd, file)
   const existing = existsSync(envPath) ? readFileSync(envPath, "utf8") : ""
-  const { kept, written } = mergeLines(parseLines(existing), plan)
+  const { kept, written, handEdited } = mergeLines(parseLines(existing), plan)
   const body = [...kept.map((l) => l.text), ...appendedLines(plan, written)].join("\n")
   const next = `${body.replace(/\n+$/, "")}\n`
   // Not written when nothing changed. `.env` is compose's input, and a command that only read the
@@ -127,6 +165,7 @@ export function upsertEnvFile(
   // Not created owner-only: the stack's containers read `.env` from the project mount as another
   // user, and on a Linux host a 600 file stopped the server starting.
   writeFileSync(envPath, next, "utf8")
+  if (handEdited.length > 0) opts.onHandEdited?.(handEdited)
 }
 
 /** One upsert's updates and its {@link UpsertOptions} as sets, for {@link mergeLines}. */
@@ -157,8 +196,12 @@ function pushNote(kept: EnvLine[], text: string): void {
 }
 
 /** The file's lines with the plan applied in place, and the keys rewritten where they were. */
-function mergeLines(lines: readonly EnvLine[], plan: UpsertPlan): { kept: EnvLine[]; written: Set<string> } {
+function mergeLines(
+  lines: readonly EnvLine[],
+  plan: UpsertPlan,
+): { kept: EnvLine[]; written: Set<string>; handEdited: HandEditedValue[] } {
   const written = new Set<string>()
+  const handEdited: HandEditedValue[] = []
   const kept: EnvLine[] = []
   let note = plan.noteAt
   for (const line of lines) {
@@ -184,11 +227,14 @@ function mergeLines(lines: readonly EnvLine[], plan: UpsertPlan): { kept: EnvLin
       continue
     }
     const wantsMarker = plan.managed.has(key)
+    const was = wantsMarker && !line.managed ? parseEnvText(line.text)[key] : undefined
+    const now = plan.updates[key]
+    if (was !== undefined && now !== undefined && was.trim() !== "" && was !== now) handEdited.push({ key, from: was, to: now })
     relabel(kept, wantsMarker ? plan.label : undefined)
     kept.push({ key, text: `${key}=${plan.updates[key]}`, managed: wantsMarker })
     written.add(key)
   }
-  return { kept, written }
+  return { kept, written, handEdited }
 }
 
 /** The updates not rewritten in place, as lines for the end of the file, each under its marker. */

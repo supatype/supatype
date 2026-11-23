@@ -1,4 +1,4 @@
-import { upsertEnvFile } from "./env-file.js"
+import { upsertEnvFile, warnHandEditedValues } from "./env-file.js"
 import { MAILER_PASSTHROUGH_ENV, MAILER_PROVIDER_ENV, mailerProviderEnv, SMTP_ENV } from "./mailer-env.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
 
@@ -52,5 +52,5 @@ export function warnSmtpWithoutHost(
 /** Write {@link configMailerEnv} into `.env`, for a command that writes nothing else there. */
 export function syncConfigMailerEnv(cwd: string, config: SupatypeProjectConfig): void {
   const { updates, managed, removeManaged } = configMailerEnv(config)
-  upsertEnvFile(cwd, updates, { managed, removeManaged })
+  upsertEnvFile(cwd, updates, { managed, removeManaged, onHandEdited: warnHandEditedValues })
 }

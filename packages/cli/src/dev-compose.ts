@@ -96,7 +96,7 @@ import {
   isGenerateAnswer,
 } from "./engine-answers.js"
 import { writeSchemaSourcePushArtifacts, type SchemaSourcePushArtifacts } from "./schema-sources.js"
-import { readEnvFile, readEnvValue, upsertEnvFile } from "./env-file.js"
+import { readEnvFile, readEnvValue, upsertEnvFile, warnHandEditedValues } from "./env-file.js"
 import { warnMissingStackSettings } from "./stack-setting-warnings.js"
 import {
   devDatabaseIdentity,
@@ -179,6 +179,7 @@ export function syncComposeImagePins(cwd: string, config: SupatypeProjectConfig)
   upsertEnvFile(cwd, imagePins, {
     removeManaged: removeImageKeys,
     managed: COMPOSE_PINNED_IMAGE_ENV_KEYS,
+    onHandEdited: warnHandEditedValues,
   })
 }
 
@@ -417,6 +418,7 @@ export function upsertDevComposeEnv(
     removeManaged: [...removeImageKeys, ...mailer.removeManaged],
     managed: [...managedImageKeys, ...mailer.managed],
     remove: [...retiredKeys, ...staleLocalServerImage(dotEnv["SUPATYPE_SERVER_IMAGE"], wantsLocalServer, imagePins)],
+    onHandEdited: warnHandEditedValues,
   })
   // The front end's copies go where a development build reads them, not .env, which a production
   // build reads (frontend-env.ts). The URL only when it is the project's port, not the shell's.
