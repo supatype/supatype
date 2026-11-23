@@ -23,6 +23,7 @@ import { useProjectProxy, type SchemaTable } from "../hooks/useProjectProxy.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
+import { ERD_MINIMAP } from "../lib/erd-minimap.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -357,7 +358,7 @@ function ErdFlow({
       >
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} className="opacity-30" />
         <Controls />
-        <MiniMap nodeColor={() => "hsl(var(--accent))"} maskColor="hsl(var(--background) / 0.7)" />
+        <MiniMap bgColor={ERD_MINIMAP.bgColor} nodeColor={ERD_MINIMAP.nodeColor} maskColor={ERD_MINIMAP.maskColor} />
         <Panel position="top-right">
           <Button size="sm" variant="secondary" onClick={runLayout}>
             Auto layout

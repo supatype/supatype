@@ -36,7 +36,28 @@ installStackFetch({ origin: stackOrigin, forwardingSecret })
  * collide with a function somebody has already deployed. Discovery warns if one is shadowed rather
  * than silently winning.
  */
-const RESERVED_ROUTES = new Set(["_logs"])
+const RESERVED_ROUTES = new Set(["_logs", "_functions"])
+
+/**
+ * The public functions this worker serves, by name: what the server's function list asks for, and
+ * what a 404 offers as `available`. A hook is procedural and the gateway refuses its route from
+ * outside, so it is neither listed nor suggested.
+ */
+function publicFunctionNames(handlers: Record<string, Handler>): string[] {
+  return Object.keys(handlers)
+    .filter((name) => !name.startsWith(HOOKS_ROUTE_PREFIX))
+    .sort()
+}
+
+/**
+ * The answer to `GET /functions/v1/_functions`, in the shape Studio's Edge Functions page reads. The
+ * worker keeps no call statistics, so the counts are zero rather than absent: a missing number is a
+ * page that cannot render the row.
+ */
+function functionListResponse(handlers: Record<string, Handler>): Response {
+  const data = publicFunctionNames(handlers).map((name) => ({ name, invocations24h: 0, avgDurationMs: 0 }))
+  return new Response(JSON.stringify({ data }), { headers: { "Content-Type": "application/json" } })
+}
 
 type Handler = (req: Request, ctx: FunctionContext) => Response | Promise<Response>
 
@@ -493,6 +514,7 @@ const server = Deno.serve({
   // still has a tail.
   if (RESERVED_ROUTES.has(fnName)) {
     if (fnName === "_logs") return tailResponse()
+    if (fnName === "_functions") return functionListResponse(handlers)
   }
 
   // A hook the map names with no code here (a new hook whose deploy failed) cannot be reached: 503,
@@ -505,7 +527,7 @@ const server = Deno.serve({
   }
   if (!fnName || !handlers[fnName]) {
     const message = fnName ? `Function "${fnName}" not found` : "No function specified"
-    return jsonError("not_found", message, 404, { available: Object.keys(handlers) })
+    return jsonError("not_found", message, 404, { available: publicFunctionNames(handlers) })
   }
 
   // Nothing goes into the process environment, so nothing has to be taken back out and nothing has

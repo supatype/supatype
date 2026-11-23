@@ -28,6 +28,7 @@ import { LinkAccountPrompt } from "./components/LinkAccountPrompt.js"
 import { SchemaPushNotice } from "./components/SchemaPushNotice.js"
 import { RoleGate, type RoleRequirement } from "./components/RoleGate.js"
 import { forgetStoredActingModes } from "./lib/acting-mode.js"
+import { ROUTE_ALIASES } from "./lib/route-aliases.js"
 
 // Re-export for dev tool views that import useStudioClient
 export const useStudioClient = useAdminClient
@@ -549,7 +550,10 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="settings"       element={<Settings demoMode={demoMode ?? false} />} />
 
               {/* Platform features */}
-              <Route path="email"          element={<ComingSoon title="Email" description="Configure transactional email providers, templates, and delivery settings." />} />
+              <Route path="email"          element={<ComingSoon title="Email" description="Configure transactional email providers, templates, and delivery settings. Coming soon." />} />
+              {Object.entries(ROUTE_ALIASES).map(([path, to]) => (
+                <Route key={path} path={path} element={<Navigate to={to} replace />} />
+              ))}
               <Route path="edge-functions" element={gated(FUNCTIONS, <EdgeFunctions />)} />
               <Route path="edge-functions/:functionSlug" element={gated(FUNCTIONS, <EdgeFunctions />)} />
               <Route path="edge-functions/:functionSlug/:tab" element={gated(FUNCTIONS, <EdgeFunctions />)} />
