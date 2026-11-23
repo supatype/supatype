@@ -32,9 +32,20 @@ export interface TargetCall {
 
 /** `call` to the target's project, with the time limit its route needs. */
 export function targetRequest(target: DeployTarget, call: TargetCall): TargetFetchOptions {
+  return { ...projectRequest(target, call.method, call.subpath, call.body), timeoutMs: timeoutOf(call) }
+}
+
+/**
+ * `call` to the target server's admin API (`/admin/v1`), which is not under `/projects/<ref>`: a
+ * self-hosted or local server serves one project, so its `subpath` is the admin route itself.
+ */
+export function targetAdminRequest(target: DeployTarget, call: TargetCall): TargetFetchOptions {
+  return { ...apiFetchOpts(target, call.method, call.subpath, call.body), timeoutMs: timeoutOf(call) }
+}
+
+function timeoutOf(call: TargetCall): number {
   const base = call.restartsWorker === true ? RESTART_TIMEOUT_MS : TARGET_TIMEOUT_MS
-  const timeoutMs = base + (call.handlers ?? 0) * PER_HANDLER_TIMEOUT_MS
-  return { ...projectRequest(target, call.method, call.subpath, call.body), timeoutMs }
+  return base + (call.handlers ?? 0) * PER_HANDLER_TIMEOUT_MS
 }
 
 /**

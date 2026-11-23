@@ -135,7 +135,7 @@ PATCH /admin/v1/config/rest Authorization: Bearer &lt;service role key&gt; { "ca
 | `functions list` **Cloud** | List all deployed functions for the linked project |  |
 | `functions delete <name>` **Cloud** | Remove a deployed function |  |
 | `functions logs <name>` **Cloud** | Tail logs for a deployed function | `--since <duration>` (default 1h) |
-| `functions env list`, `set <KEY=value>`, `unset <key>` **Cloud** | Manage function environment variables |  |
+| `functions env list`, `set <KEY=value>`, `unset <key>` **Cloud** | Manage function environment variables | `--function <name>` (one function's own values, which override a shared one) |
 | `hooks new <name>` | Scaffold a hook handler |  |
 | `hooks list` | Show the hooks the schema declares and whether each one can run |  |
 

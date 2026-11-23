@@ -31,9 +31,24 @@ export function withEnvValue(text: string, key: string, value: string, file: str
   return `${kept}${kept === "" ? "" : "\n"}${key}=${value}\n`
 }
 
-/** `text` without any assignment of `key`, and whether it had one. */
-export function withoutEnvValue(text: string, key: string): { text: string; removed: boolean } {
+/**
+ * Whether the text of `line` before its first `=`, trimmed and without a leading `export `, is
+ * `key`. Unlike {@link assigns} it does not hold the name to the secret name rule, so a line the
+ * dotenv parser ignores (`OLD-NAME=x`) can still be found.
+ */
+function namesKey(line: string, key: string): boolean {
+  const trimmed = line.trim().replace(/^export\s+/, "")
+  if (trimmed.startsWith("#")) return false
+  const eq = trimmed.indexOf("=")
+  return eq > 0 && trimmed.slice(0, eq).trim() === key
+}
+
+/**
+ * `text` without any line naming `key`, and how many lines that was. For unset only: it also
+ * removes a line whose name breaks the secret name rule. Every other line stays as it is.
+ */
+export function withoutEnvValue(text: string, key: string): { text: string; removed: number } {
   const lines = text.split("\n")
-  const kept = lines.filter((line) => !assigns(line, key))
-  return { text: kept.join("\n"), removed: kept.length < lines.length }
+  const kept = lines.filter((line) => !namesKey(line, key))
+  return { text: kept.join("\n"), removed: lines.length - kept.length }
 }

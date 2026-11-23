@@ -156,6 +156,16 @@ $ npx supatype functions env unset RESEND_API_KEY
 
 On a project that is not linked, these commands edit `functions/.env.local`. `list` masks the values.
 
+Add `--function <name>` to `list`, `set` or `unset` to work on one function's own values: on a linked project they go to that function, and on a project that is not linked they edit `functions/.env.<name>.local`. A function's own value overrides a shared one with the same name.
+
+```sh
+$ npx supatype functions env set RESEND_API_KEY=re_456 --function send-invite
+$ npx supatype functions env list --function send-invite
+$ npx supatype functions env unset RESEND_API_KEY --function send-invite
+```
+
+On Supatype Cloud the per-function routes need a control plane that serves `/projects/<ref>/functions/<name>/env`.
+
 ```ts title="functions/send-invite/index.ts"
 const apiKey = ctx.env["RESEND_API_KEY"]
 if (!apiKey) return Response.json({ message: "RESEND_API_KEY is not set" }, { status: 500 })

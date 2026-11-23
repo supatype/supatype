@@ -1629,3 +1629,9 @@ export * from "./public-env.js"
 export * from "./seed-contract.js"
 export * from "./auth-settings.js"
 export * from "./auth-settings-groups.js"
+export {
+  FUNCTION_SECRET_NAME_PATTERN,
+  FUNCTION_SECRET_NAME_RULE,
+  functionSecretNameProblem,
+  isFunctionSecretName,
+} from "./function-secret-name.js"

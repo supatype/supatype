@@ -11,10 +11,10 @@ import { resolve, join, relative, isAbsolute } from "node:path"
 import { execSync } from "node:child_process"
 import { runUntilStopped } from "../run-until-stopped.js"
 import { fetchWithin } from "../fetch-within.js"
-import { targetRequest, targetStreamRequest, type TargetCall } from "../target-request.js"
+import { targetAdminRequest, targetRequest, targetStreamRequest, type TargetCall } from "../target-request.js"
 import { parseEnvText } from "../dotenv-parse.js"
 import { withEnvValue, withoutEnvValue } from "../env-lines.js"
-import { ensureFunctionsEnvLocal, FUNCTIONS_ENV_LOCAL } from "../functions-env-local.js"
+import { ensureFunctionsEnvLocal, functionEnvLocalName, FUNCTIONS_ENV_LOCAL } from "../functions-env-local.js"
 import { STOP_SIGNALS } from "../stop-signals.js"
 import { sayTargetWarning } from "../target-warning.js"
 import { resolveProjectApiUrl } from "../resolve-api-url.js"
@@ -36,10 +36,11 @@ import {
   type FunctionsWorkerProject,
 } from "../functions-worker-files.js"
 import { functionsServeKeyPath, sweepStaleServeKeyFiles, writeServiceRoleKeyFileUntilExit } from "../service-role-key-file.js"
+import { functionSecretNameProblem } from "@supatype/types"
 import { cloudAnonKey, publishedAnonKey } from "../frontend-values-linked.js"
 import { loadProjectLink } from "../link.js"
 import { projectRequest, resolveTarget, targetFunctions, targetLogs, type DeployTarget, type TargetStreamPath } from "../resolve-target.js"
-import { targetFetch, targetStream, type TargetFetchOptions } from "../target-client.js"
+import { TargetApiError, targetFetch, targetStream, type TargetFetchOptions } from "../target-client.js"
 import { isArrayOf, isJsonObject, isNumber, isShape, isString, isUnknown, nullable, optional, type FunctionDeployBody, type FunctionDeployEntry, type Guard } from "@supatype/shared"
 import {
   ensureFunctionsDenoTypes,
@@ -143,28 +144,31 @@ export function registerFunctions(program: Command): void {
   const envCmd = fnCmd
     .command("env")
     .summary("Manage function environment variables")
-    .description(`Manage function environment variables: on the linked project, else in the functions directory's .env.local.\n\n${ENV_HELP}`)
+    .description(`Manage function environment variables: on the linked project, else in the functions directory's .env.local (or .env.<name>.local with --function).\n\n${ENV_HELP}`)
 
   envCmd
     .command("list")
     .description("List environment variables (values masked)")
-    .action(async () => {
-      await envList(process.cwd())
+    .option(...FUNCTION_OPTION)
+    .action(async (opts: EnvScope) => {
+      await envList(process.cwd(), opts)
     })
 
   envCmd
     .command("set <keyvalue>")
     .summary("Set an environment variable (KEY=value)")
     .description(`Set an environment variable (KEY=value).\n\n${ENV_HELP}`)
-    .action(async (keyvalue: string) => {
-      await envSet(process.cwd(), keyvalue)
+    .option(...FUNCTION_OPTION)
+    .action(async (keyvalue: string, opts: EnvScope) => {
+      await envSet(process.cwd(), keyvalue, opts)
     })
 
   envCmd
     .command("unset <key>")
     .description("Remove an environment variable")
-    .action(async (key: string) => {
-      await envUnset(process.cwd(), key)
+    .option(...FUNCTION_OPTION)
+    .action(async (key: string, opts: EnvScope) => {
+      await envUnset(process.cwd(), key, opts)
     })
 }
 
@@ -844,6 +848,58 @@ interface EnvWork<T> {
   guard: Guard<T>
   /** How the local functions directory is found when the project is not linked. */
   local: "read" | "write"
+  /** The function whose own values the command is about, when it is not the shared ones. */
+  fn?: string
+  /** The answer to use when the target says the key is not there (a 404 on a function's key). */
+  absent?: T
+}
+
+/** The `--function` option every env command takes. */
+const FUNCTION_OPTION: readonly [string, string] = [
+  "--function <name>",
+  "Only this function's own values: a function's own value overrides a shared one of the same name",
+]
+
+/** What an env command is given by `--function`. */
+interface EnvScope {
+  function?: string
+}
+
+/** The function an env command is about, or the command ends saying its name would be refused. */
+function envFunction(scope: EnvScope): string | undefined {
+  const fn = scope.function
+  if (fn === undefined) return undefined
+  const problem = functionNameProblem(fn)
+  if (problem !== undefined) {
+    error(problem)
+    process.exit(1)
+  }
+  return fn
+}
+
+/** The env route on the target for the shared values, or for `fn`'s own, and for one `key` of them. */
+function envSubpath(fn: string | undefined, key?: string): string {
+  const base = fn === undefined ? "/functions/env" : `/functions/${encodeURIComponent(fn)}/env`
+  return key === undefined ? base : `${base}/${encodeURIComponent(key)}`
+}
+
+/**
+ * Where a function's own env values are served. Supatype Cloud serves them under the project; a
+ * self-hosted or local server serves them from its admin API, which is not under `/projects/<ref>`.
+ */
+function envFetch<T>(target: DeployTarget, call: TargetCall, fn: string | undefined, guard: Guard<T>): Promise<T> {
+  if (fn === undefined || target.mode === "cloud") return targetFetch(target.apiBaseUrl, target.apiPrefix, targetRequest(target, call), guard)
+  return targetFetch(target.apiBaseUrl, "/admin/v1", targetAdminRequest(target, call), guard)
+}
+
+/** Whose values a linked target changed, for what a command says: `project acme` or `function x on project acme`. */
+function envScopeText(fn: string | undefined, target: DeployTarget): string {
+  return fn === undefined ? `project ${target.projectRef}` : `function ${fn} on project ${target.projectRef}`
+}
+
+/** What the local env file is called in what a command says. */
+function localEnvLabel(fn: string | undefined): string {
+  return fn === undefined ? "local env file" : `function ${fn}'s local env file`
 }
 
 /**
@@ -858,8 +914,12 @@ async function envWork<T>(cwd: string, work: EnvWork<T>): Promise<EnvOutcome<T>>
     outcome = await withSpinner(work.spinner, async (): Promise<EnvOutcome<T>> => {
       const target = resolveLinkedTarget(cwd, undefined, true)
       if (target === null) return { kind: "local", functionsDir: resolveFunctionsDir(cwd, work.local) }
-      const answer = await targetFetch(target.apiBaseUrl, target.apiPrefix, targetRequest(target, work.call), work.guard)
-      return { kind: "target", target, answer }
+      try {
+        return { kind: "target", target, answer: await envFetch(target, work.call, work.fn, work.guard) }
+      } catch (err) {
+        if (work.absent === undefined || !(err instanceof TargetApiError) || err.status !== 404) throw err
+        return { kind: "target", target, answer: work.absent }
+      }
     })
   } catch (err) {
     error(`${work.failed}: ${errorMessage(err)}`)
@@ -869,11 +929,12 @@ async function envWork<T>(cwd: string, work: EnvWork<T>): Promise<EnvOutcome<T>>
   return outcome
 }
 
-async function envList(cwd: string): Promise<void> {
-  const call = { method: "GET", subpath: "/functions/env" }
-  const work = { spinner: "Listing environment variables", failed: "Failed to list env vars", call, guard: isEnvListing, local: "read" } as const
+async function envList(cwd: string, scope: EnvScope): Promise<void> {
+  const fn = envFunction(scope)
+  const call = { method: "GET", subpath: envSubpath(fn) }
+  const work = { spinner: "Listing environment variables", failed: "Failed to list env vars", call, guard: isEnvListing, local: "read", ...(fn !== undefined && { fn }) } as const
   const outcome = await envWork(cwd, work)
-  if (outcome.kind === "local") return listLocalEnv(outcome.functionsDir)
+  if (outcome.kind === "local") return listLocalEnv(outcome.functionsDir, fn)
   const listed = outcome.answer
   // Every target lists the names. An older self-hosted control plane answers a map of names to
   // values, read here for its names alone.
@@ -889,62 +950,72 @@ async function envList(cwd: string): Promise<void> {
 const isEnvListing = (value: unknown): value is string[] | Record<string, unknown> =>
   isArrayOf(isString)(value) || isJsonObject(value)
 
-/** The variables in the functions' local env file, for a project that is not linked. */
-function listLocalEnv(functionsDir: string): void {
-  const envPath = resolve(functionsDir, FUNCTIONS_ENV_LOCAL)
+/** The variables in the functions' local env file (or one function's), for a project that is not linked. */
+function listLocalEnv(functionsDir: string, fn: string | undefined): void {
+  const envPath = resolve(functionsDir, fn === undefined ? FUNCTIONS_ENV_LOCAL : functionEnvLocalName(fn))
   if (!existsSync(envPath)) {
-    info("No environment variables configured.")
+    info(fn === undefined ? "No environment variables configured." : `No environment variables configured for function ${fn}.`)
     return
   }
-  plain("Local environment variables:\n")
+  plain(fn === undefined ? "Local environment variables:\n" : `Local environment variables for function ${fn}:\n`)
   for (const key of Object.keys(parseEnvText(readFileSync(envPath, "utf8")))) plain(`  ${key} = ••••••••`)
 }
 
-async function envSet(cwd: string, keyvalue: string): Promise<void> {
+async function envSet(cwd: string, keyvalue: string, scope: EnvScope): Promise<void> {
+  const fn = envFunction(scope)
   const eqIdx = keyvalue.indexOf("=")
   if (eqIdx <= 0) {
     error("Invalid format. Use: npx supatype functions env set KEY=value")
     process.exit(1)
   }
   const key = keyvalue.slice(0, eqIdx)
+  const nameProblem = functionSecretNameProblem(key)
+  if (nameProblem !== undefined) {
+    error(nameProblem)
+    process.exit(1)
+  }
   const value = keyvalue.slice(eqIdx + 1)
-  const call = { method: "POST", subpath: "/functions/env", body: { key, value }, restartsWorker: true }
-  const outcome = await envWork(cwd, { spinner: `Setting ${key}`, failed: "Failed to set env var", call, guard: isUnknown, local: "write" })
-  if (outcome.kind === "local") return setLocalEnv(outcome.functionsDir, key, value)
-  info(`Set ${key} for project ${outcome.target.projectRef}.`)
+  const call = { method: "POST", subpath: envSubpath(fn), body: { key, value }, restartsWorker: true }
+  const work = { spinner: `Setting ${key}`, failed: "Failed to set env var", call, guard: isUnknown, local: "write", ...(fn !== undefined && { fn }) } as const
+  const outcome = await envWork(cwd, work)
+  if (outcome.kind === "local") return setLocalEnv(outcome.functionsDir, key, value, fn)
+  info(`Set ${key} for ${envScopeText(fn, outcome.target)}.`)
 }
 
-/** Sets `key` in the functions' local env file, replacing its line or adding one. */
-function setLocalEnv(functionsDir: string, key: string, value: string): void {
-  const envPath = ensureFunctionsEnvLocal(functionsDir).path
+/** Sets `key` in the functions' local env file (or one function's), replacing its line or adding one. */
+function setLocalEnv(functionsDir: string, key: string, value: string, fn: string | undefined): void {
+  const envPath = ensureFunctionsEnvLocal(functionsDir, fn).path
   writeFileSync(envPath, withEnvValue(readFileSync(envPath, "utf8"), key, value, relative(process.cwd(), envPath)), "utf8")
-  info(`Set ${key} in local env file.`)
+  info(`Set ${key} in ${localEnvLabel(fn)}.`)
 }
 
-async function envUnset(cwd: string, key: string): Promise<void> {
-  const call = { method: "DELETE", subpath: `/functions/env/${encodeURIComponent(key)}`, restartsWorker: true }
-  const outcome = await envWork(cwd, { spinner: `Removing ${key}`, failed: "Failed to unset env var", call, guard: isUnknown, local: "read" })
-  if (outcome.kind === "local") return unsetLocalEnv(outcome.functionsDir, key)
+async function envUnset(cwd: string, key: string, scope: EnvScope): Promise<void> {
+  const fn = envFunction(scope)
+  const call = { method: "DELETE", subpath: envSubpath(fn, key), restartsWorker: true }
+  const absent = fn === undefined ? {} : { absent: { removed: false } }
+  const work = { spinner: `Removing ${key}`, failed: "Failed to unset env var", call, guard: isUnknown, local: "read", ...(fn !== undefined && { fn }), ...absent } as const
+  const outcome = await envWork(cwd, work)
+  if (outcome.kind === "local") return unsetLocalEnv(outcome.functionsDir, key, fn)
   const { answer, target } = outcome
   // A self-hosted server says whether the key was there to remove.
-  if (isJsonObject(answer) && answer["removed"] === false) info(`${key} was not set for project ${target.projectRef}.`)
-  else info(`Removed ${key} for project ${target.projectRef}.`)
+  if (isJsonObject(answer) && answer["removed"] === false) info(`${key} was not set for ${envScopeText(fn, target)}.`)
+  else info(`Removed ${key} for ${envScopeText(fn, target)}.`)
 }
 
-/** Removes `key` from the functions' local env file. */
-function unsetLocalEnv(functionsDir: string, key: string): void {
-  const envPath = resolve(functionsDir, FUNCTIONS_ENV_LOCAL)
+/** Removes `key` from the functions' local env file (or one function's). */
+function unsetLocalEnv(functionsDir: string, key: string, fn: string | undefined): void {
+  const envPath = resolve(functionsDir, fn === undefined ? FUNCTIONS_ENV_LOCAL : functionEnvLocalName(fn))
   if (!existsSync(envPath)) {
-    error("No local env file found.")
+    error(`No ${localEnvLabel(fn)} found.`)
     process.exit(1)
   }
   const { text, removed } = withoutEnvValue(readFileSync(envPath, "utf8"), key)
-  if (!removed) {
-    info(`${key} was not set in the local env file.`)
+  if (removed === 0) {
+    info(`${key} was not set in ${fn === undefined ? "the " : ""}${localEnvLabel(fn)}.`)
     return
   }
   writeFileSync(envPath, text, "utf8")
-  info(`Removed ${key} from local env file.`)
+  info(removed === 1 ? `Removed ${key} from ${localEnvLabel(fn)}.` : `Removed ${key} from ${localEnvLabel(fn)} (${removed} lines).`)
 }
 
 /**
