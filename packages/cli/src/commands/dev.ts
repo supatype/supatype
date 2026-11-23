@@ -1163,7 +1163,7 @@ async function writeNativeSchemaArtifacts(
   const { cwd, engineBin, astPath } = paths
   if (paths.storagePath || paths.storageApi) await provisionDeclaredBuckets(engineBin, cwd, astPath, paths)
   if (paths.adminConfigPath) await writeNativeAdminConfig(paths, paths.adminConfigPath, ast, config)
-  if (config) writeNativeAppliedAst(cwd, config, ast)
+  if (config) await writeNativeAppliedAst(cwd, config, ast)
   await writeNativeTypes(cwd, ast, config)
 }
 
@@ -1645,11 +1645,11 @@ function ensureProjectDatabase(db: ProjectDatabase): void {
  * only go into one that exists, and the first push runs before native dev records its functions,
  * which switches functions (`services.functions`) before the server reads it.
  */
-export function writeNativeAppliedAst(cwd: string, config: SupatypeProjectConfig, ast: unknown): void {
+export async function writeNativeAppliedAst(cwd: string, config: SupatypeProjectConfig, ast: unknown): Promise<void> {
   const manifestPath = join(cwd, ".supatype", "manifest.json")
   if (!existsSync(manifestPath)) patchRouteManifest(manifestPath, {})
   for (const line of writeAppliedAstArtifacts(cwd, config, ast, { rowCacheEnv: false }).lines) console.log(`[supatype] ${line}`)
   // The declaration is a ceiling and the allowlist is what is on: only a push seeded the allowlist, so
   // a declared `.cache({ server: true })` answered BYPASS under native dev (S-24).
-  for (const note of cacheSeedingNotes(cwd, ast)) console.log(`[supatype] ${note}`)
+  for (const note of await cacheSeedingNotes(cwd, ast)) console.log(`[supatype] ${note}`)
 }

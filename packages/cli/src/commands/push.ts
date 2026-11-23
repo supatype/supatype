@@ -386,8 +386,21 @@ export async function finishTargetPush(
   reportTargetPush(target, pushResult, stepFailed)
 }
 
-
+/**
+ * What a push and a deploy send after the schema, in order: the hooks (to a linked server), the
+ * allowed origins and the platform settings (to Cloud). One list for both commands: deploy used to
+ * stop at the schema, so a project only ever deployed ran without its hooks. Each step reports its own
+ * failure and the rest still run; true when any failed (post-apply.ts).
+ */
+export async function runPostApplySteps(cwd: string, config: SupatypeProjectConfig, target: DeployTarget, ast: unknown): Promise<boolean> {
+  const hooksFailed = target.mode === "cloud" || target.mode === "self-host"
+    ? await deployHooksToTarget(cwd, config, target, ast)
+    : false
+  const corsFailed = await pushCorsOrigins(target, config)
+  const platformFailed = await pushPlatformSettings(cwd, config, target)
+  return hooksFailed || corsFailed || platformFailed
 }
+
 
 /**
  * How a push to a linked target ended. One whose step after the schema failed ends with that, not

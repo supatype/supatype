@@ -29,8 +29,8 @@ afterEach(() => {
 })
 
 describe("native dev after it applies a schema", () => {
-  it("switches on the cache the schema declares", () => {
-    writeNativeAppliedAst(dir, config, AST)
+  it("switches on the cache the schema declares", async () => {
+    await writeNativeAppliedAst(dir, config, AST)
     const written = readFileSync(join(dir, ".supatype", "api-config.json"), "utf8")
     expect(written).toContain('"posts"')
     expect(written).toContain('"enabled": true')
