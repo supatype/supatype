@@ -420,11 +420,11 @@ async function readEnvFile(path: string): Promise<Record<string, string>> {
  */
 const managedEnvPath = (Deno.env.get("SUPATYPE_FUNCTION_ENV_FILE") ?? "").trim()
 
-async function readManagedEnv(): Promise<Record<string, string>> {
-  if (!managedEnvPath) return {}
+async function readManagedEnv(path: string = managedEnvPath): Promise<Record<string, string>> {
+  if (!path) return {}
   let parsed: unknown
   try {
-    parsed = JSON.parse(await Deno.readTextFile(managedEnvPath))
+    parsed = JSON.parse(await Deno.readTextFile(path))
   } catch {
     return {}
   }
@@ -433,16 +433,30 @@ async function readManagedEnv(): Promise<Record<string, string>> {
 }
 
 /**
- * The shared env file, then the managed values, then the function's own file, which wins. The three
- * are read together: every call waits for them.
+ * The file of one function's own managed values: `fn.<name>.json`, in the directory of the managed
+ * file, in the same JSON shape. Supatype Cloud writes one per function that has secrets of its own
+ * (self-host keeps them in `.env.<name>.local`). Empty when there is no managed file, or when the name
+ * is not a plain function name, so a route name can never reach outside that directory.
+ */
+function functionManagedEnvPath(fnName: string): string {
+  if (!managedEnvPath || !/^[A-Za-z0-9_-]+$/.test(fnName)) return ""
+  const slash = Math.max(managedEnvPath.lastIndexOf("/"), managedEnvPath.lastIndexOf("\\"))
+  return `${managedEnvPath.slice(0, slash + 1)}fn.${fnName}.json`
+}
+
+/**
+ * The shared env file, then the managed values, then the function's own file, which wins, then the
+ * function's own managed values, which win over all of those. They are read together: every call waits
+ * for them.
  */
 async function scopedEnvForFunction(fnName: string): Promise<Record<string, string>> {
-  const [shared, managed, fnVars] = await Promise.all([
+  const [shared, managed, fnVars, fnManaged] = await Promise.all([
     readEnvFile(sharedEnvPath),
     readManagedEnv(),
     readEnvFile(`${normalizedFunctionsDir}/.env.${fnName}.local`),
+    readManagedEnv(functionManagedEnvPath(fnName)),
   ])
-  return { ...shared, ...managed, ...fnVars }
+  return { ...shared, ...managed, ...fnVars, ...fnManaged }
 }
 
 /**
