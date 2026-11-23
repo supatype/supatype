@@ -22,6 +22,8 @@ export interface RecordEditor {
   savedAt: number
   /** A draft was saved from this form and no publishing act has followed it. */
   draftSaved?: boolean
+  /** When the last save from this form landed, for the "Saved" notice; null before one has. */
+  savedNoticeAt?: number | null
   /** The plain "Save draft": what the form's own save button does. */
   onSave: () => void
   /** Save the form as a draft, creating the record when it is new: its id, or null when refused. */

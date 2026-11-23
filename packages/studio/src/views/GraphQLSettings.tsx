@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import { useStudioClient } from "../StudioCore.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
-import { Button, Card, CodeBlock, Input, LoadingSettingsCard, Switch } from "../components/ui.js"
+import { Button, Card, CodeBlock, Input, LoadingSettingsCard, SavedNotice, Switch } from "../components/ui.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
 import { useRoleRefusalText } from "../components/RoleGate.js"
@@ -43,7 +43,7 @@ export function GraphQLSettings(): React.ReactElement {
   const [defaultMaxRows, setDefaultMaxRows] = useState("1000")
   const [committed, setCommitted] = useState({ introspection: true, maxQueryDepth: "10", defaultMaxRows: "1000" })
   const [isSaving, setIsSaving] = useState(false)
-  const [savedOk, setSavedOk] = useState(false)
+  const [savedAt, setSavedAt] = useState<number | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -78,7 +78,7 @@ export function GraphQLSettings(): React.ReactElement {
   const handleSave = async () => {
     setIsSaving(true)
     setSaveError(null)
-    setSavedOk(false)
+    setSavedAt(null)
     try {
       const res = await fetch(`${client.url}/admin/v1/config/graphql`, {
         method: "PATCH",
@@ -98,8 +98,7 @@ export function GraphQLSettings(): React.ReactElement {
         throw new Error(bodyMessage(body) ?? `${res.status} ${res.statusText}`)
       }
       setCommitted({ introspection, maxQueryDepth, defaultMaxRows })
-      setSavedOk(true)
-      setTimeout(() => setSavedOk(false), 2000)
+      setSavedAt(Date.now())
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Save failed")
     } finally {
@@ -136,8 +135,9 @@ export function GraphQLSettings(): React.ReactElement {
               <span className="text-xs text-destructive-text">{saveError}</span>
             ) : null}
             <Button size="xs" variant="primary" onClick={() => void handleSave()} disabled={!isDirty || isSaving}>
-              {isSaving ? "Saving…" : savedOk ? "Saved!" : "Save"}
+              {isSaving ? "Saving…" : "Save"}
             </Button>
+            <SavedNotice at={savedAt} />
           </div>
         </div>
         <div className="divide-y divide-border">
