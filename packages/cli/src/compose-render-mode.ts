@@ -19,7 +19,7 @@
  * `supatype dev` itself is the one caller that does not ask: it is what makes a stack dev.
  */
 
-import { askDockerSync, DOCKER_QUERY_TIMEOUT_MS } from "./docker-exec.js"
+import { askDockerState, askDockerSync, DOCKER_QUERY_TIMEOUT_MS } from "./docker-exec.js"
 import { isDockerSession, liveDevSessionLock } from "./dev-session-lock.js"
 import { composeProjectName } from "./self-host-compose.js"
 import { otherFoldersStack } from "./stack-folder.js"
@@ -40,20 +40,18 @@ export interface ComposeRenderModeProbe {
 /** `SUPATYPE_MODE` from a running server container's environment, as the render wrote it. */
 function runningServerModeFromDocker(composeProject: string): ComposeRenderMode | undefined {
   // Synchronous: the render mode is read while compose is rendered, which is synchronous.
-  const listed = askDockerSync(
-    [
-      "ps", "-q",
-      "--filter", `label=com.docker.compose.project=${composeProject}`,
-      "--filter", "label=com.docker.compose.service=server",
-    ],
-    { timeoutMs: DOCKER_QUERY_TIMEOUT_MS },
-  )
-  const id = listed.status === 0 ? listed.stdout.trim().split(/\s+/)[0] : undefined
+  const listed = askDockerState([
+    "ps", "-q",
+    "--filter", `label=com.docker.compose.project=${composeProject}`,
+    "--filter", "label=com.docker.compose.service=server",
+  ])
+  const id = listed.stdout.trim().split(/\s+/)[0]
   if (!id) return undefined
-  const inspected = askDockerSync(["inspect", "-f", "{{range .Config.Env}}{{println .}}{{end}}", id], {
-    timeoutMs: DOCKER_QUERY_TIMEOUT_MS,
-  })
-  if (inspected.status !== 0) return undefined
+  const inspectArgs = ["inspect", "-f", "{{range .Config.Env}}{{println .}}{{end}}", id]
+  const first = askDockerSync(inspectArgs, { timeoutMs: DOCKER_QUERY_TIMEOUT_MS })
+  // A container gone since it was listed is not running; any other failure is Docker not answering.
+  if (first.status !== 0 && /no such/i.test(first.stderr)) return undefined
+  const inspected = first.status === 0 ? first : askDockerState(inspectArgs)
   const mode = inspected.stdout.split(/\r?\n/).find((line) => line.startsWith("SUPATYPE_MODE="))
   return mode === "SUPATYPE_MODE=dev" ? "dev" : "standalone"
 }
