@@ -34,7 +34,7 @@ describe("the functions worker", () => {
     // lock back. The three deletes are the service-role key's, the forwarding secret's and the
     // allowlist scrub's (env-allowlist.ts), each once at start before any handler is imported; a
     // --watch reload reads the key from its file again.
-    expect(WORKER.match(/Deno.env.delete(/g)).toHaveLength(3)
+    expect(WORKER.match(/Deno\.env\.delete\(/g)).toHaveLength(3)
     expect(MAIN).toContain('Deno.env.delete("SUPATYPE_SERVICE_ROLE_KEY")')
     expect(MAIN).toContain('Deno.env.delete("SUPATYPE_FORWARDING_SECRET")')
     expect(FUNCTIONS_WORKER_SOURCE["env-allowlist.ts"]).toContain("Deno.env.delete(name)")
