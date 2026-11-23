@@ -58,6 +58,7 @@ import { Settings } from "./views/Settings.js"
 import { ComingSoon } from "./views/ComingSoon.js"
 import { RealtimeInspector } from "./views/RealtimeInspector.js"
 import { EdgeFunctions } from "./views/EdgeFunctions.js"
+import { Hooks } from "./views/Hooks.js"
 import { PluginsMarketplace } from "./views/PluginsMarketplace.js"
 
 // Database sub-pages
@@ -522,6 +523,7 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="edge-functions" element={gated(FUNCTIONS, <EdgeFunctions />)} />
               <Route path="edge-functions/:functionSlug" element={gated(FUNCTIONS, <EdgeFunctions />)} />
               <Route path="edge-functions/:functionSlug/:tab" element={gated(FUNCTIONS, <EdgeFunctions />)} />
+              <Route path="hooks" element={gated(FUNCTIONS, <Hooks />)} />
               {/* The Inspector where this deployment's control plane serves it, "coming soon" where it
                   does not (Phase-08 Appendix A). Settings and metrics are a later release. */}
               <Route path="realtime"          element={gated(REALTIME, <RealtimeInspector demoMode={demoMode ?? false} />)} />
