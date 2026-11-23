@@ -43,6 +43,11 @@ vi.mock("../src/schema-sources.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/schema-sources.js")>()),
   buildSchemaSourcesPayload: () => null,
 }))
+// A linked push now writes the project's types; this file is about the platform settings, so the engine is not run.
+vi.mock("../src/type-generation.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/type-generation.js")>()),
+  writeGeneratedTypes: async () => [],
+}))
 vi.mock("../src/rest-ready.js", () => ({ waitForRestReady: async () => true }))
 vi.mock("../src/target-client.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/target-client.js")>()),

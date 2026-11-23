@@ -77,7 +77,7 @@ describe("releaseProblems", () => {
 
 describe("what the check reads from the tree", () => {
   it("finds the packages init scaffolds, and ignores ones only named in comments", () => {
-    expect(scaffoldedPackages(repo("packages", "cli", "src", "init-package-json.ts"))).toEqual(["cli", "client", "types"])
+    expect(scaffoldedPackages(repo("packages", "cli", "src", "init-package-json.ts"))).toEqual(["cli", "client", "react", "types"])
   })
 
   it("finds the packages the npm job publishes, ending with cli", () => {
