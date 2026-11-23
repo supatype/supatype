@@ -159,3 +159,38 @@ describe("parseRowsExactly with array columns", () => {
     expect(out.ok && out.value).toEqual([{ views: 9007199254740993n, ids: [1, 2] }])
   })
 })
+
+describe("parseRowsExactly with arrays", () => {
+  it("refuses an unregistered column whose array holds a lossy number, naming the column", () => {
+    registerFieldKinds({ version: 1, tables: { job_post: { views: "bigint" } } })
+    const out = parseRowsExactly('[{"tags":[9007199254740993]}]', "job_post")
+
+    expect(out.ok).toBe(false)
+    expect(!out.ok && out.columns).toEqual(["tags"])
+    expect(!out.ok && out.message).toContain("tags")
+  })
+
+  it("passes an unregistered array that is safe", () => {
+    registerFieldKinds({ version: 1, tables: { job_post: { views: "bigint" } } })
+    const out = parseRowsExactly('[{"tags":[1,2,3]}]', "job_post")
+
+    expect(out.ok).toBe(true)
+    expect(out.ok && out.value).toEqual([{ tags: [1, 2, 3] }])
+  })
+
+  it("still protects a registered bigint[] column rather than refusing it", () => {
+    registerFieldKinds({ version: 1, tables: { job_post: { ids: "bigint[]" } } })
+    const out = parseRowsExactly('[{"ids":[9007199254740993,2]}]', "job_post")
+
+    expect(out.ok).toBe(true)
+    expect(out.ok && out.value).toEqual([{ ids: [9007199254740993n, 2n] }])
+  })
+
+  it("still protects a registered numeric[] column rather than refusing it", () => {
+    registerFieldKinds({ version: 1, tables: { job_post: { rates: "numeric[]" } } })
+    const out = parseRowsExactly('[{"rates":[12345678901234567890.1234]}]', "job_post")
+
+    expect(out.ok).toBe(true)
+    expect(out.ok && out.value).toEqual([{ rates: ["12345678901234567890.1234"] }])
+  })
+})

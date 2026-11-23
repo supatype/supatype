@@ -177,17 +177,18 @@ export function quoteExactNumbers(body: string, fields: ExactFields): string {
 /**
  * The columns whose literals will not survive `JSON.parse`.
  *
- * The safety net for when column metadata could not be loaded. Without it a failed metadata fetch
- * would quietly restore the corruption this module exists to remove. Reports at any depth, since
- * over-reporting here costs a clear error and under-reporting costs a wrong number.
+ * The safety net for when column metadata could not be loaded, or does not describe a column.
+ * Without it a failed metadata fetch would quietly restore the corruption this module exists to
+ * remove. Reports at any depth, since over-reporting here costs a clear error and under-reporting
+ * costs a wrong number. A literal inside an array counts, at any nesting depth, and is reported
+ * under the column holding the array. Columns registered as exact kinds are quoted before this
+ * runs, so they are protected rather than reported.
  */
 export function findLossyNumbers(body: string): string[] {
   const names: string[] = []
   const seen = new Set<string>()
   forEachKeyedNumber(body, (found) => {
-    // Elements are left to the registered kinds: a JSON column holding an array of large numbers
-    // was never refused here, and starting to would break projects that read one today.
-    if (found.element || seen.has(found.key)) return
+    if (seen.has(found.key)) return
     if (!isLossy(body.slice(found.start, found.end))) return
     seen.add(found.key)
     names.push(found.key)

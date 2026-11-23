@@ -61,7 +61,7 @@ Tables are named as in the database: `post`, `comment`, `post_tag`. Calling `cre
 
 Exact numbers keep every digit when you import from the generated `client.ts`. A `BigInt` column reads as a `bigint`. `Decimal` and `Money` columns read as strings.
 
-A number too large for JavaScript, in a column the client does not know, returns an error that names the column. This usually happens in an embed: select the column directly instead.
+A number too large for JavaScript, in a column the client does not know, returns an error that names the column. This usually happens in an embed: select the column directly instead. This covers a number inside an array too, at any depth, such as a json column holding `[9007199254740993]`. `BigInt[]` and `Decimal[]` columns the generated types describe keep every element exact instead.
 
 <h2 id="read">Read rows</h2>
 

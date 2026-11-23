@@ -195,3 +195,23 @@ describe("array columns", () => {
     ])
   })
 })
+
+describe("findLossyNumbers inside arrays", () => {
+  it("names a column whose array holds a literal that will not survive the parse", () => {
+    expect(findLossyNumbers('[{"ids":[9007199254740993]}]')).toEqual(["ids"])
+  })
+
+  it("names the column for an element at any depth, once", () => {
+    const body = '[{"grid":[[1,[9007199254740993]],[9007199254740995]]}]'
+    expect(findLossyNumbers(body)).toEqual(["grid"])
+  })
+
+  it("passes an array whose elements all round-trip", () => {
+    expect(findLossyNumbers('[{"ids":[1,2,9007199254740992,1.5,null,"x"]}]')).toEqual([])
+  })
+
+  it("applies the same rules to elements: trailing zeros pass, lost digits do not", () => {
+    expect(findLossyNumbers('[{"rates":[19.0000,1e2]}]')).toEqual([])
+    expect(findLossyNumbers('[{"rates":[12345678901234567890.1234]}]')).toEqual(["rates"])
+  })
+})
