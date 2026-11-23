@@ -201,9 +201,9 @@ export function dockerHasImage(image: string): boolean {
 /**
  * How long a question about the stack's state is waited on: one limit per attempt, so a Docker
  * that is only slow (a daemon still starting, a loaded machine) gets time, and one that is hung
- * costs at most their sum.
+ * costs at most their sum, a minute, before it is reported.
  */
-export const DOCKER_STATE_ATTEMPT_TIMEOUTS_MS: readonly number[] = [15_000, 30_000, 60_000]
+export const DOCKER_STATE_ATTEMPT_TIMEOUTS_MS: readonly number[] = [10_000, 20_000, 30_000]
 
 /** The pause between attempts. */
 const DOCKER_STATE_PAUSE_MS = 1_000

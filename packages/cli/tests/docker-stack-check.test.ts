@@ -13,12 +13,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 type Reply = "timeout" | "fail" | "none" | "running"
 
 /** What the fake docker answers to the server-container lookup, one reply per call, the last one repeated. */
-const docker = vi.hoisted(() => ({ replies: [] as string[], serverCalls: 0, calls: [] as string[][] }))
+const docker = vi.hoisted(() => ({ replies: [] as string[], serverCalls: 0, calls: [] as string[][], timeouts: [] as number[] }))
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>()
   const timedOut = { status: null, stdout: "", stderr: "", error: Object.assign(new Error("spawnSync docker ETIMEDOUT"), { code: "ETIMEDOUT" }) }
-  const fake = (command: string, args: readonly string[] = []) => {
+  const fake = (command: string, args: readonly string[] = [], options: { timeout?: number } = {}) => {
     if (command !== "docker") return { status: 0, stdout: "", stderr: "" }
     docker.calls.push([...args])
     const isServerLookup = args[0] === "ps" && args.includes("label=com.docker.compose.service=server")
@@ -26,6 +26,7 @@ vi.mock("node:child_process", async (importOriginal) => {
     if (args[0] === "ps" && !isServerLookup) return { status: 0, stdout: "", stderr: "" }
     if (args[0] === "inspect") return { status: 0, stdout: "SUPATYPE_MODE=dev\n", stderr: "" }
     if (isServerLookup || isServiceLookup) {
+      if (options.timeout !== undefined) docker.timeouts.push(options.timeout)
       const reply = docker.replies[Math.min(docker.serverCalls++, docker.replies.length - 1)]
       if (reply === "timeout") return timedOut
       if (reply === "fail") return { status: 1, stdout: "", stderr: "Cannot connect to the Docker daemon" }
@@ -50,6 +51,7 @@ function script(...replies: Reply[]): void {
   docker.replies = replies
   docker.serverCalls = 0
   docker.calls = []
+  docker.timeouts = []
 }
 
 beforeEach(() => {
@@ -94,6 +96,17 @@ describe("runningStackMode with a slow Docker", () => {
     expect(err).not.toBeInstanceOf(NoStackRunning)
     expect((err as Error).message).toMatch(/Docker did not respond/)
     expect((err as Error).message).not.toMatch(/isn't running/)
+  })
+
+  it("gives up after about a minute in all: limits of 10, 20 and 30 seconds", () => {
+    script("timeout")
+    expect(() => runningStackMode(project, "shop")).toThrow(DockerNotResponding)
+    // The mode lookup may ask more than once; each ask is one 10, 20, 30 second round.
+    expect(docker.timeouts.length).toBeGreaterThan(0)
+    expect(docker.timeouts.length % 3).toBe(0)
+    for (let i = 0; i < docker.timeouts.length; i += 3) {
+      expect(docker.timeouts.slice(i, i + 3)).toEqual([10_000, 20_000, 30_000])
+    }
   })
 
   it("still says no stack when Docker answers that nothing runs", () => {
