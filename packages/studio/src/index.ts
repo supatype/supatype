@@ -4,6 +4,7 @@
 
 // Core component
 export { StudioCore } from "./StudioCore.js"
+export type { SizeFigure, SizeReadout, SizeSource } from "./lib/size-source.js"
 
 // Types
 export type {

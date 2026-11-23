@@ -83,6 +83,12 @@ export interface StudioCoreProps {
    * no Static site group: a group claims a site this host has told Studio nothing about.
    */
   staticSite?: StaticSiteHost
+  /**
+   * Where the Dashboard's Database Size and Storage cards read their figures (see SizeSource).
+   * Without one Studio reads the project's own `db_stats` and `storage_stats` functions, which
+   * self-host has. Cloud does not expose that schema and passes a source over its metered usage.
+   */
+  sizeSource?: SizeSource
 }
 
 // Re-export config types for convenience
@@ -94,4 +100,6 @@ import type { AdminConfig } from "./config.js"
 import type { ProjectConnection } from "./hooks/useConnection.js"
 import type { StaticSiteHost } from "./lib/static-site-host.js"
 export type { ProjectConnection }
+import type { SizeSource } from "./lib/size-source.js"
+export type { SizeFigure, SizeReadout, SizeSource } from "./lib/size-source.js"
 export type { SupatypeClient }

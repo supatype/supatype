@@ -16,6 +16,7 @@ import { useShowsProjectRows } from "../components/ElevatedModeBanner.js"
 import { Button, ButtonLink, ConfirmButton, IconButton, Input, Select, Skeleton, TextLink } from "../components/ui.js"
 import { authUserListPath, userListTotal } from "../lib/auth-user-search.js"
 import { firstModelWithCreatedAt, hasCreatedAt } from "../lib/model-created-at.js"
+import { useSizeReadout, type SizeFigure } from "../lib/size-source.js"
 import { RoleGate } from "../components/RoleGate.js"
 import { useContentWriteOffered } from "../hooks/useContentWriteOffered.js"
 
@@ -23,12 +24,6 @@ import { useContentWriteOffered } from "../hooks/useContentWriteOffered.js"
 
 /** The auth admin user list; only its length is read, the count comes from X-Total-Count. */
 const isUserListBody = isShape({ users: isArrayOf(isUnknown) })
-
-/** `storage_stats()`: `RETURNS TABLE(file_count BIGINT, total_bytes BIGINT)`, both never null. */
-const isStorageStats = isArrayOf(isShape({ file_count: isNumber, total_bytes: isNumber }))
-
-/** `db_stats()`: `RETURNS TABLE(db_size_bytes BIGINT, db_size_pretty TEXT)`. */
-const isDbStats = isArrayOf(isShape({ db_size_bytes: isNumber, db_size_pretty: isString }))
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
@@ -265,17 +260,33 @@ function BlockContent({ block }: { block: DashboardBlock }): React.ReactElement 
 
 // ─── Stats block ──────────────────────────────────────────────────────────────
 
-/** How many rows a PostgREST HEAD request counts, from its Content-Range; no rows are sent. */
-async function headCount(url: string, headers: Record<string, string>): Promise<number> {
-  const res = await fetch(url, { method: "HEAD", headers })
-  return parseInt(res.headers.get("content-range")?.split("/")[1] ?? "0", 10)
+/** PostgREST's total from a Content-Range such as `0-4/12`; null when absent or not a number. */
+function rangeTotal(res: Response): number | null {
+  const match = /\/(\d+)$/.exec(res.headers.get("content-range") ?? "")
+  return match?.[1] !== undefined ? Number(match[1]) : null
 }
 
-function StatsBlock({ block }: { block: DashboardBlock }): React.ReactElement {
+/**
+ * How many rows a PostgREST request counts, from its Content-Range. A HEAD is tried first; a proxy
+ * that drops the header from it is asked again with a one-row GET. Null when neither says, so the
+ * card never shows a count nobody gave (it showed 0 beside seven rows).
+ */
+async function rowCount(url: string, headers: Record<string, string>): Promise<number | null> {
+  const head = await fetch(url, { method: "HEAD", headers })
+  if (!head.ok) return null
+  const fromHead = rangeTotal(head)
+  if (fromHead !== null) return fromHead
+  const get = await fetch(url, { headers: { ...headers, Range: "0-0", "Range-Unit": "items" } })
+  return get.ok ? rangeTotal(get) : null
+}
+
+export function StatsBlock({ block }: { block: DashboardBlock }): React.ReactElement {
   const client = useAdminClient()
   const config = useAdminConfig()
   const [count, setCount] = useState<number | null>(null)
   const [trend, setTrend] = useState<number | null>(null)
+  // Once the reads have answered, a count still null is unknown, shown as a dash and never as 0.
+  const [settled, setSettled] = useState(false)
   // The week's count reads created_at, which only some models have.
   const dated = hasCreatedAt(config.models, block.model)
 
@@ -287,13 +298,15 @@ function StatsBlock({ block }: { block: DashboardBlock }): React.ReactElement {
         const headers = studioRestHeaders(client, { Prefer: "count=exact" })
         const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString()
         const [total, week] = await Promise.all([
-          headCount(url, headers),
-          dated ? headCount(`${url}&created_at=gte.${weekAgo}`, headers) : Promise.resolve(null),
+          rowCount(url, headers),
+          dated ? rowCount(`${url}&created_at=gte.${weekAgo}`, headers) : Promise.resolve(null),
         ])
         setCount(total)
         setTrend(week)
       } catch {
-        setCount(0)
+        setCount(null)
+      } finally {
+        setSettled(true)
       }
     })()
   }, [client, block.model, dated])
@@ -301,7 +314,7 @@ function StatsBlock({ block }: { block: DashboardBlock }): React.ReactElement {
   return (
     <div className="p-5">
       <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">{block.title}</h3>
-      <div className="text-3xl font-bold text-foreground">{count ?? "…"}</div>
+      <div className="text-3xl font-bold text-foreground">{count ?? (settled ? "-" : "…")}</div>
       {trend !== null && trend > 0 && (
         <p className="text-xs text-emerald-500 mt-1">+{trend} this week</p>
       )}
@@ -395,16 +408,18 @@ export function AuthBlock(): React.ReactElement {
   const client = useAdminClient()
   const [total, setTotal] = useState<number | null>(null)
   const [newThisWeek, setNewThisWeek] = useState<number | null>(null)
+  // A total the server did not give reads as a dash, never as 0.
+  const [settled, setSettled] = useState(false)
 
   useEffect(() => {
-    void fetchUserTotal(client).then((n) => setTotal(n ?? 0), () => setTotal(0))
+    void fetchUserTotal(client).then((n) => { setTotal(n); setSettled(true) }, () => setSettled(true))
     void fetchSignupsThisWeek(client).then(setNewThisWeek, () => setNewThisWeek(null))
   }, [client])
 
   return (
     <div className="p-5">
       <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Total Users</h3>
-      <div className="text-3xl font-bold text-foreground">{total ?? "…"}</div>
+      <div className="text-3xl font-bold text-foreground">{total ?? (settled ? "-" : "…")}</div>
       {newThisWeek !== null && newThisWeek > 0 && (
         <p className="text-xs text-emerald-500 mt-1">+{newThisWeek} this week</p>
       )}
@@ -414,40 +429,22 @@ export function AuthBlock(): React.ReactElement {
 
 // ─── Storage block ────────────────────────────────────────────────────────────
 
-function StorageBlock(): React.ReactElement {
-  const client = useAdminClient()
-  const [sizeBytes, setSizeBytes] = useState<number | null>(null)
-  const [fileCount, setFileCount] = useState<number | null>(null)
+/** "12.0 MB of 500.0 MB" when the plan has a limit, the size alone otherwise, a dash when unknown. */
+function sizeText(figure: SizeFigure | null, settled: boolean): string {
+  if (figure === null) return settled ? "-" : "…"
+  const used = formatBytes(figure.usedBytes)
+  return figure.limitBytes === null ? used : `${used} of ${formatBytes(figure.limitBytes)}`
+}
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        const res = await fetch(`${client.url}/rest/v1/rpc/storage_stats`, {
-          method: "POST",
-          headers: studioRestHeaders(client, {
-            "Content-Profile": "supatype",
-            "Accept-Profile": "supatype",
-            "Content-Type": "application/json",
-          }),
-          body: "{}",
-        })
-        if (res.ok) {
-          const rows = await readJson(res, isStorageStats)
-          if (rows[0]) { setFileCount(rows[0].file_count); setSizeBytes(rows[0].total_bytes) }
-        }
-      } catch {
-        setSizeBytes(0)
-        setFileCount(0)
-      }
-    })()
-  }, [client])
+export function StorageBlock(): React.ReactElement {
+  const client = useAdminClient()
+  const { readout, settled } = useSizeReadout(client)
+  const fileCount = readout?.fileCount ?? null
 
   return (
     <div className="p-5">
       <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Storage Used</h3>
-      <div className="text-3xl font-bold text-foreground">
-        {sizeBytes === null ? "…" : formatBytes(sizeBytes)}
-      </div>
+      <div className="text-3xl font-bold text-foreground">{sizeText(readout?.storage ?? null, settled)}</div>
       {fileCount !== null && (
         <p className="text-xs text-muted-foreground mt-1">{fileCount.toLocaleString()} files</p>
       )}
@@ -536,38 +533,14 @@ function SignupsChartBlock(): React.ReactElement {
 
 // ─── DB size block ────────────────────────────────────────────────────────────
 
-function DbSizeBlock(): React.ReactElement {
+export function DbSizeBlock(): React.ReactElement {
   const client = useAdminClient()
-  const [sizeBytes, setSizeBytes] = useState<number | null>(null)
-  const [sizePretty, setSizePretty] = useState<string | null>(null)
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const res = await fetch(
-          `${client.url}/rest/v1/rpc/db_stats`,
-          {
-            method: "POST",
-            headers: studioRestHeaders(client, {
-              "Content-Profile": "supatype",
-              "Accept-Profile": "supatype",
-              "Content-Type": "application/json",
-            }),
-            body: "{}",
-          },
-        )
-        if (res.ok) {
-          const rows = await readJson(res, isDbStats)
-          if (rows[0]) { setSizeBytes(rows[0].db_size_bytes); setSizePretty(rows[0].db_size_pretty) }
-        }
-      } catch { /* leave empty */ }
-    })()
-  }, [client])
+  const { readout, settled } = useSizeReadout(client)
 
   return (
     <div className="p-5">
       <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Database Size</h3>
-      <div className="text-3xl font-bold text-foreground">{sizePretty ?? (sizeBytes !== null ? formatBytes(sizeBytes) : "…")}</div>
+      <div className="text-3xl font-bold text-foreground">{sizeText(readout?.db ?? null, settled)}</div>
       <p className="text-xs text-muted-foreground mt-1">Total on-disk size including indexes</p>
     </div>
   )
