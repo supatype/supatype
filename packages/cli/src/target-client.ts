@@ -203,7 +203,7 @@ function refusal(result: FetchAnswer, url: string, opts: TargetFetchOptions): Ta
  * Where under the target's base URL a request goes: the control plane's API, or `/auth/v1`, the auth
  * server behind the same gateway, for its admin API (`supatype sso`).
  */
-export type TargetApiPrefix = "/api/v1" | "/platform/v1" | "/auth/v1"
+export type TargetApiPrefix = "/api/v1" | "/platform/v1" | "/auth/v1" | "/admin/v1"
 
 /**
  * A request to the control plane or a project's API. The answer is the body's `data` when it has

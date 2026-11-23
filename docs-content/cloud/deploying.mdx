@@ -177,3 +177,9 @@ List environment variables (the values are masked):
 ```bash
 npx supatype functions env list
 ```
+
+To set a value for one function only, add `--function <name>`. A function's own value overrides a shared one with the same name:
+
+```bash
+npx supatype functions env set MY_API_KEY=sk-123456 --function send-email
+```

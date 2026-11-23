@@ -2,8 +2,18 @@
 
 ## Unreleased
 
+### Features
+
+* **functions:** `functions env list`, `set` and `unset` take `--function <name>` to work on one
+  function's own values, which override a shared one. A linked self-hosted server serves them at
+  `/admin/v1/functions/<name>/env`, Supatype Cloud at `/projects/<ref>/functions/<name>/env`, and a
+  project that is not linked keeps them in `functions/.env.<name>.local`.
+
 ### Bug Fixes
 
+* **functions:** `functions env unset` on a project that is not linked removes every line of
+  `.env.local` whose name is the key, even one that breaks the secret name rule (`OLD-NAME=x`), and
+  says how many it removed. It used to say the key was not set and leave the line.
 * **dev:** on Linux the app URL (`http://localhost:18473/`) answered 502 for a Vite app. `supatype
   dev` started Vite on `127.0.0.1`, and Docker Engine on Linux reaches the host through the docker0
   bridge, not the loopback, so the gateway found nothing listening. On Linux Vite now listens on
