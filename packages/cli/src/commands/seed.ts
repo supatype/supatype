@@ -32,6 +32,7 @@ import {
   locateBuilder,
   runOnceForAll,
   seedDocuments,
+  type SeedFiles,
   type Prepared,
 } from "../seed-prepare.js"
 import { isSeedResult, isSeedStatus, report, reportSeedStatus } from "../seed-report.js"
