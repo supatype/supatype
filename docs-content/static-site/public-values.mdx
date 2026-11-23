@@ -1,0 +1,56 @@
+---
+title: Public values
+description: Set non-secret settings a static site reads, such as a maps key or a banner, in supatype.config.ts. They reach the build and the browser, per environment.
+---
+
+A public value is a setting your static site reads that is not a secret: a maps key meant for browsers, an analytics ID, a banner text. Every visitor can read it. Supatype serves the values with your API address and anon key, and gives them to your build.
+
+Pre-1.0: APIs and config may change between releases.
+
+## Set values
+
+On a self-hosted stack, and in `supatype dev`, the values come from `build.publicEnv` in `supatype.config.ts`. A plain string is one value for every environment. A map sets a value per environment:
+
+```ts title="supatype.config.ts"
+import { defineConfig } from "@supatype/cli"
+
+export default defineConfig({
+  build: {
+    publicEnv: {
+      BANNER: "Welcome",
+      MAPS_KEY: { local: "dev-maps-key", production: "prod-maps-key" },
+    },
+  },
+})
+```
+
+Run `supatype push`. It sends the values for the environment you push to (`production` for a self-hosted link) and says `Sent 2 public value(s) for production`. `supatype dev` serves the `local` values. A name whose map does not name the environment is left out of it. Removing a name from the config and pushing again removes it from the site.
+
+On Supatype Cloud the same values can also be set in Studio under Static site, or with `supatype site env set NAME value`. A value in the config is shown as read-only there. Self-host Studio has no editor for them: change the config and push.
+
+## What a name and value may be
+
+| Rule | Limit |
+| --- | --- |
+| Name | Upper case letters, digits and underscores, starting with a letter, at most 64 bytes |
+| Reserved prefixes | Not `VITE_`, `PUBLIC_`, `NEXT_PUBLIC_`, `EXPO_PUBLIC_` or `SUPATYPE_`. The build adds each framework's prefix itself |
+| Value | At most 2048 bytes. A private key, an `sk_` or `rk_` key, or a service role key is refused |
+| The set | At most 50 values and 16384 bytes in all |
+
+A refused value stops `supatype push` before it reaches a deployment, and the message names the config key and never repeats the value. Setting `build.publicEnv` with `server.public_env: false` is refused, since nothing would serve the values.
+
+## Read them
+
+In the browser, the script tag from [Deploy your frontend](/docs/deploying-your-frontend.html#supatype-hosts) carries them in an `env` member:
+
+```js
+window.__SUPATYPE_ENV__ = {"url":"https://example.com","anonKey":"eyJhbGciOi...","env":{"BANNER":"Welcome"}};
+```
+
+`GET /supatype-env.json` answers the same object. `env` is left out when no value is set. The server reads the values on every request, so a push reaches the next page load.
+
+In a build, `supatype build` passes each value under every framework's prefix, so `BANNER` is `VITE_BANNER`, `PUBLIC_BANNER`, `NEXT_PUBLIC_BANNER` and `EXPO_PUBLIC_BANNER`. A value your host's own settings already define wins.
+
+## Static site in Studio
+
+The Static site group in Studio shows what the server reports about your site. A server that cannot describe its site has no group. If the group is missing on a self-hosted stack, the values still work: check them with `curl <your address>/supatype-env.json`.
