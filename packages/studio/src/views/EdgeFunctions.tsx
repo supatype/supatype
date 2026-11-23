@@ -1,15 +1,14 @@
 import React, { useState, useEffect, useCallback } from "react"
 import { useStudioClient } from "../StudioCore.js"
-import { useNavigate, useParams } from "react-router-dom"
+import { useLocation, useNavigate, useParams } from "react-router-dom"
 import { useApiQuery } from "../hooks/useApiQuery.js"
-import { Badge, Button, Card, Checkbox, ConfirmButton, Input, Select, Table, Tabs, Textarea, Th, Td, type DestructiveQuestion, type TabItem } from "../components/ui.js"
+import { Badge, Button, Card, Checkbox, Input, Select, Table, Tabs, Textarea, Th, Td, type TabItem } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { useFunctionLogTail } from "../hooks/useFunctionLogTail.js"
 import { useInterval } from "../hooks/useTabActivity.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import {
   type Guard,
-  isArrayOf,
   isNumber,
   isOneOf,
   isShape,
@@ -18,9 +17,10 @@ import {
   optional,
   readJson,
 } from "../lib/json.js"
-import { functionsAdminError, functionsAdminFetch } from "../lib/functions-admin.js"
+import { functionsAdminError, functionsAdminFetch, isDataList } from "../lib/functions-admin.js"
 import { useSendAs } from "../hooks/useSendAs.js"
 import { SendAsField } from "../components/SendAsField.js"
+import { FunctionSecrets } from "./FunctionSecrets.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -47,11 +47,6 @@ const isFunctionMeta: Guard<FunctionMeta> = isShape({
 
 const isLogEntry: Guard<LogEntry> = isShape({ timestamp: isString, level: isString, message: isString })
 
-/** The functions admin API's list bodies: `{ data: [...] }`, where an empty list may be null. */
-function isDataList<T>(item: Guard<T>): Guard<{ data?: T[] | null }> {
-  return isShape({ data: optional(nullable(isArrayOf(item))) })
-}
-
 const isHttpMethod = isOneOf(["GET", "POST"] as const)
 const BUILTIN_RUNTIME_ENV_VARS: Array<{ key: string; description: string }> = [
   { key: "SUPATYPE_URL", description: "API gateway URL for this project." },
@@ -67,10 +62,10 @@ const BUILTIN_RUNTIME_ENV_VARS: Array<{ key: string; description: string }> = [
 ]
 
 /** The secret scopes a function's Secrets tab switches between. */
-function scopeTabs(functionName: string): Array<TabItem<"function" | "shared" | "defaults">> {
+function scopeTabs(functionName: string): Array<TabItem<SecretsScope>> {
   return [
-    { id: "function", label: `Function (${functionName})` },
     { id: "shared", label: "Shared (all functions)" },
+    { id: "function", label: `Function (${functionName})` },
     { id: "defaults", label: "Defaults (read-only)" },
   ]
 }
@@ -351,118 +346,28 @@ function LogsTab({
   )
 }
 
-// ─── Env Vars tab ─────────────────────────────────────────────────────────────
+// ─── Secrets tab ──────────────────────────────────────────────────────────────
 
-/** Studio never shows a variable's value, so a deleted one cannot be recovered from here. */
-function deleteVariableQuestion(key: string): DestructiveQuestion {
-  return {
-    title: `Delete ${key}?`,
-    detail: <p>The variable and its value are deleted, and cannot be recovered from here.</p>,
-    answer: "Delete variable",
-  }
-}
+type SecretsScope = "function" | "shared" | "defaults"
 
-function EnvVarsTab({
-  functionName,
-  adminFetch,
-}: {
-  functionName: string
-  adminFetch: (path: string, init?: RequestInit) => Promise<Response>
-}): React.ReactElement {
-  const [scope, setScope] = useState<"function" | "shared" | "defaults">("function")
-  const [newKey, setNewKey]     = useState("")
-  const [newValue, setNewValue] = useState("")
-  const [saving, setSaving]     = useState(false)
-  const [error, setError]       = useState<string | null>(null)
-  const envBasePath = scope === "shared"
-    ? "/env"
-    : `/${encodeURIComponent(functionName)}/env`
-  const showDefaults = scope === "defaults"
-
-  const { data, loading, error: listError, refetch } = useApiQuery<string[]>(
-    async () => {
-      const res = await adminFetch(envBasePath)
-      if (!res.ok) throw await functionsAdminError(res, "Could not list variables")
-      const json = await readJson(res, isDataList(isString))
-      return json.data ?? []
-    },
-    [envBasePath],
-  )
-
-  const keys = data ?? []
-  const shownError = error ?? listError
-
-  const handleAdd = async () => {
-    if (!newKey.trim()) return
-    setSaving(true)
-    setError(null)
-    try {
-      const res = await adminFetch(envBasePath, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: newKey.trim(), value: newValue }),
-      })
-      if (!res.ok) throw await functionsAdminError(res, "Could not set the variable")
-      setNewKey("")
-      setNewValue("")
-      refetch()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred")
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleDelete = async (key: string) => {
-    try {
-      const res = await adminFetch(`${envBasePath}/${encodeURIComponent(key)}`, { method: "DELETE" })
-      if (!res.ok) throw await functionsAdminError(res, "Could not delete the variable")
-      refetch()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred")
-    }
-  }
+/**
+ * The secrets the functions receive: the shared store every function and data hook reads, one
+ * function's own (on self-host and on Cloud), and the read-only defaults the runtime
+ * sets. Both stores are the one `FunctionSecrets` component.
+ */
+function EnvVarsTab({ functionName }: { functionName: string }): React.ReactElement {
+  const [scope, setScope] = useState<SecretsScope>("shared")
+  const items = scopeTabs(functionName)
 
   return (
     <div>
-      {shownError && <ErrorBanner message={shownError} />}
-
-      <div className="mb-5">
-        <div className="mb-2">
-          <Tabs tabs={{ label: "Secret scope", items: scopeTabs(functionName), look: "pill", size: "xs" }} value={scope} onChange={setScope} />
-        </div>
-
-        {!showDefaults && (
-          <>
-            <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
-              Add {scope === "shared" ? "Shared" : "Function"} Variable
-            </h4>
-            <div className="flex gap-2 flex-wrap">
-              <Input
-                placeholder="KEY"
-                value={newKey}
-                onChange={(e) => setNewKey(e.target.value)}
-                className="font-mono text-xs w-40"
-              />
-              <Input
-                type="password"
-                placeholder="value"
-                value={newValue}
-                onChange={(e) => setNewValue(e.target.value)}
-                className="font-mono text-xs flex-1 min-w-[120px]"
-              />
-              <Button size="sm" onClick={() => void handleAdd()} disabled={saving || !newKey.trim()}>
-                {saving ? "Saving…" : "Add"}
-              </Button>
-            </div>
-            <p className="text-[11px] text-muted-foreground mt-1.5">
-              Values are write-only; function vars override shared vars with the same key.
-            </p>
-          </>
-        )}
+      <div className="mb-3">
+        <Tabs tabs={{ label: "Secret scope", items, look: "pill", size: "xs" }} value={scope} onChange={setScope} />
       </div>
 
-      {showDefaults ? (
+      {scope === "shared" && <FunctionSecrets />}
+      {scope === "function" && <FunctionSecrets key={functionName} scope={{ kind: "function", name: functionName }} />}
+      {scope === "defaults" && (
         <Card className="overflow-auto">
           <Table>
             <thead>
@@ -481,52 +386,6 @@ function EnvVarsTab({
             </tbody>
           </Table>
         </Card>
-      ) : (
-        <>
-          {/* Key list */}
-          {loading && (
-            <div className="text-center py-6 text-xs text-muted-foreground">Loading…</div>
-          )}
-
-          {!loading && !listError && keys.length === 0 && (
-            <EmptyState
-              title={`No ${scope === "shared" ? "shared" : "function"} environment variables`}
-              description="Add variables above to inject them into your edge functions at runtime."
-            />
-          )}
-
-          {!loading && keys.length > 0 && (
-            <Card className="overflow-auto">
-              <Table>
-                <thead>
-                  <tr className="border-b border-border">
-                    <Th>Key</Th>
-                    <Th>Value</Th>
-                    <Th></Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {keys.map((key) => (
-                    <tr key={key} className="border-b border-border last:border-0">
-                      <Td className="font-mono text-xs">{key}</Td>
-                      <Td className="text-xs text-muted-foreground font-mono">••••••••</Td>
-                      <Td>
-                        <ConfirmButton
-                          size="xs"
-                          variant="destructive"
-                          ask={deleteVariableQuestion(key)}
-                          act={() => void handleDelete(key)}
-                        >
-                          Delete
-                        </ConfirmButton>
-                      </Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            </Card>
-          )}
-        </>
       )}
     </div>
   )
@@ -537,6 +396,7 @@ function EnvVarsTab({
 export function EdgeFunctions(): React.ReactElement {
   const client = useStudioClient()
   const navigate = useNavigate()
+  const location = useLocation()
   const params = useParams<{ functionSlug?: string; tab?: string }>()
   const activeTab: "logs" | "env" | "invoke" =
     params.tab === "logs"
@@ -571,8 +431,10 @@ export function EdgeFunctions(): React.ReactElement {
     if (functions.length === 0) return
     const current = params.functionSlug ? decodeURIComponent(params.functionSlug) : null
     if (current && functions.some((f) => f.name === current)) return
-    navigate(`/edge-functions/${encodeURIComponent(functions[0]!.name)}/invoke`, { replace: true })
-  }, [functions, params.functionSlug, navigate])
+    // `?tab=env` is how another section sends the editor to the secrets, whichever function is first.
+    const wanted = new URLSearchParams(location.search).get("tab")
+    navigate(`/edge-functions/${encodeURIComponent(functions[0]!.name)}/${wanted === "env" || wanted === "logs" ? wanted : "invoke"}`, { replace: true })
+  }, [functions, params.functionSlug, location.search, navigate])
 
   useEffect(() => {
     if (!params.functionSlug || params.tab) return
@@ -586,11 +448,15 @@ export function EdgeFunctions(): React.ReactElement {
     return <div className="text-sm text-muted-foreground">Loading functions...</div>
   }
   if (!loading && functions.length === 0) {
+    // Secrets are the project's, so they can be set before the first function is deployed.
     return (
-      <EmptyState
-        title="No functions deployed"
-        description="Run npx supatype functions deploy to deploy your first function."
-      />
+      <div className="flex flex-col gap-4">
+        <EmptyState
+          title="No functions deployed"
+          description="Run npx supatype functions deploy to deploy your first function."
+        />
+        <FunctionSecrets />
+      </div>
     )
   }
 
@@ -631,7 +497,7 @@ export function EdgeFunctions(): React.ReactElement {
                 <LogsTab functionName={selectedFn.name} adminFetch={adminFetch} />
               )}
               {activeTab === "env" && (
-                <EnvVarsTab functionName={selectedFn.name} adminFetch={adminFetch} />
+                <EnvVarsTab functionName={selectedFn.name} />
               )}
             </div>
           </div>

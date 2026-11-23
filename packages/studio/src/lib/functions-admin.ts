@@ -1,5 +1,5 @@
 import type { SupatypeClient } from "@supatype/client"
-import { bodyErrorText, readJsonObject } from "./json.js"
+import { bodyErrorText, isArrayOf, isShape, nullable, optional, readJsonObject, type Guard } from "./json.js"
 import { studioAuthHeaders } from "./studio-auth-headers.js"
 
 /**
@@ -27,4 +27,9 @@ export function functionsAdminFetch(client: SupatypeClient, path: string, init?:
       ...init?.headers,
     },
   })
+}
+
+/** The functions admin API's list bodies: `{ data: [...] }`, where an empty list may be null. */
+export function isDataList<T>(item: Guard<T>): Guard<{ data?: T[] | null }> {
+  return isShape({ data: optional(nullable(isArrayOf(item))) })
 }

@@ -39,6 +39,7 @@ function buildRouteItems(models: ModelConfig[], globals: { name: string; label: 
     { label: "Storage",                href: "/media-storage",                     category: "Storage",       kind: "route" },
     { label: "Storage Policies",       href: "/media-storage/policies",            category: "Storage",       kind: "route" },
     { label: "Edge Functions",         href: "/edge-functions",                    category: "Functions",     kind: "route" },
+    { label: "Hooks",                  href: "/hooks",                             category: "Functions",     kind: "route" },
     { label: "Realtime",               href: "/realtime",                          category: "Realtime",      kind: "route" },
     { label: "AI Usage",               href: "/ai/usage",                          category: "Intelligence",  kind: "route" },
     { label: "Audit Log",              href: "/audit",                             category: "Platform",      kind: "route" },
