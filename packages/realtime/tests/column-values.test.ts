@@ -215,9 +215,9 @@ describe("a filter on an array column", () => {
   })
 })
 
-describe("array columns are not exact columns", () => {
-  it("leaves bigint[] and numeric[] out of the exact set, since their elements are converted here", () => {
-    expect(exactColumnsOf(["a", "b", "c"], ["bigint[]", "numeric(12,2)[]", "bigint"])).toEqual({ c: "bigint" })
+describe("array columns of exact values", () => {
+  it("names bigint[] and numeric[] as exact kinds, so the client keeps their elements exact", () => {
+    expect(exactColumnsOf(["a", "b", "c"], ["bigint[]", "numeric(12,2)[]", "bigint"])).toEqual({ a: "bigint[]", b: "numeric[]", c: "bigint" })
   })
 
   it("quotes an element that needs it when matching a filter", () => {

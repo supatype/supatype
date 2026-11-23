@@ -218,7 +218,7 @@ describe("array columns of exact values", () => {
     expect(change?.newRecord?.["grid"]).toEqual([["1", "9007199254740993"], ["3", "4"]])
   })
 
-  it("registers the array kinds and leaves other arrays alone", () => {
+  it("registers the array kinds and still parses other arrays into arrays", () => {
     const [change] = parseWal2json(ARRAYS)
     expect(change?.exactColumns).toEqual({
       ids: "bigint[]",
@@ -226,7 +226,7 @@ describe("array columns of exact values", () => {
       prices: "numeric[]",
       grid: "bigint[]",
     })
-    expect(change?.newRecord?.["tags"]).toBe("{a,b}")
+    expect(change?.newRecord?.["tags"]).toEqual(["a", "b"])
   })
 
   it("passes an array that already arrived as an array through", () => {
