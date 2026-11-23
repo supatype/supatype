@@ -43,6 +43,25 @@ export function cloudAdminTarget(cwd: string, connection: string | undefined): D
   return resolveTarget(cwd)
 }
 
+/**
+ * What `supatype admin <command>` says in a folder linked to a self-host project when no local
+ * stack is there to write: the link, named. The command writes a project's own database, which a
+ * self-host link does not give this machine (it holds the API URL and the service-role key), and an
+ * HTTP route to a self-host project's Studio users is not built yet. Without this the command said
+ * the local Docker stack was not running, as if the link were not there. Null when the folder is
+ * not linked to a self-host project.
+ */
+export function selfHostLinkRefusal(cwd: string, command: string): Error | null {
+  const link = loadProjectLink(cwd)
+  if (link?.kind !== "self-host") return null
+  const apiUrl = link.environments[link.defaultEnvironment]?.apiUrl
+  const where = apiUrl === undefined ? "" : ` (${apiUrl})`
+  return new Error(
+    `supatype ${command} does not work on a self-host link yet: this folder is linked to the self-host project "${link.projectRef}"${where}. ` +
+      "Pass --connection <database URL> to manage that project's Studio users through its database directly.",
+  )
+}
+
 function orgIdOf(target: DeployTarget): string {
   if (target.orgId === undefined) throw new Error("The project link names no organisation. Run `supatype link` again.")
   return target.orgId
