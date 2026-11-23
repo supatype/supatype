@@ -55,7 +55,8 @@ export interface SubscribeMessage {
   /**
    * Whether the join listens for row changes. True: its table is checked against the database.
    * False: a broadcast or presence join, which reads nothing from the database and is sent no row
-   * change. Absent, from a client that predates it: a row join, never refused, as before the check.
+   * change. Absent, from a client that predates it: a row join, never refused, as before the check,
+   * except the 0.7.0 frame (a `table`, no `ref`), which is checked as a row join (FF-21).
    *
    * A client sends `table` on every join, row changes or not: with no row listener, the table its
    * channel name reads as. Checking every join refused broadcast and presence on any channel not

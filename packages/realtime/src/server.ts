@@ -96,6 +96,20 @@ function sameTableJoin(
   return previous.schema === target.schema && previous.table === target.table ? previous : undefined
 }
 
+/**
+ * Whether a join is a row join whose table must be checked.
+ *
+ * `changes: true` says so. The exact `@supatype/client@0.7.0` frame says nothing: a `table`, no
+ * `changes` key and no `ref`, and it always meant row changes. Leaving it unchecked let an anon
+ * join on a table it could not read report SUBSCRIBED (FF-21). Clients from 0.8.0 to 0.9.1 send no
+ * `changes` either, but every join of theirs carries a `ref`, and a broadcast or presence join of
+ * theirs names the table its channel name reads as (R2-RB2), so a `ref` keeps them unchecked.
+ */
+function isCheckedRowJoin(msg: SubscribeMessage): boolean {
+  if (msg.changes !== undefined) return msg.changes === true
+  return msg.table !== undefined && msg.ref === undefined
+}
+
 /** Schemas whose changes a shared instance never forwards: platform and service internals. */
 function isInternalSchema(schema: string): boolean {
   return (
@@ -549,7 +563,7 @@ export class RealtimeServer {
     const checked: JoinCheck = wantsRows
       ? await this.checkJoin(target, {
         wantPosition: rejoin === undefined,
-        checkTable: msg.changes === true,
+        checkTable: isCheckedRowJoin(msg),
         role: client.claims ? (client.claims.role ?? "authenticated") : null,
       })
       : { refusal: null }

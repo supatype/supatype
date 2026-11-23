@@ -144,6 +144,35 @@ describe("a join for a table that does not exist", () => {
     await listener.next((m) => m.type === "broadcast" && m.channel === "room:probe")
   })
 
+  // D-38 B (FF-21): `@supatype/client@0.7.0` sends no `changes` flag and no `ref`, so its row joins
+  // skipped the table check and an anon join on a table it could not read reported SUBSCRIBED.
+  // Clients from 0.8.0 to 0.9.1 also send no `changes`, but every join of theirs carries a `ref`,
+  // and their broadcast and presence joins name the table their channel name reads as (R2-RB2).
+  it("refuses the 0.7.0 frame (a table, no changes, no ref) as a row join", async () => {
+    const peer = await open()
+    peer.send({ type: "subscribe", channel: "ghost", table: "notes", event: "*" })
+    const reply = await peer.next(isRefusalOf("ghost"))
+    expect(reply.type === "system" && reply.message).toMatch(/notes/)
+  })
+
+  it("refuses the 0.7.0 frame for a table the subscriber's role cannot read", async () => {
+    const peer = await open()
+    peer.send({ type: "subscribe", channel: "users", schema: "auth", table: "users", event: "*" })
+    await peer.next(isRefusalOf("users"))
+  })
+
+  it("still acknowledges the 0.8.0 to 0.9.1 frame (a table, no changes, a ref) for a channel not named after a table", async () => {
+    const peer = await open()
+    peer.send({ type: "subscribe", channel: "lobby:lobby", schema: "lobby", table: "lobby", event: "*", ref: "1" })
+    await peer.next(isSystem("ok", "subscribed to lobby:lobby"))
+  })
+
+  it("acknowledges a frame with no table, no changes and no ref as before", async () => {
+    const peer = await open()
+    peer.send({ type: "subscribe", channel: "legacy-bare" })
+    await peer.next(isSystem("ok", "subscribed to legacy-bare"))
+  })
+
   // Round 2 (R2-S8): a join for auth.users reported SUBSCRIBED and nothing ever came, because every
   // change is withheld from a role that cannot read the table. The join now says so.
   it("is refused for a table the subscriber's role cannot read, naming the role", async () => {
