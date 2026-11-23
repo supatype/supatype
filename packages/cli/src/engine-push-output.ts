@@ -47,6 +47,8 @@ export interface CacheReport {
   tables?: string[]
   honoured?: boolean
   enabled?: string[]
+  /** The project-wide cache cap the server holds, when it said: 0 caches nothing. Never set by a push. */
+  cacheMaxTtl?: number
 }
 
 export interface EnginePushResult {

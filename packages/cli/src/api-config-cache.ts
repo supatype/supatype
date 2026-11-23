@@ -158,8 +158,12 @@ export async function cacheSeedingNotes(cwd: string, ast: unknown): Promise<stri
   return seedNotes(result.seeded, tables.length, result.ttlIsOff, "in .supatype/api-config.json")
 }
 
+/** Where a TTL of 0 is set: a Cloud project has no api-config.json to edit. */
+const CLOUD_TTL_PLACE = "under API > REST > Settings in Studio."
+const SELF_HOST_TTL_PLACE = "under API > REST > Settings or in .supatype/api-config.json."
+
 /** The lines for one seeding: what was switched on, and always the TTL note while the TTL is 0. */
-function seedNotes(seeded: string[], declaredCount: number, ttlIsOff: boolean, where: string): string[] {
+function seedNotes(seeded: string[], declaredCount: number, ttlIsOff: boolean, where: string, ttlPlace = SELF_HOST_TTL_PLACE): string[] {
   const notes: string[] = []
   if (seeded.length > 0) {
     notes.push(`Server cache enabled for ${seeded.join(", ")} ${where}`)
@@ -169,7 +173,7 @@ function seedNotes(seeded: string[], declaredCount: number, ttlIsOff: boolean, w
     // turned caching on project-wide would be overriding a decision rather than filling in a blank.
     notes.push(
       `${declaredCount} table(s) declare a cache, but cache_max_ttl is 0, so nothing ` +
-        `is cached until it is set, under API > REST > Settings or in .supatype/api-config.json.`,
+        `is cached until it is set, ${ttlPlace}`,
     )
   }
   return notes
@@ -208,11 +212,16 @@ export function freeTierCacheNote(report: CacheReport | undefined): string | nul
 /**
  * The lines a Cloud push prints about the cache: the tables the server confirmed as switched on,
  * in the words a self-host push uses, then the free-tier note when the tier does not honour it.
- * A control plane that predates `enabled` sends none, so it prints the free-tier note alone.
+ * A control plane that predates `enabled` sends none, so it prints the free-tier note alone. While the
+ * project-wide TTL it reports (`cacheMaxTtl`) is 0 it says nothing is cached, as a self-host push does,
+ * and never sets it.
  */
 export function cloudCacheNotes(report: CacheReport | undefined): string[] {
   const enabled = (report?.enabled ?? []).filter((t) => t.length > 0)
-  const notes = seedNotes(enabled, report?.tables?.length ?? 0, false, "on Supatype Cloud")
+  const declared = report?.tables?.length ?? 0
+  // Absent is a control plane that does not say, and silence is the honest answer to that.
+  const ttlIsOff = declared > 0 && report?.cacheMaxTtl !== undefined && report.cacheMaxTtl <= 0
+  const notes = seedNotes(enabled, declared, ttlIsOff, "on Supatype Cloud", CLOUD_TTL_PLACE)
   const freeTier = freeTierCacheNote(report)
   return freeTier === null ? notes : [...notes, freeTier]
 }
