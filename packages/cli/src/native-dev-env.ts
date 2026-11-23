@@ -93,6 +93,34 @@ export interface NativeServerCoreInput {
  */
 export const DENO_ENV = { NO_COLOR: "1" } as const
 
+/** What the server, and the Deno it starts, need from this CLI's environment by exact name. */
+const SERVER_INHERITED_NAMES = new Set([
+  "PATH", "PATHEXT", "HOME", "USER", "USERNAME", "LOGNAME", "TMPDIR", "TEMP", "TMP", "TZ", "LANG",
+  "LC_ALL", "LC_CTYPE", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "NO_COLOR",
+  // Windows: the profile and cache directories, and what its networking and process APIs read.
+  "USERPROFILE", "APPDATA", "LOCALAPPDATA", "SYSTEMROOT", "WINDIR", "SYSTEMDRIVE", "COMSPEC",
+  "PROGRAMDATA", "HOMEDRIVE", "HOMEPATH",
+  // Outbound HTTP (OAuth, SMTP over TLS, npm: imports) through a proxy or a private CA.
+  "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "NPM_CONFIG_REGISTRY", "SSL_CERT_FILE", "SSL_CERT_DIR",
+])
+
+/**
+ * By prefix: the server's own settings (a SUPATYPE_* set in the shell still applies), Deno's, and the
+ * AWS SDK's default chain, which signs SES mail when the mailer is SES.
+ */
+const SERVER_INHERITED_PREFIXES = ["SUPATYPE_", "DENO_", "AWS_"]
+
+/**
+ * Whether native supatype-server starts with `name` from this CLI's environment (e2e 2026-11-21,
+ * RB-2). It used to get the whole shell, and passed it on to the Deno worker, so a token in the
+ * developer's shell was a `Deno.env.get` away for any function. What the server is told explicitly
+ * is unaffected. Case-insensitive, as Windows names `PATH` `Path`.
+ */
+export function nativeServerInheritsEnv(name: string): boolean {
+  const upper = name.toUpperCase()
+  return SERVER_INHERITED_NAMES.has(upper) || SERVER_INHERITED_PREFIXES.some((prefix) => upper.startsWith(prefix))
+}
+
 /**
  * supatype-server's outer layer: mode, cache, manifest paths, PostgREST and GraphQL, and the
  * database as this machine reaches it, without its password, for Studio's connection strings. The

@@ -31,13 +31,17 @@ describe("the functions worker", () => {
   it("does not write per-invocation values into the process environment", () => {
     // `Deno.env.set` per invocation is the mechanism, and there is no safe amount of it: the
     // environment is shared by every invocation in the isolate, so one write is enough to need the
-    // lock back. The two deletes are the service-role key's and the forwarding secret's, each once
-    // at start before any handler is imported; a --watch reload reads the key from its file again.
-    expect(WORKER.match(/Deno\.env\.delete\(/g)).toHaveLength(2)
+    // lock back. The three deletes are the service-role key's, the forwarding secret's and the
+    // allowlist scrub's (env-allowlist.ts), each once at start before any handler is imported; a
+    // --watch reload reads the key from its file again.
+    expect(WORKER.match(/Deno.env.delete(/g)).toHaveLength(3)
     expect(MAIN).toContain('Deno.env.delete("SUPATYPE_SERVICE_ROLE_KEY")')
     expect(MAIN).toContain('Deno.env.delete("SUPATYPE_FORWARDING_SECRET")')
+    expect(FUNCTIONS_WORKER_SOURCE["env-allowlist.ts"]).toContain("Deno.env.delete(name)")
     expect(WORKER).not.toMatch(/Deno\.env\.set\(/)
     expect(MAIN.indexOf("Deno.env.delete(")).toBeLessThan(MAIN.indexOf("Deno.serve("))
+    expect(MAIN.indexOf("\nscrubProcessEnv()")).toBeGreaterThan(-1)
+    expect(MAIN.indexOf("\nscrubProcessEnv()")).toBeLessThan(MAIN.indexOf("await loadHandlers(routes)"))
   })
 
   it("passes the call's configuration to the handler instead", () => {

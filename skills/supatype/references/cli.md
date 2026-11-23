@@ -104,7 +104,7 @@ Full guide: https://www.supatype.com/docs/sso.html
 | `supatype functions serve` | Local Deno server for all functions, on port 18472 unless `--port` moves it |
 | `supatype functions deploy` | Deploy edge functions via control plane when linked. On a self-host compose stack nothing is uploaded (the worker reads `functions/` from disk): run `supatype self-host compose restart functions-worker` to load changes (`supatype dev` does that on save) |
 | `supatype functions list` | List deployed functions |
-| `supatype functions env set KEY=value` / `list` / `unset KEY` | A function's env values: on the linked project, else `functions/.env.local`. With `functions/.env.<name>.local` (one function, wins), every value arrives in `ctx.env`, read again on each call, never in `Deno.env`: that is the worker's one process environment, shared by every call running at once, so `Deno.env.get` finds none of them |
+| `supatype functions env set KEY=value` / `list` / `unset KEY` | A function's env values: on the linked project, else `functions/.env.local`. With `functions/.env.<name>.local` (one function, wins), every value arrives in `ctx.env`, read again on each call, never in `Deno.env`: that is the worker's one process environment, shared by every call running at once, so `Deno.env.get` finds none of them. `Deno.env` holds only the worker's own settings (`SUPATYPE_URL`, `SUPATYPE_ANON_KEY` and the like), `DENO_*` and what the OS needs: the worker deletes the rest, the stack's secrets and the shell's variables included, before any function loads |
 | `supatype plugins` | Plugin scaffolding. A plugin cannot run SQL: the SDK has no `installSQL` or `uninstallSQL`, and `defineComposite` refuses either |
 | `supatype types` | Type utilities |
 
