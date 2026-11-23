@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { buildKongDeclarative } from "../src/kong-config.js"
 import { renderSelfHostCompose } from "../src/self-host-compose.js"
 import { validateProjectConfig, type SupatypeProjectConfig } from "../src/project-config.js"
 import { platformSettingsBody, serviceSwitchServerEnv, storageBucketPlan } from "../src/platform-settings.js"
@@ -43,6 +44,16 @@ describe("services", () => {
       expect(lines, `devLocal: ${devLocal}`).toContain('SUPATYPE_STORAGE_DISABLED: "true"')
       expect(lines, `devLocal: ${devLocal}`).toContain('SUPATYPE_GRAPHQL_DISABLED: "true"')
     }
+  })
+
+  it("sends /graphql/v1 through the server on self-host and dev, where services.graphql: false answers 501", () => {
+    // Kong used to send it straight to PostgREST, so the server's switch never saw the request.
+    const kong = buildKongDeclarative({ unifiedGateway: true })
+    const service = /^ {2}- name: (\S+)\n {4}url: (\S+)\n {4}routes:\n {6}- name: graphql-v1\n {8}strip_path: (\w+)\n {8}paths:\n {10}- (\S+)$/m.exec(kong)
+    expect(service?.slice(2)).toEqual(["http://server:9999", "false", "/graphql/v1"])
+    const block = kong.slice(kong.indexOf("name: graphql-v1"), kong.indexOf("name: studio-config-route"))
+    expect(block).not.toContain("Content-Profile")
+    expect(kong).not.toContain("http://postgrest:3000/rpc/graphql")
   })
 
   it("renders only the service that is off", () => {

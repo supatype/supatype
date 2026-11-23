@@ -127,13 +127,14 @@ function runtimeRouteSpecUnified(opts: RuntimeRouteOptions): RuntimeRoute[] {
       paths: ["/platform/v1/"],
       stripPath: false,
     },
+    // Through the server, as storage is: it calls PostgREST's `rpc/graphql` itself, and answers 501
+    // when `services.graphql` is off. Sent straight to PostgREST, that switch never saw a request.
     {
       name: "graphql-v1",
-      serviceName: "postgrest-graphql",
-      serviceUrl: "http://postgrest:3000/rpc/graphql",
+      serviceName: "supatype-server-graphql",
+      serviceUrl: SERVER_GATEWAY,
       paths: ["/graphql/v1"],
-      stripPath: true,
-      graphqlPostgrest: true,
+      stripPath: false,
     },
     {
       name: "studio-config-route",

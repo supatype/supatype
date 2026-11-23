@@ -87,8 +87,8 @@ describe("runtime contract", () => {
     expect(kong).toContain("/storage/v1/")
     expect(kong).toContain("/realtime/v1/")
     expect(kong).toContain("/functions/v1/")
-    expect(kong).toContain("http://postgrest:3000/rpc/graphql")
-    expect(kong).toContain("Content-Profile:graphql_public")
+    expect(kong).toContain("/graphql/v1")
+    expect(kong).not.toContain("http://postgrest:3000/rpc/graphql")
     expect(kong).not.toContain("http://storage:5000")
   })
 
@@ -761,8 +761,8 @@ export default defineConfig({
       expect(compose).toContain("unified gateway")
       const kong = readFileSync(out.kongPath, "utf8")
       expect(kong).toContain("http://server:9999")
-      expect(kong).toContain("http://postgrest:3000/rpc/graphql")
-      expect(kong).toContain("Content-Profile:graphql_public")
+      expect(kong).toContain("/graphql/v1")
+      expect(kong).not.toContain("http://postgrest:3000/rpc/graphql")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
