@@ -14,7 +14,8 @@ export interface QueryCacheOptions {
   key?: string | undefined
 }
 
-export type CacheStatus = "HIT" | "MISS" | "BYPASS" | undefined
+/** HIT, MISS and BYPASS come from the server cache; CLIENT is an answer from this client's own memory cache. */
+export type CacheStatus = "HIT" | "MISS" | "BYPASS" | "CLIENT" | undefined
 
 interface CacheEntry<T> {
   result: QueryResult<T>

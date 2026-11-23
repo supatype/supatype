@@ -33,7 +33,7 @@ const { data } = await supatype
   .cache({ ttl: 30_000, server: true, public: true })
 ```
 
-`meta.cacheStatus` on the result is `"HIT"`, `"MISS"`, or `"BYPASS"` when caching is active.
+`meta.cacheStatus` on the result is `"HIT"`, `"MISS"` or `"BYPASS"` for the server cache, and `"CLIENT"` when the client's own memory cache answered without a request. It is set when caching is active.
 
 ### React
 

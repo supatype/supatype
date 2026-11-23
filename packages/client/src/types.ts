@@ -1,4 +1,5 @@
 import type { TableRelationship } from "./select-types.js"
+import type { CacheStatus } from "./query-cache.js"
 import type { SupatypeError } from "./errors.js"
 
 // ─── Auth types ───────────────────────────────────────────────────────────────
@@ -240,7 +241,7 @@ export interface QueryResult<TData> {
   error: SupatypeError | null
   count: number | null
   meta?: {
-    cacheStatus?: "HIT" | "MISS" | "BYPASS" | undefined
+    cacheStatus?: CacheStatus | undefined
     /** Present only when the response named restricted columns. Absent means "not stated". */
     maskedFields?: MaskedField[] | undefined
   } | undefined
