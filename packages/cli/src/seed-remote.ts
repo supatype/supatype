@@ -9,7 +9,7 @@
  * with no default export (which would run its writes when imported).
  */
 
-import type { RemoteSeedRequest } from "@supatype/types"
+import { formatRemoteSeedRefusal, isRemoteSeedRefusal, type RemoteSeedRequest } from "@supatype/types"
 import type { SeedFlags } from "./commands/seed.js"
 import { loadSchemaAst, type SupatypeConfig } from "./config.js"
 import { seedUnsupportedByPinnedEngine } from "./engine-floor.js"
@@ -20,6 +20,7 @@ import { pushAuditFields } from "./push-audit.js"
 import {
   loadBranchContext,
   resolveTarget,
+  targetProjectRef,
   targetSeed,
   targetSeedCapabilities,
   targetSeedStatus,
@@ -37,6 +38,7 @@ import {
 } from "./seed-prepare.js"
 import { isSeedResult, isSeedStatus, report, reportSeedStatus } from "./seed-report.js"
 import { isInteractive } from "./ui/interactive.js"
+import { TargetApiError } from "./target-client.js"
 import { promptText } from "./ui/prompts.js"
 import { error } from "./ui/messages.js"
 
@@ -204,10 +206,25 @@ async function productionConfirmed(target: DeployTarget, opts: SeedFlags): Promi
     )
     return false
   }
-  const typed = await promptText(`This seeds production in ${target.projectRef}. Type the project ref to continue`)
-  if (typed === target.projectRef) return true
-  error("That is not the project ref, so nothing was seeded.")
+  // Cloud's link holds the slug; the ref is what the dashboard and the API call the project. A link
+  // made since the ref was recorded holds it, an older one asks Cloud, and only the ref is accepted.
+  const ref = target.link?.ref ?? (await targetProjectRef(target)) ?? target.projectRef
+  const typed = await promptText(`This seeds production in ${ref}. Type the project ref, ${ref}, to continue`)
+  if (typed.trim() === ref) return true
+  error(`That is not the project ref (${ref}), so nothing was seeded.`)
   return false
+}
+
+/**
+ * A failed request as the CLI prints it. A seed refusal carries its code beside its message, and the
+ * code is what a script or a bug report quotes, so it leads: `[seed_busy] Another seed is ...`.
+ */
+function failureText(e: unknown): string {
+  if (!(e instanceof TargetApiError)) return errorMessage(e)
+  const said = e.details?.["message"]
+  const code = e.details?.["error"]
+  if (!isRemoteSeedRefusal(code) || typeof said !== "string") return errorMessage(e)
+  return formatRemoteSeedRefusal(code, said)
 }
 
 async function send(target: DeployTarget, request: RemoteSeedRequest, count: number): Promise<number> {
@@ -215,7 +232,7 @@ async function send(target: DeployTarget, request: RemoteSeedRequest, count: num
     return report(await targetSeed(target, request, isSeedResult), count, describe(target))
   } catch (e) {
     // A refusal or a server failure is the run not starting, whatever its status.
-    error(errorMessage(e))
+    error(failureText(e))
     return 2
   }
 }

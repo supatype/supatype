@@ -601,6 +601,22 @@ export async function targetSeedStatus<T>(target: DeployTarget, guard: Guard<T>)
   }
 }
 
+const isProjectRef = isShape({ ref: isString })
+
+/**
+ * The ref Cloud keeps for the linked project, which a Cloud link does not hold: its link names the
+ * project by slug. A self-hosted link already holds the server's ref. Undefined when Cloud cannot be
+ * asked, so a caller falls back to what the link says.
+ */
+export async function targetProjectRef(target: DeployTarget): Promise<string | undefined> {
+  if (target.mode !== "cloud") return target.projectRef
+  try {
+    return (await targetFetch(target.apiBaseUrl, target.apiPrefix, projectRequest(target, "GET", ""), isProjectRef)).ref
+  } catch {
+    return undefined
+  }
+}
+
 export interface SchemaRollbackResult {
   status: string
   name: string

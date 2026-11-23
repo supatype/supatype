@@ -15,7 +15,7 @@ import { ensureSupatypeGitignore, warnIfLinkNotGitignored } from "../gitignore.j
 import { targetFetch } from "../target-client.js"
 import { localLinkLabel } from "../local-gateway.js"
 import { resolveProjectApiUrl } from "../resolve-api-url.js"
-import { isArrayOf, isShape, isString } from "@supatype/shared"
+import { isArrayOf, isShape, isString, optional } from "@supatype/shared"
 import { error, info, plain, warn } from "../ui/messages.js"
 import { projectConfigIfAny } from "../local-stack-guard.js"
 import { configEnvironment } from "../resolve-target.js"
@@ -295,7 +295,7 @@ export async function runLinkAction(opts: {
       cloudApiUrl,
       "/api/v1",
       { method: "GET", path: `/projects/${project}`, token },
-      isShape({ slug: isString, orgId: isString }),
+      isShape({ slug: isString, orgId: isString, ref: optional(isString) }),
     )
     let environments: Array<{ name: string; apiUrl: string }> = [
       { name: "production", apiUrl: cloudApiUrl },
@@ -320,6 +320,7 @@ export async function runLinkAction(opts: {
     }
     const link = createCloudLink({
       projectRef: project,
+      ...(one.ref !== undefined ? { ref: one.ref } : {}),
       cloudApiUrl,
       token,
       orgId: one.orgId,

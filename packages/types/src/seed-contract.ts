@@ -63,6 +63,40 @@ export const REMOTE_SEED_REFUSALS = [
 
 export type RemoteSeedRefusal = (typeof REMOTE_SEED_REFUSALS)[number]
 
+/** Whether `value` is one of the refusal codes. */
+export function isRemoteSeedRefusal(value: unknown): value is RemoteSeedRefusal {
+  return REMOTE_SEED_REFUSALS.some((code) => code === value)
+}
+
+/** What a request over a cap names: the byte size, or the file count. */
+export type RemoteSeedLimit = { readonly maxBytes: number } | { readonly maxFiles: number }
+
+/**
+ * The words of every refusal whose text does not depend on what the request said. Both control
+ * planes build their refusal from this table, so the same refusal reads the same on either host.
+ * `validation_error` is not here: its text is whatever the body check found wrong.
+ */
+export const REMOTE_SEED_MESSAGES = {
+  environment_mismatch: (said: { readonly requested: string; readonly target: string }): string =>
+    `The seed's environment condition is "${said.requested}" but the target is "${said.target}". ` +
+    `Seed with --env ${said.requested}, or drop --environment.`,
+  production_confirmation_required: (): string =>
+    "This seed targets production. Confirm it (supatype seed --confirm-production) and send it again.",
+  seed_busy: (): string => "Another seed is already running on this environment. Wait for it to finish.",
+  schema_not_pushed: (said: { readonly environment: string; readonly changes: number }): string =>
+    `The ${said.environment} database does not have the schema in this seed yet (${said.changes} change(s) to push). ` +
+    `Run \`supatype push --env ${said.environment}\` first.`,
+  payload_too_large: (said: RemoteSeedLimit): string =>
+    "maxBytes" in said
+      ? `A seed request may be at most ${said.maxBytes} bytes.`
+      : `At most ${said.maxFiles} seed files can be sent at once.`,
+} as const
+
+/** A refusal as the CLI prints it: its code in brackets, then its message. */
+export function formatRemoteSeedRefusal(code: RemoteSeedRefusal, message: string): string {
+  return `[${code}] ${message}`
+}
+
 /** A refusal body: 400, 409 or 413, with no engine run. */
 export interface RemoteSeedRefused {
   readonly error: RemoteSeedRefusal

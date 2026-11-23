@@ -23,6 +23,12 @@ export interface ProjectLink {
   version: typeof LINK_VERSION
   kind: ProjectLinkKind
   projectRef: string
+  /**
+   * Cloud only: the ref Cloud keeps for the project, which the dashboard and the API call it by.
+   * `projectRef` above is the slug the link names the project by. Recorded when the project is
+   * linked; a link made before that has none, and it is looked up from Cloud as it always was.
+   */
+  ref?: string
   defaultEnvironment: string
   /** Access token (cloud user JWT) or self-host SERVICE_ROLE_KEY. */
   token?: string
@@ -74,6 +80,7 @@ const isProjectLink: Guard<ProjectLink> = isShape({
   version: isOneOf([LINK_VERSION]),
   kind: isOneOf(["cloud", "self-host", "local"] as const),
   projectRef: isString,
+  ref: optional(isString),
   defaultEnvironment: isString,
   token: optional(isString),
   refreshToken: optional(isString),
@@ -260,6 +267,8 @@ export function createSelfHostLink(params: {
 
 export function createCloudLink(params: {
   projectRef: string
+  /** The ref Cloud keeps for the project; an updated link for the same project keeps the one it has. */
+  ref?: string
   cloudApiUrl: string
   token: string
   refreshToken?: string
@@ -282,11 +291,13 @@ export function createCloudLink(params: {
   }
 
   const refreshToken = params.refreshToken ?? params.existing?.refreshToken
+  const ref = params.ref ?? (params.existing?.projectRef === params.projectRef ? params.existing.ref : undefined)
 
   return {
     version: LINK_VERSION,
     kind: "cloud",
     projectRef: params.projectRef,
+    ...(ref !== undefined ? { ref } : {}),
     defaultEnvironment: "production",
     token: params.token,
     cloudApiUrl: trimApiUrl(params.cloudApiUrl),

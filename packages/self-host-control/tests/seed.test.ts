@@ -5,7 +5,12 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { test, describe, before, after, beforeEach } from "node:test"
 import { isJsonObject, isString } from "@supatype/shared"
-import { REMOTE_SEED_MAX_BODY_BYTES, REMOTE_SEED_MAX_FILES, type RemoteSeedRequest } from "@supatype/types"
+import {
+  REMOTE_SEED_MAX_BODY_BYTES,
+  REMOTE_SEED_MAX_FILES,
+  REMOTE_SEED_MESSAGES,
+  type RemoteSeedRequest,
+} from "@supatype/types"
 import { CONTROL_PLANE_SECRET_HEADER } from "../src/auth.js"
 import { setAuditWriter, type AuditEntry } from "../src/audit.js"
 import { resetEngineCapabilities } from "../src/engine-runner.js"
@@ -156,7 +161,7 @@ describe("seed routes (mock engine)", () => {
     const res = await seed(seedBody())
     assert.equal(res.status, 409, res.text)
     assert.equal(res.json["error"], "schema_not_pushed")
-    assert.match(String(res.json["message"]), /supatype push/)
+    assert.equal(res.json["message"], REMOTE_SEED_MESSAGES.schema_not_pushed({ environment: "production", changes: 1 }))
     assert.equal(existsSync(recordPath), false)
     assert.equal(audits.at(-1)?.action, "seed.refused")
   })
@@ -209,6 +214,7 @@ describe("seed routes (mock engine)", () => {
     const res = await seed(seedBody({ confirmProduction: false }))
     assert.equal(res.status, 409)
     assert.equal(res.json["error"], "production_confirmation_required")
+    assert.equal(res.json["message"], REMOTE_SEED_MESSAGES.production_confirmation_required())
     assert.equal(existsSync(recordPath), false)
   })
 
@@ -216,6 +222,7 @@ describe("seed routes (mock engine)", () => {
     const res = await seed(seedBody({ environment: "staging" }))
     assert.equal(res.status, 400)
     assert.equal(res.json["error"], "environment_mismatch")
+    assert.equal(res.json["message"], REMOTE_SEED_MESSAGES.environment_mismatch({ requested: "staging", target: "production" }))
     assert.equal(existsSync(recordPath), false)
   })
 
@@ -230,6 +237,7 @@ describe("seed routes (mock engine)", () => {
     const res = await seed(seedBody({ irDocuments: docs }))
     assert.equal(res.status, 413)
     assert.equal(res.json["error"], "payload_too_large")
+    assert.equal(res.json["message"], REMOTE_SEED_MESSAGES.payload_too_large({ maxFiles: REMOTE_SEED_MAX_FILES }))
     assert.equal(existsSync(recordPath), false)
   })
 
@@ -249,6 +257,7 @@ describe("seed routes (mock engine)", () => {
     const second = await seed(seedBody())
     assert.equal(second.status, 409)
     assert.equal(second.json["error"], "seed_busy")
+    assert.equal(second.json["message"], REMOTE_SEED_MESSAGES.seed_busy())
     assert.equal((await first).status, 200)
     delete process.env["MOCK_SEED_MODE"]
     assert.equal((await seed(seedBody())).status, 200)

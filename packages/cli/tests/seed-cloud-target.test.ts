@@ -12,7 +12,7 @@ import { projectConfig } from "./support/project-config.js"
  */
 const said = vi.hoisted(() => ({ errors: [] as string[], infos: [] as string[], successes: [] as string[] }))
 const local = vi.hoisted(() => ({ requests: [] as Array<Record<string, unknown>> }))
-const terminal = vi.hoisted(() => ({ interactive: false, typed: "" }))
+const terminal = vi.hoisted(() => ({ interactive: false, typed: "", asked: [] as string[] }))
 
 vi.mock("../src/ui/messages.js", () => ({
   error: (m: string) => said.errors.push(m),
@@ -21,7 +21,12 @@ vi.mock("../src/ui/messages.js", () => ({
   success: (m: string) => said.successes.push(m),
 }))
 vi.mock("../src/ui/interactive.js", () => ({ isInteractive: () => terminal.interactive }))
-vi.mock("../src/ui/prompts.js", () => ({ promptText: async () => terminal.typed }))
+vi.mock("../src/ui/prompts.js", () => ({
+  promptText: async (message: string) => {
+    terminal.asked.push(message)
+    return terminal.typed
+  },
+}))
 vi.mock("../src/config.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/config.js")>()),
   loadConfig: () => projectConfig(),
@@ -62,11 +67,17 @@ let answer: (call: Call) => Reply
 
 const ENGINE_VERSION = "0.11.0"
 
+/** The ref Cloud keeps for the project the link calls `abc` (the link holds the slug). */
+const CLOUD_REF = "prj_9f2c41"
+
 function capabilities(features: string[], version = ENGINE_VERSION): Reply {
   return { status: 200, body: { features, version } }
 }
 
 function defaultAnswer(call: Call): Reply {
+  if (call.method === "GET" && call.url.endsWith("/projects/abc")) {
+    return { status: 200, body: { data: { slug: "abc", ref: CLOUD_REF } } }
+  }
   if (call.url.endsWith("/schema/capabilities")) return capabilities(["seed"])
   if (call.url.endsWith("/seed/status")) return { status: 200, body: { data: { files: [] } } }
   return { status: 200, body: { data: { ok: true, files: [{ file: "seeds/a.ts", status: "applied" }] }, run: { id: "r1" } } }
@@ -133,6 +144,7 @@ beforeEach(() => {
   local.requests.length = 0
   terminal.interactive = false
   terminal.typed = ""
+  terminal.asked.length = 0
   calls = []
   answer = defaultAnswer
   forgetServerCapabilities()
@@ -204,9 +216,70 @@ describe("the production gate", () => {
     terminal.typed = "nope"
     expect(await runSeed(undefined, flags({ env: "production" }))).toBe(2)
     expect(seedPosts()).toEqual([])
-    terminal.typed = "abc"
+    terminal.typed = CLOUD_REF
     expect(await runSeed(undefined, flags({ env: "production" }))).toBe(0)
     expect(seedPosts()[0]?.body).toMatchObject({ confirmProduction: true })
+  })
+
+  it("names the Cloud ref to type, and takes only the ref", async () => {
+    terminal.interactive = true
+    terminal.typed = CLOUD_REF
+    expect(await runSeed(undefined, flags({ env: "production" }))).toBe(0)
+    expect(terminal.asked.join("\n")).toContain(CLOUD_REF)
+    expect(seedPosts()[0]?.body).toMatchObject({ confirmProduction: true })
+  })
+
+  it("does not take the slug when the ref is known", async () => {
+    terminal.interactive = true
+    terminal.typed = "abc"
+    expect(await runSeed(undefined, flags({ env: "production" }))).toBe(2)
+    expect(seedPosts()).toEqual([])
+    expect(said.errors.join("\n")).toContain(CLOUD_REF)
+  })
+
+  it("reads the ref from the link, and does not ask Cloud for it", async () => {
+    saveProjectLink(dir, { ...link("cloud"), ref: CLOUD_REF })
+    terminal.interactive = true
+    terminal.typed = CLOUD_REF
+    expect(await runSeed(undefined, flags({ env: "production" }))).toBe(0)
+    expect(calls.filter((c) => c.url.endsWith("/projects/abc"))).toEqual([])
+    expect(terminal.asked.join("\n")).toContain(CLOUD_REF)
+  })
+
+  it("does not take the slug when the link holds the ref", async () => {
+    saveProjectLink(dir, { ...link("cloud"), ref: CLOUD_REF })
+    terminal.interactive = true
+    terminal.typed = "abc"
+    expect(await runSeed(undefined, flags({ env: "production" }))).toBe(2)
+    expect(seedPosts()).toEqual([])
+  })
+
+  it("still refuses a wrong answer when the Cloud ref is known", async () => {
+    terminal.interactive = true
+    terminal.typed = "prj_other"
+    expect(await runSeed(undefined, flags({ env: "production" }))).toBe(2)
+    expect(seedPosts()).toEqual([])
+    expect(said.errors.join("\n")).toContain(CLOUD_REF)
+  })
+
+  it("falls back to the slug when Cloud cannot say the ref", async () => {
+    terminal.interactive = true
+    terminal.typed = "abc"
+    answer = (call) =>
+      call.method === "GET" && call.url.endsWith("/projects/abc")
+        ? { status: 500, body: { error: "boom", message: "down" } }
+        : defaultAnswer(call)
+    expect(await runSeed(undefined, flags({ env: "production" }))).toBe(0)
+    expect(terminal.asked.join("\n")).toContain("abc")
+  })
+
+  it("asks a self-hosted server for nothing: its link already holds the ref", async () => {
+    saveProjectLink(dir, link("self-host"))
+    terminal.interactive = true
+    terminal.typed = "abc"
+    expect(await runSeed(undefined, flags({ env: "production" }))).toBe(0)
+    expect(calls.filter((c) => c.url.endsWith("/projects/abc"))).toEqual([])
+    expect(terminal.asked.join("\n")).toContain("abc")
   })
 
   it("needs no flag for staging", async () => {
@@ -299,7 +372,8 @@ describe("a control plane that cannot seed", () => {
 
 describe("answers to exit codes", () => {
   const engine = (body: unknown): Reply => ({ status: 200, body: { data: body, run: { id: "r" } } })
-  const refuse = (status: number, error: string): Reply => ({ status, body: { error, message: `refused: ${error}` } })
+  // The message never repeats the code, so the code on the line comes from the CLI.
+  const refuse = (status: number, error: string): Reply => ({ status, body: { error, message: "The server said no." } })
   const cases: Array<[string, Reply, number]> = [
     ["200 applied", engine({ ok: true, files: [] }), 0],
     ["200 a constraint failure", engine({ ok: false, error: { kind: "constraint", message: "dup" } }), 1],
@@ -321,7 +395,7 @@ describe("answers to exit codes", () => {
   it("shows the server's message for a refusal", async () => {
     answer = (call) => (isSeedPost(call) ? refuse(409, "seed_busy") : defaultAnswer(call))
     await runSeed(undefined, flags({ env: "staging" }))
-    expect(said.errors.join("\n")).toContain("refused: seed_busy")
+    expect(said.errors.join("\n")).toContain("[seed_busy] The server said no.")
   })
 })
 
