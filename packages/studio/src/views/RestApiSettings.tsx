@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react"
 import { useAdminConfig } from "../hooks/useAdminConfig.js"
 import { useStudioClient } from "../StudioCore.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
-import { Button, Card, CodeBlock, Input, LoadingSettingsCard, TextLink } from "../components/ui.js"
+import { Button, Card, CodeBlock, Input, LoadingSettingsCard, SavedNotice, TextLink } from "../components/ui.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { cn } from "../lib/utils.js"
 import { useRoleRefusalText } from "../components/RoleGate.js"
@@ -42,7 +42,7 @@ export function RestApiSettings(): React.ReactElement {
   const [cacheMaxTTL, setCacheMaxTTL] = useState("0")
   const [committed, setCommitted] = useState({ schema: "public", maxRows: "1000", cacheMaxTTL: "0" })
   const [isSaving, setIsSaving] = useState(false)
-  const [savedOk, setSavedOk] = useState(false)
+  const [savedAt, setSavedAt] = useState<number | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -86,7 +86,7 @@ export function RestApiSettings(): React.ReactElement {
   const handleSave = async () => {
     setIsSaving(true)
     setSaveError(null)
-    setSavedOk(false)
+    setSavedAt(null)
     try {
       const res = await fetch(`${client.url}/admin/v1/config/rest`, {
         method: "PATCH",
@@ -106,8 +106,7 @@ export function RestApiSettings(): React.ReactElement {
         throw new Error(bodyMessage(body) ?? `${res.status} ${res.statusText}`)
       }
       setCommitted({ schema, maxRows, cacheMaxTTL })
-      setSavedOk(true)
-      setTimeout(() => setSavedOk(false), 2000)
+      setSavedAt(Date.now())
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Save failed")
     } finally {
@@ -144,8 +143,9 @@ export function RestApiSettings(): React.ReactElement {
               <span className="text-xs text-destructive-text">{saveError}</span>
             ) : null}
             <Button size="xs" variant="primary" onClick={() => void handleSave()} disabled={!isDirty || isSaving}>
-              {isSaving ? "Saving…" : savedOk ? "Saved!" : "Save"}
+              {isSaving ? "Saving…" : "Save"}
             </Button>
+            <SavedNotice at={savedAt} />
           </div>
         </div>
         <div className="divide-y divide-border">

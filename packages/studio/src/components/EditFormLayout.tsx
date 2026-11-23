@@ -16,6 +16,8 @@ export interface EditFormLayoutProps {
   saving: boolean
   /** Saves the form; left out for a reader who may not change the record. */
   onSave?: () => void
+  /** When the last save landed; the sidebar says "Saved" beside Save for a moment. */
+  savedAt?: number | null
   isCreate?: boolean
   onDuplicate?: () => void
   onDelete?: () => void
@@ -40,6 +42,7 @@ export function EditFormLayout({
   slugFollowSource,
   saving,
   onSave,
+  savedAt,
   isCreate,
   onDuplicate,
   onDelete,
@@ -86,6 +89,7 @@ export function EditFormLayout({
           recordSyncKey={recordSyncKey}
           saving={saving}
           {...(onSave !== undefined && { onSave })}
+          {...(savedAt !== undefined && { savedAt })}
           {...(isCreate !== undefined && { isCreate })}
           {...(onDuplicate !== undefined && { onDuplicate })}
           {...(onDelete !== undefined && { onDelete })}

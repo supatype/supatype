@@ -19,7 +19,7 @@ afterEach(() => {
   container?.remove()
 })
 
-function renderSidebar(handlers: { onSave: () => void; onDuplicate: () => void; onDelete: () => void }, saving = false): void {
+function renderSidebar(handlers: { onSave: () => void; onDuplicate: () => void; onDelete: () => void }, saving = false, savedAt: number | null = null): void {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
   container = document.createElement("div")
   document.body.appendChild(container)
@@ -35,6 +35,7 @@ function renderSidebar(handlers: { onSave: () => void; onDuplicate: () => void; 
         defaultLocale="en"
         recordSyncKey="r1"
         saving={saving}
+        savedAt={savedAt}
         {...handlers}
       />,
     )
@@ -65,5 +66,15 @@ describe("the edit sidebar's actions", () => {
   it("holds Save while a save is in flight", () => {
     renderSidebar({ onSave: vi.fn(), onDuplicate: vi.fn(), onDelete: vi.fn() }, true)
     expect(buttonNamed("Saving...").disabled).toBe(true)
+  })
+
+  it("says Saved beside Save once a save has landed, and not before", () => {
+    const handlers = { onSave: vi.fn(), onDuplicate: vi.fn(), onDelete: vi.fn() }
+    renderSidebar(handlers)
+    expect(container.querySelector("[role=status]")).toBeNull()
+    act(() => root?.unmount())
+    container.remove()
+    renderSidebar(handlers, false, Date.now())
+    expect(container.querySelector("[role=status]")?.textContent).toBe("Saved")
   })
 })

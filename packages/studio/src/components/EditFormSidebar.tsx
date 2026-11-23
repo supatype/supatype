@@ -1,7 +1,7 @@
 import React from "react"
 import type { FieldConfig } from "../config.js"
 import { EditFormFieldList } from "./EditFormFieldList.js"
-import { Button } from "./ui.js"
+import { Button, SavedNotice } from "./ui.js"
 
 /** The sidebar's actions stack, each as wide as the sidebar. */
 const FULL_WIDTH = "w-full justify-center"
@@ -27,6 +27,8 @@ export interface EditFormSidebarProps {
   saving: boolean
   /** Saves the form; left out for a reader who may not change the record, so no Save is offered. */
   onSave?: () => void
+  /** When the last save landed, so "Saved" shows beside Save for a moment; null before one has. */
+  savedAt?: number | null
   isCreate?: boolean
   onDuplicate?: () => void
   onDelete?: () => void
@@ -44,6 +46,7 @@ export function EditFormSidebar({
   recordSyncKey,
   saving,
   onSave,
+  savedAt = null,
   isCreate = false,
   onDuplicate,
   onDelete,
@@ -77,6 +80,7 @@ export function EditFormSidebar({
             {saving ? "Saving..." : "Save"}
           </Button>
         )}
+        {publishing === undefined && onSave !== undefined && <SavedNotice at={savedAt} />}
         {!isCreate && onDuplicate && (
           <Button type="button" size="md" className={FULL_WIDTH} onClick={onDuplicate}>
             Duplicate

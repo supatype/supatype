@@ -51,6 +51,30 @@ export function Badge({
   )
 }
 
+/* ─── Saved notice ─── */
+
+/** How long "Saved" stays beside a Save button. */
+export const SAVED_NOTICE_MS = 3000
+
+/**
+ * "Saved", beside the Save button that was clicked, for three seconds.
+ *
+ * `at` is when the last save landed, or null before one has or while a new one is under way. A
+ * save that fails never sets it, so the error the form shows is the only message. Each new value
+ * of `at` shows the notice afresh and restarts the three seconds.
+ */
+export function SavedNotice({ at }: { at: number | null }): React.ReactElement | null {
+  const [visible, setVisible] = React.useState(at !== null)
+  React.useEffect(() => {
+    setVisible(at !== null)
+    if (at === null) return undefined
+    const timer = setTimeout(() => { setVisible(false) }, SAVED_NOTICE_MS)
+    return () => { clearTimeout(timer) }
+  }, [at])
+  if (!visible) return null
+  return <span data-ui="saved-notice" role="status" className="text-green-400 text-xs">Saved</span>
+}
+
 /* ─── Button ─── */
 
 type ButtonVariant = "secondary" | "primary" | "destructive" | "ghost"

@@ -3,7 +3,7 @@ import { useStudioClient } from "../StudioCore.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useInterval } from "../hooks/useTabActivity.js"
-import { Badge, Button, Card, Checkbox, ConfirmButton, Input, LoadingRows, TableCard, Td, Th, type DestructiveQuestion } from "../components/ui.js"
+import { Badge, Button, Card, Checkbox, ConfirmButton, Input, LoadingRows, SavedNotice, TableCard, Td, Th, type DestructiveQuestion } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { SlidePanel } from "../components/SlidePanel.js"
@@ -228,6 +228,7 @@ export function RestCacheBrowser({
   const [tableCfg, setTableCfg] = useState<RestTableCacheConfig>({ enabled: false, allow_public: false })
   const [cacheMaxTTL, setCacheMaxTTL] = useState(0)
   const [settingsSaving, setSettingsSaving] = useState(false)
+  const [settingsSavedAt, setSettingsSavedAt] = useState<number | null>(null)
   const [rowCacheNote, setRowCacheNote] = useState<ReconcileNote | null>(null)
   // What the schema permits, which is what decides whether each control below may be moved at
   // all. Undefined until the first read: a screen that assumed "everything" would offer controls
@@ -341,6 +342,7 @@ export function RestCacheBrowser({
     if (!tableFilter) return
     setSettingsSaving(true)
     setActionError(null)
+    setSettingsSavedAt(null)
     try {
       const cfgRes = await fetch(`${client.url}/admin/v1/config/rest`, {
         headers: studioAuthHeaders(client),
@@ -368,6 +370,7 @@ export function RestCacheBrowser({
       setRowCacheNote(reconcileNoteFor(tableFilter, saved.row_cache))
       setAdjustments((saved.adjusted ?? []).filter((a) => a.table === tableFilter || a.table === "*"))
       await loadSettings()
+      setSettingsSavedAt(Date.now())
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Save failed")
     } finally {
@@ -460,9 +463,12 @@ export function RestCacheBrowser({
               />
             </div>
             {controls.reason.ttl && <p className="text-xs text-muted-foreground">{controls.reason.ttl}</p>}
-            <Button size="xs" variant="primary" disabled={settingsSaving} onClick={() => void saveTableSettings()}>
-              {settingsSaving ? "Saving…" : "Save cache settings"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button size="xs" variant="primary" disabled={settingsSaving} onClick={() => void saveTableSettings()}>
+                {settingsSaving ? "Saving…" : "Save cache settings"}
+              </Button>
+              <SavedNotice at={settingsSavedAt} />
+            </div>
             {/*
               One switch, two caches. A table with no primary key gets the response cache and not
               the row cache, and this is the only place that difference is ever visible. Silence

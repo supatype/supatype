@@ -76,6 +76,18 @@ describe("what crosses the CLI to Studio boundary", () => {
     expect(out.livePreview).toEqual({ Post: { urlPattern: "/preview/{slug}" } })
   })
 
+  it("carries the project name and the site URL through to the General settings", () => {
+    const out = normalizeAdminConfig({ ...base, projectName: "shop", siteUrl: "https://shop.example.com" })
+    expect(out.projectName).toBe("shop")
+    expect(out.siteUrl).toBe("https://shop.example.com")
+  })
+
+  it("leaves the project name and site URL absent when the server sent none or sent rubbish", () => {
+    const out = normalizeAdminConfig({ ...base, projectName: "", siteUrl: 7 })
+    expect(out.projectName).toBeUndefined()
+    expect(out.siteUrl).toBeUndefined()
+  })
+
   it("keeps both an address and a pattern when a model gives both", () => {
     const out = normalizeAdminConfig({
       ...base,

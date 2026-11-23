@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react"
-import { Badge, Button, type BadgeVariant } from "./ui.js"
+import { Badge, Button, SavedNotice, type BadgeVariant } from "./ui.js"
 import { IconHistory } from "./icons.js"
 import { PublishSplitButton } from "./PublishMenu.js"
 import { SharePreview } from "./SharePreview.js"
@@ -88,6 +88,7 @@ export function PublishBar({ record, editor, seesDrafts, onNavigate }: PublishBa
     ...panelOf({ title: record.title, creating: recordId === undefined, dirty: editor.dirty, savedDraft: editor.draftSaved === true, state, locale }, localesFor(model, codes)),
     busy: actions.busy || editor.saving,
     saving: editor.saving,
+    savedAt: editor.savedNoticeAt ?? null,
     error: actions.error,
   }
   const toHistory = (): void => {
@@ -137,6 +138,8 @@ export interface PanelView {
   busy: boolean
   /** The form itself is saving, which Save draft says. */
   saving: boolean
+  /** When the last save landed, for the "Saved" notice beside Save draft. */
+  savedAt?: number | null
   error: string | null
 }
 
@@ -166,6 +169,7 @@ export function PublishPanel({ view, actions }: { view: PanelView; actions: Pane
         </Button>
         <PublishSplitButton panel={panel} title={view.title} busy={view.busy} actions={actions} />
       </div>
+      <SavedNotice at={view.savedAt ?? null} />
       {view.error !== null && <div className="text-xs text-destructive-text" role="alert">{view.error}</div>}
       {panel.note !== null && (
         <p className="text-xs text-muted-foreground">
