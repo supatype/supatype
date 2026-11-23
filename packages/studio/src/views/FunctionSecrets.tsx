@@ -7,7 +7,7 @@ import { ErrorBanner } from "../components/ErrorBanner.js"
 import { FieldError } from "../widgets/field-parts.js"
 import { functionsAdminError, isDataList } from "../lib/functions-admin.js"
 import { isString, readJson } from "../lib/json.js"
-import { secretNameProblem } from "../lib/secret-name.js"
+import { functionSecretNameProblem } from "@supatype/types"
 
 /**
  * The one place function secrets are managed. Data hooks run as functions and read the same store
@@ -56,7 +56,7 @@ export function FunctionSecrets({ scope = { kind: "shared" } }: { scope?: Secret
   const [savedAt, setSavedAt] = useState<number | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const name = key.trim()
-  const problem = secretNameProblem(name)
+  const problem = name === "" ? null : (functionSecretNameProblem(name) ?? null)
   const words = scopeWords(scope)
 
   const { data, loading, error: listError, refetch } = useApiQuery<string[]>(async () => {
