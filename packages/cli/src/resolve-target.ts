@@ -346,21 +346,45 @@ export interface TargetStreamPath {
 }
 
 /**
+ * The URL a Cloud project is served on: the environment's own URL as the link recorded it from the
+ * control plane. A link that holds only the control plane's URL for the environment (the default
+ * before the control plane was asked) has no project URL, and none is guessed: the command is
+ * refused and the user is told to link again.
+ */
+function cloudProjectUrl(target: DeployTarget): string {
+  const recorded = target.link?.environments[target.environment]?.apiUrl.replace(/\/$/, "")
+  const controlPlane = (target.link?.cloudApiUrl ?? target.apiBaseUrl).replace(/\/$/, "")
+  if (recorded !== undefined && recorded !== "" && recorded !== controlPlane) return recorded
+  throw new Error(
+    `This link holds no API address for the "${target.environment}" environment of ${target.projectRef}: it predates links recording one. Run: supatype link`,
+  )
+}
+
+/**
  * The target's functions: Supatype Cloud serves them on the project's own host and keeps past log
  * lines; a self-hosted or local server serves them under its API and relays a live tail from its
  * admin API. An authenticated invoke carries the Cloud session, or a local link's key; a
  * self-hosted link's service-role key is never handed to it.
  */
 export function targetFunctions(target: DeployTarget): TargetFunctions {
+  const logs = targetLogs(target)
   if (target.mode === "cloud") {
-    const invokeBase = `https://${target.projectRef}.supatype.dev/functions/v1`
-    return { invokeBase, invokeToken: target.token, logs: { kind: "window" } }
+    return { invokeBase: `${cloudProjectUrl(target)}/functions/v1`, invokeToken: target.token, logs }
   }
   // A local link is this machine's own server, and its key goes with an authenticated invoke there.
   // A self-hosted link's service-role key is not handed to a function.
   const invokeToken = target.mode === "local" ? target.token : undefined
+  return { invokeBase: `${target.apiBaseUrl}/functions/v1`, invokeToken, logs }
+}
+
+/**
+ * How the target's function logs are read. It needs no project URL, so a link too old to hold one
+ * can still read its logs.
+ */
+export function targetLogs(target: DeployTarget): TargetFunctions["logs"] {
+  if (target.mode === "cloud") return { kind: "window" }
   const tail: TargetStreamPath = { baseUrl: target.apiBaseUrl, apiPrefix: "/admin/v1", path: "/functions/logs/tail" }
-  return { invokeBase: `${target.apiBaseUrl}/functions/v1`, invokeToken, logs: { kind: "tail", tail } }
+  return { kind: "tail", tail }
 }
 
 /**
