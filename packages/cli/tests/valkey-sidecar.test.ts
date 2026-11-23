@@ -179,6 +179,20 @@ describe("a Valkey already running", () => {
     expect(calls).toEqual([])
   })
 
+  it("carries SUPATYPE_VALKEY_PASSWORD from the shell, then .env, as the named Valkey's password", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-valkey-pw-"))
+    try {
+      writeFileSync(join(dir, ".env"), "SUPATYPE_VALKEY_ADDR=127.0.0.1:6391\nSUPATYPE_VALKEY_PASSWORD=from-file\n")
+      vi.spyOn(console, "log").mockImplementation(() => undefined)
+      const calls: string[][] = []
+      expect(await ensureValkeySidecar("demo", dir, { docker: recordingDocker(calls) })).toMatchObject({ password: "from-file" })
+      vi.stubEnv("SUPATYPE_VALKEY_PASSWORD", "from-shell")
+      expect(await ensureValkeySidecar("demo", dir, { docker: recordingDocker(calls) })).toMatchObject({ password: "from-shell" })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   // 0.9.2 round 2 (R2-S21): read from the shell only, while the port variables are read from the
   // shell over .env, so a SUPATYPE_VALKEY_ADDR in .env was ignored and a sidecar started.
   it("is used when .env names it, and the shell's SUPATYPE_VALKEY_ADDR wins over .env's", async () => {

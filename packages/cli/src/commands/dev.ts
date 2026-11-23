@@ -149,6 +149,7 @@ import {
 import { ensureValkeySidecar, externalValkey, type RespCredentials } from "../valkey-sidecar.js"
 import {
   nativeKeyspaceAddr,
+  machineKeyspaceChecks,
   nativeKeyspacePort,
   writeKeyspacePasswordFile,
 } from "../native-keyspace.js"
@@ -484,7 +485,7 @@ export function registerDev(program: Command): void {
         // The RESP keyspace, when this archive carries it and can require a password: one process
         // instead of a Postgres and a Valkey container. The port is chosen rather than fixed
         // because 6379 is the first thing a developer's own Redis or a leftover sidecar takes.
-        const keyspacePort = await nativeKeyspacePort(config, pgBinDir, pgInstall.version)
+        const keyspacePort = await nativeKeyspacePort(config, pgBinDir, pgInstall.version, machineKeyspaceChecks(cwd))
         // The project's password, from .env or the file SUPATYPE_KEYSPACE_PASSWORD_FILE names
         // (R2-S16), which the keyspace reads itself from a file only this user can read, and
         // requires from its first client (N-RB2).
