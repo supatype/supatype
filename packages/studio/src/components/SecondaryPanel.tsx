@@ -17,6 +17,10 @@ import { SQL_EDITOR_HREF, sqlEditorOffered } from "../lib/sql-editor-access.js"
 import { bucketManagementOffered } from "../lib/capability-offers.js"
 import { useStaticSiteHost, type StaticSiteHost } from "../lib/static-site-host.js"
 import { staticSitePages } from "../lib/static-site.js"
+import { useExtensionServes } from "../hooks/useExtensionRoutes.js"
+
+/** The label of a group of pages not built yet. */
+const COMING_SOON = "Coming Soon"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -63,7 +67,7 @@ const STATIC_SECTIONS: Record<string, SectionDef> = {
           { label: "Overview",   href: "/database/overview" },
           { label: "Tables",     href: "/database/tables" },
           { label: "Views",      href: "/database/views" },
-          { label: "Functions",  href: "/database/functions", unavailable: { note: "Database function browser is not built yet" } },
+          { label: "Functions",  href: "/database/functions" },
           { label: "Triggers",   href: "/database/triggers" },
           { label: "Indexes",    href: "/database/indexes" },
           { label: "Constraints", href: "/database/constraints" },
@@ -82,7 +86,7 @@ const STATIC_SECTIONS: Record<string, SectionDef> = {
         ],
       },
       {
-        label: "Coming Soon",
+        label: COMING_SOON,
         items: [
           { label: "Wrappers",    href: "/database/wrappers", unavailable: { note: "Foreign data wrappers are not built yet" } },
           { label: "Replication", href: "/database/replication", unavailable: { note: "Read replicas are coming soon" } },
@@ -163,6 +167,32 @@ const STATIC_SECTIONS: Record<string, SectionDef> = {
   },
 }
 
+/**
+ * `section` with every page the host's extension serves made available: its "coming soon" note
+ * dropped, and the item moved out of a group of pages still to come into the group before it, so a
+ * page that works is not listed under "Coming Soon". On a host that serves none, nothing changes.
+ */
+export function withServedPages(section: SectionDef, serves: (href: string) => boolean): SectionDef {
+  const groups: NavGroup[] = []
+  for (const group of section.groups) {
+    const servedHere = group.items.filter((item) => item.unavailable !== undefined && serves(item.href))
+    if (servedHere.length === 0) {
+      groups.push(group)
+      continue
+    }
+    const available = servedHere.map(({ unavailable: _unavailable, ...item }) => item)
+    const rest = group.items.filter((item) => !servedHere.includes(item))
+    const previous = groups.at(-1)
+    if (group.label === COMING_SOON && previous !== undefined) {
+      groups[groups.length - 1] = { ...previous, items: [...previous.items, ...available] }
+      if (rest.length > 0) groups.push({ ...group, items: rest })
+    } else {
+      groups.push({ ...group, items: group.items.map((item) => available.find((a) => a.href === item.href) ?? item) })
+    }
+  }
+  return { ...section, groups }
+}
+
 /** The Database section, without the SQL editor for a role that is not offered it (RX1). */
 export function databaseSectionFor(capability: { role: string | null; permissions: Record<string, boolean> }): SectionDef {
   const section = STATIC_SECTIONS["database"]!
@@ -197,7 +227,7 @@ export function buildRealtimeSection(availability: InspectorAvailability): Secti
   return {
     title: "Realtime",
     groups: [{
-      label: "Coming Soon",
+      label: COMING_SOON,
       items: [
         { label: "Inspector", href: "/realtime", unavailable: { note: "The Realtime Inspector is coming soon" } },
         settings,
@@ -352,6 +382,7 @@ export function SecondaryPanel({
   const { availability: realtimeAvailability } = useInspectorAvailability({ enabled: sectionId === "realtime" })
   const capability = useStudioCapability()
   const staticSiteHost = useStaticSiteHost()
+  const serves = useExtensionServes()
 
   const adminFetch = React.useCallback(
     (adminPath: string, init?: RequestInit) => functionsAdminFetch(client, adminPath, init),
@@ -451,6 +482,7 @@ export function SecondaryPanel({
   } else {
     section = sectionId === "database" ? databaseSectionFor(capability) : (STATIC_SECTIONS[sectionId] ?? { title: "", groups: [] })
   }
+  section = withServedPages(section, serves)
 
   const claimedHref = longestMatchingHref(section, path)
 

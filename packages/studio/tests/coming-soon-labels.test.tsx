@@ -91,4 +91,12 @@ describe.each([
     expect(tag).not.toContain("aria-disabled")
     expect(html).not.toContain("SSO is coming soon")
   })
+
+  it("lists the database function browser as built, since its page is", () => {
+    const html = panel("/database/overview", platform)
+    const tag = entryTag(html, "Functions")
+    expect(tag).toMatch(/^<button/)
+    expect(tag).not.toContain("aria-disabled")
+    expect(html).not.toContain("Database function browser is not built yet")
+  })
 })
