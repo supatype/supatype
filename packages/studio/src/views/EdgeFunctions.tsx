@@ -9,7 +9,6 @@ import { useInterval } from "../hooks/useTabActivity.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import {
   type Guard,
-  isArrayOf,
   isNumber,
   isOneOf,
   isShape,
@@ -18,7 +17,7 @@ import {
   optional,
   readJson,
 } from "../lib/json.js"
-import { functionsAdminError, functionsAdminFetch } from "../lib/functions-admin.js"
+import { functionsAdminError, functionsAdminFetch, isDataList } from "../lib/functions-admin.js"
 import { useSendAs } from "../hooks/useSendAs.js"
 import { SendAsField } from "../components/SendAsField.js"
 
@@ -46,11 +45,6 @@ const isFunctionMeta: Guard<FunctionMeta> = isShape({
 })
 
 const isLogEntry: Guard<LogEntry> = isShape({ timestamp: isString, level: isString, message: isString })
-
-/** The functions admin API's list bodies: `{ data: [...] }`, where an empty list may be null. */
-function isDataList<T>(item: Guard<T>): Guard<{ data?: T[] | null }> {
-  return isShape({ data: optional(nullable(isArrayOf(item))) })
-}
 
 const isHttpMethod = isOneOf(["GET", "POST"] as const)
 const BUILTIN_RUNTIME_ENV_VARS: Array<{ key: string; description: string }> = [
