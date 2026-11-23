@@ -20,7 +20,7 @@ interface DiffOptions {
 export function registerDiff(program: Command): void {
   program
     .command("diff")
-    .description("Show planned schema changes without applying them (dry run)")
+    .description("Show planned schema changes (operations, not SQL) without applying them; `migrate` prints the SQL")
     .option("--connection <url>", "Database connection URL (overrides config)")
     .option("--env <name>", "Target environment when linked")
     .option("--direct", "Use local engine subprocess")

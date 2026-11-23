@@ -107,6 +107,8 @@ export interface ScaffoldAppOptions {
   upstream?: string
   start?: string
   viteDevUrl?: string
+  /** A React (Vite) starter: the page mounts `src/main.tsx`, and the packages and config come with it. */
+  react?: boolean
 }
 
 /** File-affecting answers that drive what `scaffold()` writes. */
@@ -573,17 +575,20 @@ async function promptApp(
         ? "proxy"
         : "none"
 
-  const mode = ensureNotCancelled(
-    await p.select<ScaffoldAppOptions["mode"]>({
+  const choice = ensureNotCancelled(
+    await p.select<ScaffoldAppOptions["mode"] | "react">({
       message: "Host a frontend app at /?",
       initialValue: initialMode,
       options: [
         { value: "none", label: "No app", hint: "API only" },
         { value: "static", label: "Static site", hint: "serve a built directory" },
         { value: "proxy", label: "Local dev server", hint: "forward requests to a dev server you run" },
+        { value: "react", label: "React (Vite)", hint: "a React starter on Vite, with @supatype/react" },
       ],
     }),
   )
+  if (choice === "react") return promptReactStarter(detected)
+  const mode = choice
 
   if (mode === "static") {
     const viteDevUrl = await promptViteDevUrl(detected, productionTarget)
@@ -593,6 +598,16 @@ async function promptApp(
   if (mode === "proxy") return promptDevServer(detected, productionTarget)
 
   return { mode: "none" }
+}
+
+/**
+ * The React (Vite) starter: a Vite app served through the dev proxy, like "Local dev server" with Vite
+ * chosen, plus the React page, packages and Vite plugin. Vite is the point, so it is not asked.
+ */
+async function promptReactStarter(detected: DetectedProjectSetup): Promise<ScaffoldAppOptions> {
+  if (!detected.declaresVite) refuseAddingViteOnOldNode()
+  const viteDevUrl = await askWithDefault("Vite dev server URL", detected.viteDevUrl)
+  return { mode: "proxy", upstream: viteDevUrl, start: "vite", viteDevUrl, react: true }
 }
 
 /**
@@ -818,6 +833,9 @@ export function scaffold(
   }
   write(opts.schemaPath, schemaTemplate())
   write(".env", env)
+  if (opts.email === "smtp" && opts.adminEmail) {
+    info(`SUPATYPE_SMTP_ADMIN_EMAIL in .env defaults to your admin email (${opts.adminEmail}): change it to the address mail should come from.`)
+  }
   scaffoldDevFrontendEnv(dir, opts)
   write("seed.ts", seedTemplate(opts.projectName))
   write("seeds/.gitkeep", "")
@@ -972,13 +990,89 @@ function scaffoldVite(
   holding: string,
 ): void {
   if (!opts.app.viteDevUrl) return
-  write("index.html", holding)
+  write("index.html", opts.app.react ? reactIndexHtml(opts.projectName, servedStatically(opts)) : holding)
+  if (opts.app.react) scaffoldReactSources(opts.projectName, write)
   const viteConfigRel = VITE_CONFIG_NAMES.find((name) => existsSync(join(dir, name)))
   if (viteConfigRel) {
     file("skipped", `${viteConfigRel} (already exists)`)
     return
   }
-  write(newViteConfigName(dir), viteConfigTemplate(opts.app.viteDevUrl, viteBuildOutDir(opts)))
+  write(newViteConfigName(dir), viteConfigTemplate(opts.app.viteDevUrl, viteBuildOutDir(opts), opts.app.react === true))
+}
+
+/** The React starter's page: a root to mount into and the entry module, with the runtime env tag a served build needs. */
+function reactIndexHtml(projectName: string, runtimeEnv: boolean): string {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${escapeHtml(projectName)}: Supatype</title>${runtimeEnv ? RUNTIME_ENV_SCRIPT : ""}
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+`
+}
+
+/** src/supatype.ts, main.tsx and App.tsx of the React starter. */
+function scaffoldReactSources(projectName: string, write: (rel: string, content: string) => void): void {
+  write("src/supatype.ts", REACT_CLIENT_SOURCE)
+  write("src/main.tsx", REACT_MAIN_SOURCE)
+  write("src/App.tsx", reactAppSource(projectName))
+}
+
+const REACT_CLIENT_SOURCE = [
+  'import { createClient } from "@supatype/client"',
+  "",
+  "// The address and anon key: init, supatype dev and supatype keys write them to .env.development.local,",
+  "// and a build Supatype serves reads them from /supatype-env.js.",
+  "export const supatype = createClient({",
+  "  url: import.meta.env.VITE_SUPATYPE_URL,",
+  "  anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,",
+  "})",
+  "",
+].join("\n")
+
+const REACT_MAIN_SOURCE = [
+  'import { StrictMode } from "react"',
+  'import { createRoot } from "react-dom/client"',
+  'import { SupatypeProvider } from "@supatype/react"',
+  'import { App } from "./App"',
+  'import { supatype } from "./supatype"',
+  "",
+  'const root = document.getElementById("root")',
+  'if (root === null) throw new Error("index.html has no #root to mount the app into")',
+  "",
+  "createRoot(root).render(",
+  "  <StrictMode>",
+  "    <SupatypeProvider client={supatype}>",
+  "      <App />",
+  "    </SupatypeProvider>",
+  "  </StrictMode>,",
+  ")",
+  "",
+].join("\n")
+
+/** The starter's page component. The project name is shown as a JSON string, so no name can break the markup. */
+function reactAppSource(projectName: string): string {
+  return [
+    'import { useAuth } from "@supatype/react"',
+    "",
+    "export function App() {",
+    "  const { user, loading } = useAuth()",
+    "  return (",
+    "    <main>",
+    `      <h1>{${JSON.stringify(projectName)}}</h1>`,
+    '      <p>{loading ? "Checking your session" : user ? "Signed in as " + user.email : "Not signed in"}</p>',
+    "      <p>Add a model to schema/index.ts, push it, then read it with useQuery from @supatype/react.</p>",
+    "    </main>",
+    "  )",
+    "}",
+    "",
+  ].join("\n")
 }
 
 /**
@@ -1370,13 +1464,15 @@ function vitePortFromDevUrl(viteDevUrl: string): number {
   }
 }
 
-function viteConfigTemplate(viteDevUrl: string, outDir?: string): string {
+function viteConfigTemplate(viteDevUrl: string, outDir?: string, react = false): string {
   const port = vitePortFromDevUrl(viteDevUrl)
   const build = outDir === undefined ? "" : `  // Built into the directory supatype.config.ts serves.\n  build: { outDir: "${outDir}" },\n`
-  return `import { defineConfig } from "vite"
+  const reactImport = react ? '\nimport react from "@vitejs/plugin-react"' : ""
+  const reactPlugin = react ? "  plugins: [react()],\n" : ""
+  return `import { defineConfig } from "vite"${reactImport}
 
 export default defineConfig({
-${build}  server: {
+${reactPlugin}${build}  server: {
     // supatype dev sets ${DEV_APP_HOST_ENV}: 0.0.0.0 on Linux, where the gateway arrives over
     // the Docker bridge rather than the loopback.
     host: process.env.${DEV_APP_HOST_ENV} ?? "127.0.0.1",
@@ -1557,7 +1653,7 @@ function selfHostPortsEnvSection(storageProduction: StorageProvider): string {
  * written unprefixed (RESEND_API_KEY, SES_FROM, SMTP_HOST), which nothing reads, so a developer who
  * filled them in still got no email.
  */
-function emailEnvSection({ email, projectName, smtp }: ScaffoldOptions): string {
+function emailEnvSection({ email, projectName, smtp, adminEmail }: ScaffoldOptions): string {
   switch (email) {
     case "resend":
       return `# Email (Resend)
@@ -1575,6 +1671,9 @@ SUPATYPE_SMTP_HOST=${smtp?.host ?? ""}
 SUPATYPE_SMTP_PORT=${smtp?.port ?? 587}
 SUPATYPE_SMTP_USER=
 SUPATYPE_SMTP_PASS=
+# The address mail is sent from. Without it the server builds an empty From and fails every send.
+# Defaulted to the admin email given at init: change it to a sender your SMTP server accepts.
+SUPATYPE_SMTP_ADMIN_EMAIL=${adminEmail ?? ""}
 SUPATYPE_SMTP_SENDER_NAME=${projectName}`
     case "console":
     default:

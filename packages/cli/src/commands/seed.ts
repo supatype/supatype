@@ -36,6 +36,7 @@ import {
 } from "../seed-prepare.js"
 import { isSeedResult, isSeedStatus, report, reportSeedStatus } from "../seed-report.js"
 import { linkedTarget, runRemoteSeed } from "../seed-remote.js"
+import { withPublishing } from "../model-versioning.js"
 import { error, info, warn } from "../ui/messages.js"
 
 export { discoverSeedsDir, seedPaths } from "../seed-prepare.js"
@@ -183,7 +184,7 @@ function collectLocal(file: string | undefined, opts: SeedFlags, cwd: string, co
 
 // --- Applying ---
 
-interface ApplyOptions {
+export interface ApplyOptions {
   cwd: string
   config: SupatypeConfig
   dsn: string
@@ -192,9 +193,9 @@ interface ApplyOptions {
   engine: ComposeEngine | undefined
 }
 
-async function apply(prepared: Prepared[], options: ApplyOptions): Promise<number> {
+export async function apply(prepared: Prepared[], options: ApplyOptions): Promise<number> {
   const { cwd, config, dsn, opts, engine } = options
-  const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
+  const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
   let documents: string[]
   try {
     documents = seedDocuments(prepared, ast)

@@ -16,13 +16,15 @@ import {
 } from "../browser-login.js"
 import { errorMessage } from "../error-message.js"
 import {
+  checkCloudSession,
   clearCloudCredentials,
   credentialKind,
   fetchCloudEmail,
   loadCloudCredentials,
   persistCloudSession,
+  type CloudCredentials,
 } from "../cloud-credentials.js"
-import { loadProjectLink, saveProjectLink } from "../link.js"
+import { loadProjectLink, saveProjectLink, type ProjectLink } from "../link.js"
 import { openBrowser } from "../open-browser.js"
 import { isPersonalAccessToken } from "../personal-access-token.js"
 import { isInteractive } from "../ui/interactive.js"
@@ -140,8 +142,8 @@ function registerLogout(program: Command): void {
 function registerWhoami(program: Command): void {
   program
     .command("whoami")
-    .description("Show the current Supatype Cloud session")
-    .action(() => {
+    .description("Show the current Supatype Cloud session, checked against the control plane")
+    .action(async () => {
       const creds = loadCloudCredentials()
       const cwd = process.cwd()
       const link = loadProjectLink(cwd)
@@ -156,5 +158,28 @@ function registerWhoami(program: Command): void {
         plain(`Updated: ${creds.updatedAt}`)
       }
       if (link?.kind === "cloud") plain(`Linked project: ${link.projectRef}`)
+      await reportSessionState(creds, link)
     })
+}
+
+/** The control plane answer for the stored session; a rejected one is not refreshed, since a login now stores a personal access token. Exits 1 when it is gone, 2 when the control plane cannot be reached. */
+async function reportSessionState(
+  creds: CloudCredentials | null,
+  link: ProjectLink | null,
+): Promise<void> {
+  const cloudLink = link?.kind === "cloud" ? link : null
+  const apiUrl = creds?.apiUrl ?? cloudLink?.cloudApiUrl
+  const accessToken = creds?.accessToken ?? cloudLink?.token
+  if (!apiUrl || !accessToken) return
+
+  const check = await checkCloudSession(apiUrl, accessToken)
+  if (check.state === "valid") {
+    info("Session: valid")
+  } else if (check.state === "rejected") {
+    error(`Session: rejected by ${apiUrl}. It was signed out or revoked. Run: supatype login`)
+    process.exit(1)
+  } else {
+    error(`Session: not checked, ${check.reason}`)
+    process.exit(2)
+  }
 }

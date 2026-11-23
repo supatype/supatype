@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest"
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
@@ -496,6 +496,26 @@ describe("scaffold()", () => {
     const env = readFileSync(join(tmpRoot, ".env"), "utf8")
     expect(env).toMatch(/^SUPATYPE_SMTP_HOST=smtp\.acme\.test$/m)
     expect(env).toMatch(/^SUPATYPE_SMTP_PORT=2525$/m)
+  })
+
+  it("defaults the SMTP sender address to the admin email and says so", () => {
+    const said = vi.spyOn(console, "log").mockImplementation(() => undefined)
+    scaffold(tmpRoot, {
+      ...defaultScaffoldOptions("my-app"),
+      email: "smtp",
+      smtp: { host: "smtp.acme.test", port: 2525 },
+      adminEmail: "admin@acme.test",
+      adminPassword: "correct horse battery",
+    })
+    const env = readFileSync(join(tmpRoot, ".env"), "utf8")
+    expect(env).toMatch(/^SUPATYPE_SMTP_ADMIN_EMAIL=admin@acme\.test$/m)
+    expect(said.mock.calls.flat().join("\n")).toContain("SUPATYPE_SMTP_ADMIN_EMAIL in .env defaults to your admin email (admin@acme.test)")
+    said.mockRestore()
+  })
+
+  it("writes the SMTP sender address line blank when no admin email was given", () => {
+    scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app"), email: "smtp" })
+    expect(readFileSync(join(tmpRoot, ".env"), "utf8")).toMatch(/^SUPATYPE_SMTP_ADMIN_EMAIL=$/m)
   })
 
   it("mixed local dev and s3 production writes both storage sections", () => {
