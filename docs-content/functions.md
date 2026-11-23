@@ -210,6 +210,8 @@ Function logs are JSON lines on the container's output, each with the call's `re
 $ npx supatype self-host compose logs --service functions-worker
 ```
 
+Under `supatype dev` without Docker (native dev), functions run inside the server process, so there is no worker container to read. `supatype dev` sets `SUPATYPE_FUNCTIONS_LOG_TO_STDOUT`, and the server then prints each line a function writes to the terminal that runs `dev`, prefixed with the function name, for example `[hello] got a request`. Lines that name no function, such as Deno's own errors, are prefixed `[deno]`. The same lines stay in Studio's function logs. A server that does not have the variable set, such as Cloud or a Compose stack, prints nothing extra.
+
 :::note
 The Compose file mounts `functions/` at the project root. Keep the default path on a self-hosted stack.
 :::

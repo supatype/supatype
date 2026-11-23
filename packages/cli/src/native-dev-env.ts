@@ -138,6 +138,8 @@ export function nativeServerCoreEnv(input: NativeServerCoreInput): Record<string
     SUPATYPE_DB_PUBLIC_URL: splitPassword(input.databaseUrl).dsn,
     // A clear 501 on /graphql/v1 rather than "function not found" from PostgREST.
     ...nativeGraphqlServerEnv(input.pgBinDir),
+    // Natively the server runs in a terminal; this prints each function's console.log there.
+    SUPATYPE_FUNCTIONS_LOG_TO_STDOUT: "true",
   }
 }
 

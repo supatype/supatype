@@ -75,6 +75,7 @@ describe("supatype-server's outer environment on the native path", () => {
       SUPATYPE_ADMIN_CONFIG_PATH: "/p/.supatype/admin-config.json",
       SUPATYPE_POSTGREST_URL: "http://127.0.0.1:3001",
       SUPATYPE_DB_PUBLIC_URL: "postgres://postgres@127.0.0.1:5433/acme?sslmode=disable",
+      SUPATYPE_FUNCTIONS_LOG_TO_STDOUT: "true",
     })
   })
 
