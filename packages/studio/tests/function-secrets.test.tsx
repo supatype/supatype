@@ -139,7 +139,7 @@ describe("the secret name rule", () => {
     const container = await open(SELF_HOST, <FunctionSecrets />)
     await typeInto(keyInput(container), name)
     await settle()
-    expect(container.textContent).toContain("letters, digits and underscores")
+    expect(container.textContent).toContain("letters, digits and underscore")
     expect(keyInput(container).getAttribute("aria-invalid")).toBe("true")
     expect(button(container, "Set secret").disabled).toBe(true)
     await act(async () => { button(container, "Set secret").click() })
@@ -152,7 +152,7 @@ describe("the secret name rule", () => {
     const container = await open(SELF_HOST, <FunctionSecrets />)
     await typeInto(keyInput(container), name)
     await settle()
-    expect(container.textContent).not.toContain("letters, digits and underscores")
+    expect(container.textContent).not.toContain("letters, digits and underscore")
     expect(button(container, "Set secret").disabled).toBe(false)
   })
 })
@@ -224,5 +224,15 @@ describe("Settings > Environment", () => {
     const link = container.querySelector<HTMLAnchorElement>('a[data-ui="text-link"]')
     expect(link?.getAttribute("href")).toBe("/edge-functions?tab=env")
     expect(container.textContent).toContain("Functions")
+  })
+})
+
+describe("the secret name message", () => {
+  it("is the one @supatype/types gives, naming the refused name", async () => {
+    serveEnv([])
+    const container = await open(SELF_HOST, <FunctionSecrets />)
+    await typeInto(keyInput(container), "1STRIPE")
+    await settle()
+    expect(container.textContent).toContain('"1STRIPE" is not a valid secret name: use letters, digits and underscore, and do not start with a digit.')
   })
 })
