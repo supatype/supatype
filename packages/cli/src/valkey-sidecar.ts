@@ -148,7 +148,7 @@ export async function ensureValkeySidecar(
  * The Valkey SUPATYPE_VALKEY_ADDR names: the shell's, then `.env` and `.env.local`'s, as for the
  * port variables. It was read from the shell only, so one in .env was ignored (0.9.2 round 2, R2-S21).
  */
-function namedValkeyAddr(cwd: string): string | undefined {
+export function namedValkeyAddr(cwd: string): string | undefined {
   return namedDotEnvValue(cwd, VALKEY_ADDR_ENV)
 }
 

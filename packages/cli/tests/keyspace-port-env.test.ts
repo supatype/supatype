@@ -104,4 +104,31 @@ describe("the Valkey sidecar's port", () => {
     const run = ran.find((args) => args[0] === "run")
     expect(run?.join(" ")).toContain(`127.0.0.1:${port}:6379`)
   })
+
+  // Y19 (2026-11-23 run) did not reach this on Windows, where the sidecar is the only cache. The
+  // docker calls are injected, so this is the path Windows takes, without Docker.
+  it("starts no container, naming the variable, when the port it names is taken", async () => {
+    const held = createServer()
+    await new Promise<void>((done) => held.listen(0, "127.0.0.1", done))
+    const address = held.address()
+    const port = typeof address === "object" && address !== null ? address.port : 0
+    vi.stubEnv(KEYSPACE_PORT_ENV, String(port))
+    vi.stubEnv("SUPATYPE_VALKEY_ADDR", "")
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const ran: string[][] = []
+    const ok: DockerResult = { status: 0, stdout: "", stderr: "", error: undefined, timedOut: false } as DockerResult
+    try {
+      const result = await ensureValkeySidecar("acme", project(), {
+        docker: async (args) => {
+          ran.push([...args])
+          return ok
+        },
+      })
+      expect(result.addr).toBe("")
+      expect(ran.some((args) => args[0] === "run")).toBe(false)
+      expect(warn.mock.calls.flat().join("\n")).toContain(`${KEYSPACE_PORT_ENV}=${port}`)
+    } finally {
+      await new Promise((done) => held.close(done))
+    }
+  })
 })

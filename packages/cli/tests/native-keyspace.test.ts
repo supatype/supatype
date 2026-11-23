@@ -224,6 +224,20 @@ describe("whether native dev serves the keyspace from Postgres", () => {
     await expect(nativeKeyspacePort(external, withLibrary(), "17.2.13", checks)).resolves.toBeNull()
   })
 
+  // D-52 (e2e Y19): a Valkey the project names won on Windows, whose archive has no pg_keyspace,
+  // and lost on Linux, where Postgres served the keyspace and the named one was never used.
+  it("leaves the cache to a Valkey the project names, whatever the archive carries", async () => {
+    const named: NativeKeyspaceChecks = { ...checks, namedValkey: () => "127.0.0.1:28710" }
+    await expect(nativeKeyspacePort(project(pinned), withLibrary(), "17.2.13", named)).resolves.toBeNull()
+    const keyspace = project({ ...pinned, cache: { provider: "pg_keyspace" } })
+    await expect(nativeKeyspacePort(keyspace, withLibrary(), "17.2.13", named)).resolves.toBeNull()
+  })
+
+  it("serves the keyspace when no Valkey is named", async () => {
+    const unnamed: NativeKeyspaceChecks = { ...checks, namedValkey: () => undefined }
+    await expect(nativeKeyspacePort(project(pinned), withLibrary(), "17.2.13", unnamed)).resolves.toBe(6379)
+  })
+
   it("falls back to Valkey when no port is free", async () => {
     const noPort: NativeKeyspaceChecks = { ...checks, freePort: () => Promise.resolve(null) }
     await expect(nativeKeyspacePort(project(pinned), withLibrary(), "17.2.13", noPort)).resolves.toBeNull()
