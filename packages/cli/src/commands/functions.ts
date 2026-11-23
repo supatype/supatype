@@ -36,6 +36,7 @@ import {
   type FunctionsWorkerProject,
 } from "../functions-worker-files.js"
 import { functionsServeKeyPath, sweepStaleServeKeyFiles, writeServiceRoleKeyFileUntilExit } from "../service-role-key-file.js"
+import { cloudAnonKey, publishedAnonKey } from "../frontend-values-linked.js"
 import { loadProjectLink } from "../link.js"
 import { projectRequest, resolveTarget, targetFunctions, targetLogs, type DeployTarget, type TargetStreamPath } from "../resolve-target.js"
 import { targetFetch, targetStream, type TargetFetchOptions } from "../target-client.js"
@@ -129,7 +130,7 @@ export function registerFunctions(program: Command): void {
       "Invoke a local or deployed function and print its status and body. Exits 1 when it answers with a status of 400 or above.",
     )
     .option("--data <json>", "JSON body to send", "{}")
-    .option("--auth", "Send a token: your Cloud session on a Cloud link, a test JWT on this machine; refused for a self-hosted server")
+    .option("--auth", "Send a token: a test JWT on this machine; refused for a Cloud link and for a self-hosted server")
     .option(
       "--local",
       "Invoke locally: a running `functions serve` on --port if one answers, otherwise the dev API (the default when no Cloud project is linked)",
@@ -758,8 +759,25 @@ async function invokeRequest(cwd: string, name: string, opts: InvokeOptions): Pr
     ? `${await localFunctionsBase(cwd, opts.port)}/${name}`
     : `${targetFunctions(target).invokeBase}/${name}`
   const headers: Record<string, string> = { "Content-Type": "application/json" }
+  if (opts.auth && target?.mode === "cloud") refuseCloudAuth()
+  // A Cloud gateway refuses a request with no project API key, so the environment's anon key goes with every call.
+  if (target?.mode === "cloud") headers["apikey"] = await cloudApiKey(target, new URL(url).origin)
   if (opts.auth) headers["Authorization"] = `Bearer ${target === null ? LOCAL_TEST_JWT : invokeToken(target)}`
   return { url, headers }
+}
+
+/**
+ * The Cloud environment's anon key, or the command ends saying why it could not be had. The
+ * environment publishes it at its own address, which needs no session, and invoking a public
+ * function never did; the control plane's keys route (a session) is the second place to ask.
+ */
+async function cloudApiKey(target: DeployTarget, projectUrl: string): Promise<string> {
+  const published = await publishedAnonKey(projectUrl, true)
+  if (published.value !== undefined) return published.value
+  const fromControlPlane = target.token ? await cloudAnonKey(target, projectUrl) : undefined
+  if (fromControlPlane?.value !== undefined) return fromControlPlane.value
+  error(`Could not get the anon key of "${target.environment}" to call the function with: ${published.note ?? "no reason given"}`)
+  process.exit(1)
 }
 
 /** The status, how long it took, and the body, as JSON when it is. */
@@ -791,15 +809,25 @@ const LOCAL_TEST_JWT =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJyb2xlIjoiYXV0aGVudGljYXRlZCIsImlhdCI6MTcwMDAwMDAwMH0.test"
 
 /**
+ * Ends the command: `--auth` on a Cloud link would hand the user's Cloud session to the function.
+ * That session manages the user's projects, and the function's code could log it or send it on. The
+ * command sends nothing, not even the project API key, once it has refused.
+ */
+function refuseCloudAuth(): never {
+  error("--auth is not available on a Cloud link: it would send your Supatype Cloud session, which can manage your projects, to the function.")
+  error("Call the function with a signed-in user's access token instead (for example with curl), or use --local to test against this machine.")
+  process.exit(1)
+}
+
+/**
  * The token `invoke --auth` sends to a linked target ({@link targetFunctions}), or the command ends
- * saying why there is none. A self-hosted server gets neither the placeholder nor the link's
- * service-role key.
+ * saying why there is none. A Cloud link never gets here ({@link refuseCloudAuth}); a self-hosted
+ * server gets neither the placeholder nor the link's service-role key.
  */
 function invokeToken(target: DeployTarget): string {
   const token = targetFunctions(target).invokeToken
   if (token !== undefined) return token
-  if (target.mode === "cloud") error(`--auth sends your Supatype Cloud session. ${NOT_LOGGED_IN}`)
-  else error(`--auth has no user token for ${target.apiBaseUrl}. Call the function with a signed-in user's access token instead.`)
+  error(`--auth has no user token for ${target.apiBaseUrl}. Call the function with a signed-in user's access token instead.`)
   process.exit(1)
 }
 

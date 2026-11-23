@@ -363,13 +363,13 @@ function cloudProjectUrl(target: DeployTarget): string {
 /**
  * The target's functions: Supatype Cloud serves them on the project's own host and keeps past log
  * lines; a self-hosted or local server serves them under its API and relays a live tail from its
- * admin API. An authenticated invoke carries the Cloud session, or a local link's key; a
- * self-hosted link's service-role key is never handed to it.
+ * admin API. An authenticated invoke carries a local link's key; neither the Cloud session nor a
+ * self-hosted link's service-role key is ever handed to a function.
  */
 export function targetFunctions(target: DeployTarget): TargetFunctions {
   const logs = targetLogs(target)
   if (target.mode === "cloud") {
-    return { invokeBase: `${cloudProjectUrl(target)}/functions/v1`, invokeToken: target.token, logs }
+    return { invokeBase: `${cloudProjectUrl(target)}/functions/v1`, invokeToken: undefined, logs }
   }
   // A local link is this machine's own server, and its key goes with an authenticated invoke there.
   // A self-hosted link's service-role key is not handed to a function.
