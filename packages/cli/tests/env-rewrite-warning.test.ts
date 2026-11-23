@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest"
 import { syncConfigMailerEnv } from "../src/config-mailer-env.js"
 import { syncComposeImagePins } from "../src/dev-compose.js"
 import { MANAGED_MARKER, upsertEnvFile, type HandEditedValue } from "../src/env-file.js"
@@ -14,7 +14,7 @@ import type { SupatypeProjectConfig } from "../src/project-config.js"
  * the value is still replaced, but now the developer is told which key, from what, to what.
  */
 let dir = ""
-let warn: ReturnType<typeof vi.spyOn>
+let warn: MockInstance<Console["warn"]>
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "supatype-env-warn-"))
