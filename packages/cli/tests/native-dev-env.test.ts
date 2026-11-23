@@ -202,6 +202,18 @@ describe("the keyspace login native dev hands the server", () => {
     })
   })
 
+  // Y19 (2026-11-23 run): a Valkey started with `requirepass` has one user, `default`. The server
+  // logs in as `supatype` when it is given a password and no user, so the named Valkey answered
+  // WRONGPASS and the cache bypassed.
+  it("logs in to a named Valkey as its default user when only a password is given", () => {
+    const named = { sidecar: { addr: "127.0.0.1:6380", containerName: null, started: false }, login: null }
+    expect(nativeKeyspaceServerEnv(named, { SUPATYPE_VALKEY_PASSWORD: "mine" })).toEqual({
+      SUPATYPE_KEYSPACE_USERNAME: "default",
+      SUPATYPE_KEYSPACE_PASSWORD: "mine",
+      SUPATYPE_KEYSPACE_PASSWORD_FILE: "",
+    })
+  })
+
   it("asks nothing of .env when there is no Valkey at all", () => {
     expect(nativeKeyspaceServerEnv({ sidecar: { addr: "", containerName: null, started: false }, login: null }, { SUPATYPE_VALKEY_PASSWORD: "mine" })).toEqual({})
   })

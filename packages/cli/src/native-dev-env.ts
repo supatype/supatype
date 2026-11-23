@@ -22,6 +22,9 @@ import { KEYSPACE_PASSWORD_ENV } from "./local-secrets.js"
 import { KEYSPACE_PASSWORD_FILE_ENV } from "./keyspace-password-file.js"
 import type { RespCredentials, ValkeySidecarResult } from "./valkey-sidecar.js"
 
+/** The user a Valkey has before ACLs are configured, and the one `requirepass` gives a password to. */
+const DEFAULT_VALKEY_USERNAME = "default"
+
 /** Where native dev's REST cache is: the server's RESP address, and its login when it needs one. */
 export interface NativeCache {
   sidecar: ValkeySidecarResult
@@ -60,12 +63,16 @@ export function nativeKeyspaceServerEnv(cache: NativeCache, env: Record<string, 
  * (and SUPATYPE_VALKEY_USERNAME) from the shell or .env, never the keyspace's. init writes a keyspace
  * password into every .env, and handing it on made a Valkey with no password refuse the server with
  * WRONGPASS (owner, 2026-11-15).
+ *
+ * A password with no user is the `default` user's: a Valkey started with `requirepass` has no other.
+ * Left blank the server logs in as `supatype`, its own keyspace user, which that Valkey does not
+ * know, and answers WRONGPASS all the same (Y19, 2026-11-23 run).
  */
 function namedValkeyLogin(env: Record<string, string | undefined>): Record<string, string> {
   const password = env["SUPATYPE_VALKEY_PASSWORD"]?.trim() ?? ""
-  const username = env["SUPATYPE_VALKEY_USERNAME"]?.trim() ?? ""
+  const username = env["SUPATYPE_VALKEY_USERNAME"]?.trim() || DEFAULT_VALKEY_USERNAME
   return {
-    ...(password !== "" && username !== "" && { SUPATYPE_KEYSPACE_USERNAME: username }),
+    ...(password !== "" && { SUPATYPE_KEYSPACE_USERNAME: username }),
     [KEYSPACE_PASSWORD_ENV]: password,
     [KEYSPACE_PASSWORD_FILE_ENV]: "",
   }
