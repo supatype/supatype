@@ -124,6 +124,13 @@
   the kinds it does know are still converted, so a kind added by a newer service never costs a
   change. The REST field-kinds document already behaved this way and is now pinned by the same
   shared check.
+* **client:** a response is refused, with the same error as a single lossy number, when a number
+  inside an array in a column the generated types do not describe would lose digits in
+  `JSON.parse`. The error names the column. Elements are checked at any nesting depth by the
+  rules that already applied to a single value: a literal is lossy when its value changes, so
+  `19.0000` and `1e2` pass. Columns registered as `bigint[]` or `numeric[]` are still kept exact,
+  not refused. A json column holding an array of numbers too large for a double was read with
+  rounded elements before; it is now refused.
 * **client:** an array of exact values no longer loses digits. A stored `bigint[]` of
   9007199254740993 came back as 9007199254740992 and a `numeric[]` of 1.10 as 1.1, because only a
   number that was the direct value of a column was protected from `JSON.parse`. Every element of
