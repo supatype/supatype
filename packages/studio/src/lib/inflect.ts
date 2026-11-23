@@ -9,11 +9,12 @@ import pluralizeLib from "pluralize"
  * string, so a whole multi-word label goes in as written: "Child Education Experience" becomes
  * "Child Education Experiences".
  *
- * Two corrections for words a model is likely to be named after, where the library's answer is
- * wrong for a label: "Data" is a mass noun here, not the plural of "Datum", and "Caches" comes from
- * "Cache", not "Cach".
+ * Corrections for words a model is likely to be named after, where the library's answer is wrong
+ * for a label: "Data" is a mass noun here, not the plural of "Datum", "Feedback" is a mass noun
+ * ("Feedbacks" is not what a model of replies is called), and "Caches" comes from "Cache", not "Cach".
  */
 pluralizeLib.addUncountableRule(/data$/i)
+pluralizeLib.addUncountableRule(/feedback$/i)
 pluralizeLib.addSingularRule(/(cach|nich)es$/i, "$1e")
 
 /** "Post" to "Posts"; "Places" and "Children" stay as they are. */
