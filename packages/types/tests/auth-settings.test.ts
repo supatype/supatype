@@ -163,9 +163,9 @@ describe("validateAuthSettings", () => {
   })
 
   it("leaves SES key presence to the caller, but still refuses a literal where a reference belongs", () => {
-    expect(validateAuthSettings({ email: { provider: "ses" } }, "cloud")).toEqual([])
+    expect(validateAuthSettings({ email: { provider: "ses", ses_from: "a@b.test" } }, "cloud")).toEqual([])
     expect(validateAuthSettings({ email: { provider: "ses" } }, "self-host")).toEqual([])
-    expect(validateAuthSettings({ email: { provider: "ses", ses_access_key_id: "literal" } }, "cloud")[0]).toContain("ses_access_key_id")
+    expect(validateAuthSettings({ email: { provider: "ses", ses_from: "a@b.test", ses_access_key_id: "literal" } }, "cloud")[0]).toContain("ses_access_key_id")
   })
 
   it("uses the SES keys only while SES is the provider", () => {
@@ -309,5 +309,19 @@ describe("parseAuthSettings", () => {
     const bad = parseAuthSettings({ auth: { siteUrl: "nope" } }, "cloud")
     expect(bad.ok).toBe(false)
     expect(bad.ok ? [] : bad.problems[0]).toContain("auth.siteUrl")
+  })
+})
+
+describe("SES sender on Cloud", () => {
+  const keys = { ses_access_key_id: "env(SES_KEY)", ses_secret_access_key: "env(SES_SECRET)" }
+
+  it("names email.ses_from when Cloud is given SES without it", () => {
+    const problems = validateAuthSettings({ email: { provider: "ses", ...keys } }, "cloud")
+    expect(problems.join("\n")).toContain("email.ses_from")
+  })
+
+  it("takes SES with a sender on Cloud, and leaves self-host to its .env", () => {
+    expect(validateAuthSettings({ email: { provider: "ses", ses_from: "noreply@example.com", ...keys } }, "cloud")).toEqual([])
+    expect(validateAuthSettings({ email: { provider: "ses", ...keys } }, "self-host")).toEqual([])
   })
 })

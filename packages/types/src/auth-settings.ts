@@ -453,7 +453,22 @@ function mailProblems(email: unknown, target: AuthTarget): string[] {
     secretProblem(email["ses_secret_access_key"], "email.ses_secret_access_key", target, true),
     ...(["resend_from", "ses_from", "ses_region"] as const).map((f) => stringProblem(email[f], `email.${f}`)),
   ]
-  return [...found.filter((p): p is string => p !== undefined), ...smtpProblems(email["smtp"], target)]
+  return [
+    ...found.filter((p): p is string => p !== undefined),
+    ...sesSenderProblems(provider, email["ses_from"], target),
+    ...smtpProblems(email["smtp"], target),
+  ]
+}
+
+/**
+ * SES with no sender cannot send: the server logs "falling back to noop" and every mail is dropped
+ * while the request answers 200. A self-hosted stack can take the sender from `.env`
+ * (SUPATYPE_SES_FROM); a hosted project has no `.env`, so the setting is required there.
+ */
+function sesSenderProblems(provider: unknown, from: unknown, target: AuthTarget): string[] {
+  if (target !== "cloud" || provider !== "ses") return []
+  if (typeof from === "string" && from.trim() !== "") return []
+  return ["email.ses_from must be set when email.provider is ses: without a sender address the server sends no mail and says nothing"]
 }
 
 /**
