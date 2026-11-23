@@ -49,6 +49,16 @@ async function fetchSiteStatus(client: SupatypeClient): Promise<SiteStatus> {
 }
 
 /**
+ * Whether this gateway has a site status route at all. A 404 means it does not (a server older than
+ * the route), so there is no site to describe; any other answer, including a refusal or a failure,
+ * leaves the group in place for its pages to explain.
+ */
+async function fetchSiteRouteExists(client: SupatypeClient): Promise<boolean> {
+  const res = await fetch(`${client.url}/admin/v1/site/status`, { headers: studioAuthHeaders(client), credentials: "include" })
+  return res.status !== 404
+}
+
+/**
  * Where the app at `/` is reached: the gateway's own origin. `client.url` is the gateway, or its
  * Studio proxy path on the same origin, so a relative one is taken against the page.
  */
@@ -105,6 +115,11 @@ function useSiteStatus(): HostRead<SiteStatus> & { address: string } {
 
 /** Self-host Studio's host: the gateway's own status route. It has no Deployments page. */
 export const selfHostStaticSite: StaticSiteHost = {
+  useOffered() {
+    const client = useAdminClient()
+    const { data } = useApiQuery(() => fetchSiteRouteExists(client), [client])
+    return data !== false
+  },
   useOverview() {
     const { data, loading, error, address } = useSiteStatus()
     return { data: data === null ? null : overviewOf(data, address), loading, error }

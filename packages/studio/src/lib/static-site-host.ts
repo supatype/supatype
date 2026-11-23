@@ -89,6 +89,13 @@ export interface StaticSiteHost {
   useOverview(): HostRead<StaticSiteOverview>
   useSettings(): HostRead<StaticSiteSettings>
   /**
+   * Whether this host serves a site at all. A host opts out by answering false, and the group's nav
+   * entry, panel and routes are then absent: the view asks, nothing lists the routes it hides. A host
+   * that leaves this out is always offered (Cloud). Treat "not known yet" as true, so the group does
+   * not flash away: only an answer that there is no site hides it.
+   */
+  useOffered?(): boolean
+  /**
    * The Deployments page, history and rollback. Cloud only: its presence adds the page, its nav
    * entry and its route to the group, and an absent one means none of the three exist.
    */
@@ -105,6 +112,14 @@ export const StaticSiteCtx = createContext<StaticSiteHost | undefined>(undefined
 /** The host Studio was given, or undefined when it was given none, in which case there is no group. */
 export function useStaticSiteHost(): StaticSiteHost | undefined {
   return useContext(StaticSiteCtx)
+}
+
+/** The host Studio was given, when it serves a site here: none given, or one that says no, is undefined. */
+export function useOfferedStaticSiteHost(): StaticSiteHost | undefined {
+  const host = useStaticSiteHost()
+  // A host is a stable object, so whether it has useOffered never changes between renders.
+  const offered = host?.useOffered?.() ?? true
+  return offered ? host : undefined
 }
 
 /** The host, for a page that is only mounted when there is one. */
