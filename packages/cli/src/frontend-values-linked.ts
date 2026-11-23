@@ -83,7 +83,7 @@ function cloudEnvironmentUrl(link: ProjectLink, target: DeployTarget): FrontendF
 }
 
 /** The environment's anon key from the control plane's keys route, which an owner or admin may read. */
-async function cloudAnonKey(target: DeployTarget, deployment: string | undefined): Promise<FrontendFinding> {
+export async function cloudAnonKey(target: DeployTarget, deployment: string | undefined): Promise<FrontendFinding> {
   if (!target.token) return { note: "no Cloud session: run `supatype login`, or set SUPATYPE_ACCESS_TOKEN" }
   const subpath = `/environments/${encodeURIComponent(target.environment)}/keys`
   try {

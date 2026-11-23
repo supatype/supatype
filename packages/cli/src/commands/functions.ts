@@ -36,6 +36,7 @@ import {
   type FunctionsWorkerProject,
 } from "../functions-worker-files.js"
 import { functionsServeKeyPath, sweepStaleServeKeyFiles, writeServiceRoleKeyFileUntilExit } from "../service-role-key-file.js"
+import { cloudAnonKey, publishedAnonKey } from "../frontend-values-linked.js"
 import { loadProjectLink } from "../link.js"
 import { projectRequest, resolveTarget, targetFunctions, targetLogs, type DeployTarget, type TargetStreamPath } from "../resolve-target.js"
 import { targetFetch, targetStream, type TargetFetchOptions } from "../target-client.js"
@@ -758,8 +759,24 @@ async function invokeRequest(cwd: string, name: string, opts: InvokeOptions): Pr
     ? `${await localFunctionsBase(cwd, opts.port)}/${name}`
     : `${targetFunctions(target).invokeBase}/${name}`
   const headers: Record<string, string> = { "Content-Type": "application/json" }
+  // A Cloud gateway refuses a request with no project API key, so the environment's anon key goes with every call.
+  if (target?.mode === "cloud") headers["apikey"] = await cloudApiKey(target, new URL(url).origin)
   if (opts.auth) headers["Authorization"] = `Bearer ${target === null ? LOCAL_TEST_JWT : invokeToken(target)}`
   return { url, headers }
+}
+
+/**
+ * The Cloud environment's anon key, or the command ends saying why it could not be had. The
+ * environment publishes it at its own address, which needs no session, and invoking a public
+ * function never did; the control plane's keys route (a session) is the second place to ask.
+ */
+async function cloudApiKey(target: DeployTarget, projectUrl: string): Promise<string> {
+  const published = await publishedAnonKey(projectUrl, true)
+  if (published.value !== undefined) return published.value
+  const fromControlPlane = target.token ? await cloudAnonKey(target, projectUrl) : undefined
+  if (fromControlPlane?.value !== undefined) return fromControlPlane.value
+  error(`Could not get the anon key of "${target.environment}" to call the function with: ${published.note ?? "no reason given"}`)
+  process.exit(1)
 }
 
 /** The status, how long it took, and the body, as JSON when it is. */
