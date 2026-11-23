@@ -117,3 +117,14 @@ describe("auto-refresh", () => {
     expect(browser.reads.length).toBe(before)
   })
 })
+
+describe("the auto-refresh menu's label", () => {
+  it("shows the whole label and is not pinned to a width that clips it", async () => {
+    const list = await renderList(testModel())
+    const select = list.container.querySelector<HTMLSelectElement>("select[aria-label='Auto-refresh']")
+    if (!select) throw new Error("no auto-refresh menu")
+    expect(select.selectedOptions[0]?.textContent).toBe("Auto: Off")
+    // A fixed pixel width cut "Auto: Off" to "Auto: O". Without one the menu is as wide as its longest option.
+    expect(select.className).not.toMatch(/(^|\s)w-\[/)
+  })
+})
