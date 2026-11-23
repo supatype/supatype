@@ -22,7 +22,7 @@
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="/site.css?v=dc9ef7961a" />
+  <link rel="stylesheet" href="/site.css?v=f24f0508fd" />
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -120,33 +120,12 @@
 
       <div class="stack hero-demo">
         <div class="panel shadow-accent">
-          <div class="panel-bar"><span>post.ts</span><span class="panel-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
-<pre class="code"><span class="k">export type</span> <span class="t">Post</span> = <span class="t">Model</span>&lt;{
-  id: <span class="t">UUID</span>
-  title: <span class="t">string</span>
-  slug: <span class="t">Slug</span>&lt;<span class="s">"title"</span>&gt;
-  body: <span class="t">RichText</span>
-  auth_user_id: <span class="t">SupatypeAuthUserId</span>
-}, {
-  access: {
-    read: <span class="t">Public</span>
-    create: <span class="t">LoggedIn</span>
-    update: <span class="t">Owner</span>&lt;<span class="s">"auth_user_id"</span>&gt;
-  }
-}&gt;</pre>
+          <div class="panel-bar"><span>post.ts → supatype push</span><span class="panel-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
+          <video autoplay muted loop playsinline poster="/video/readme-loop.jpg" aria-label="post.ts, then supatype push, then the generated access policies" data-loop>
+            <source src="/video/readme-loop.mp4" type="video/mp4" />
+          </video>
         </div>
-        <div class="stack tight">
-<pre class="code term"><span class="pr">$</span> supatype push --direct
-<span class="dim">[supatype] Diffing against database...</span>
-
-<span class="dim">1 change(s):</span>
-
-  <span class="ok">[+]</span> create_table post  <span class="dim">(safe)</span>
-
-<span class="dim">[supatype] Applying migration...</span>
-<span class="dim">[supatype]</span> <span class="ok">Migration applied.</span></pre>
         <p class="meta">One push generates: table + migration · RLS policies · REST + GraphQL endpoints · realtime events · typed client · Studio views</p>
-        </div>
       </div>
     </div>
   </section>
@@ -597,6 +576,6 @@
   </div>
 </footer>
 
-<script src="/site.js?v=19dd554888"></script>
+<script src="/site.js?v=bbe338fcd9"></script>
 </body>
 </html>

@@ -252,3 +252,11 @@ if (targets.length > 0) {
   addEventListener("scroll", schedule, { passive: true })
   addEventListener("resize", schedule)
 }
+
+// A decorative loop holds on its poster frame for visitors who ask for less motion.
+if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+  for (const video of document.querySelectorAll("video[data-loop]")) {
+    video.removeAttribute("autoplay")
+    video.pause()
+  }
+}

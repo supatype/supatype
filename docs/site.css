@@ -260,6 +260,7 @@ main > .section:last-child { border-bottom: 0; }
 .panel-dots { display: flex; gap: 6px; }
 .panel-dots i { width: 10px; height: 10px; border: 1px solid var(--border-dim); display: inline-block; }
 .panel-dots i:last-child { background: var(--accent); border-color: var(--accent); }
+.panel video { display: block; width: 100%; height: auto; background: var(--bg); }
 .panel-foot { padding: 12px 18px; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
 
 .code, .cb pre { padding: 18px 20px; font-family: var(--mono); font-size: var(--code-size); line-height: 1.7; overflow-x: auto; color: var(--text); white-space: pre; }
