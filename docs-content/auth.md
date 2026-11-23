@@ -273,7 +273,21 @@ email: {
 `console`, the default, logs that a message would have been sent but leaves out the body, so the link is not in the log. To try magic links or password reset, configure a real provider.
 :::
 
-For Resend, set `SUPATYPE_RESEND_API_KEY` and `SUPATYPE_RESEND_FROM` in `.env`. For SES, set `SUPATYPE_SES_FROM`; credentials come from the environment's AWS configuration.
+On a self-hosted stack, for Resend set `SUPATYPE_RESEND_API_KEY` and `SUPATYPE_RESEND_FROM` in `.env`. For SES set `SUPATYPE_SES_FROM`; credentials come from the environment's AWS configuration.
+
+On Supatype Cloud there is no `.env` and no ambient AWS configuration, so SES takes all of its settings from the `email` block, and a push that leaves one out is refused:
+
+```ts title="supatype.config.ts"
+email: {
+  provider: "ses",
+  ses_from: "no-reply@example.com", // required: the sender address, verified in SES
+  ses_access_key_id: env("SES_ACCESS_KEY_ID"), // required: name an environment variable, never the key itself
+  ses_secret_access_key: env("SES_SECRET_ACCESS_KEY"), // required, the same way
+  ses_region: "eu-west-2", // optional
+},
+```
+
+Without `ses_from` the server cannot send, so mail would be dropped while requests still succeed. That is why Cloud refuses the push and names `email.ses_from`.
 
 <h3 id="email-settings">Email sign-in and confirmation</h3>
 
