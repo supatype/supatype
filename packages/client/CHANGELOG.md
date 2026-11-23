@@ -119,6 +119,18 @@
 
 ### Bug Fixes
 
+* **realtime:** a change frame that names an exact-column kind this client does not know is no
+  longer dropped. The unknown kind is ignored and that column's value passes through as sent, while
+  the kinds it does know are still converted, so a kind added by a newer service never costs a
+  change. The REST field-kinds document already behaved this way and is now pinned by the same
+  shared check.
+* **client:** an array of exact values no longer loses digits. A stored `bigint[]` of
+  9007199254740993 came back as 9007199254740992 and a `numeric[]` of 1.10 as 1.1, because only a
+  number that was the direct value of a column was protected from `JSON.parse`. Every element of
+  a `bigint[]` or `numeric[]` column, at any nesting depth, is now kept as written: `bigint[]`
+  elements are native bigints and `numeric[]` elements are exact strings, as the single values
+  are. Nulls inside an array stay null. A generated `client.ts` from before this change still
+  works, and registers no array kinds until `supatype push` regenerates it.
 * **client:** `MissingClientValuesError` gives the script tag as
   `<script src="/supatype-env.js" vite-ignore></script>`, the form `vite build` leaves alone. The
   tag it gave made every `vite build` warn that it could not bundle the script.

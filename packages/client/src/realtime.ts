@@ -1,7 +1,7 @@
 import { asHeadersProvider, bearerToken, type HeadersProvider } from "./query.js"
 import { settle, type Deferred } from "./runtime-env.js"
 import type { ChannelName } from "./types.js"
-import { coerceRecordKinds, type ExactFields } from "./exact-values.js"
+import { coerceRecordKinds, knownExactKinds, type ExactFields } from "./exact-values.js"
 import {
   PRIVATE_CHANNELS_FEATURE,
   channelRefusal,
@@ -186,8 +186,11 @@ interface ServerChangeMessage {
    *
    * The service reads them from the database's own declared types, so this is authoritative in a
    * way the local registry is not: a project that never generated still gets the right value.
+   *
+   * The kind is any string: one this client does not know is ignored, and that column passes through
+   * as sent, so a kind added later never drops a change.
    */
-  exactColumns?: ExactFields
+  exactColumns?: Readonly<Record<string, string>>
   timestamp: string
 }
 
@@ -230,7 +233,7 @@ const isChangeMessage: Guard<ServerChangeMessage> = isShape({
   channel: isString,
   event: isOneOf(["INSERT", "UPDATE", "DELETE"]),
   payload: isShape({ old: isRecordOrNull, new: isRecordOrNull }),
-  exactColumns: optional(isRecordOf(isOneOf(["bigint", "numeric"]))),
+  exactColumns: optional(isRecordOf(isString)),
   timestamp: isString,
 })
 
@@ -830,7 +833,7 @@ export class RealtimeClient {
     // A bigint column arrives as a string and becomes a native bigint here, and a numeric stays
     // the exact string `@supatype/types` declares for Decimal and Money. The same coercion the
     // REST path uses, so a row read either way holds the same values.
-    const exact = msg.exactColumns ?? {}
+    const exact = knownExactKinds(msg.exactColumns ?? {})
     const newRecord = coerceRecord(msg.payload.new, exact)
     const oldRecord = coerceRecord(msg.payload.old, exact)
 

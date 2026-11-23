@@ -16,8 +16,8 @@
  * had. The gap could not be reported because nothing could detect it. Here, absence is a fact:
  * {@link fieldKindsAreRegistered} is false, and the caller can say so.
  */
-import type { ExactFields, ExactKind } from "./exact-values.js"
-import { isJsonObject, isOneOf } from "./json.js"
+import { isExactKind, type ExactFields, type ExactKind } from "./exact-values.js"
+import { isJsonObject } from "./json.js"
 
 /** Table name to its exact-value columns. */
 export type ExactFieldsByTable = Readonly<Record<string, ExactFields>>
@@ -38,7 +38,6 @@ export type UnrecognisedFieldKindsDocument = {
 }
 
 const SUPPORTED_VERSION = 1
-const isExactKind = isOneOf(["bigint", "numeric"])
 const NO_FIELDS: ExactFields = {}
 
 // Module level, and deliberately not per client. Server-side rendering builds a client per

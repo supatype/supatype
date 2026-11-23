@@ -15,23 +15,72 @@
  * module exists to remove.
  */
 
-import { isJsonObject } from "./json.js"
+import { isJsonObject, isOneOf } from "./json.js"
 
-/** The two shapes a column can need. `numeric` covers both `decimal` and `money`. */
-export type ExactKind = "bigint" | "numeric"
+/**
+ * The shapes a column can need. `numeric` covers both `decimal` and `money`. The `[]` forms are
+ * Postgres arrays of the same, which protect and convert each element the way the single value is.
+ */
+export type ExactKind = "bigint" | "numeric" | "bigint[]" | "numeric[]"
 
 /** Column name to kind, for the table being read. */
 export type ExactFields = Readonly<Record<string, ExactKind>>
 
+/** Whether this client knows the kind. A newer generator or service may name ones it does not. */
+export const isExactKind = isOneOf(["bigint", "numeric", "bigint[]", "numeric[]"])
+
+/**
+ * The columns whose kind this client knows. A kind it does not know is ignored, not refused: that
+ * column's value passes through as sent, so a future kind never costs a whole row or change.
+ */
+export function knownExactKinds(columns: Readonly<Record<string, string>>): ExactFields {
+  const known: Record<string, ExactKind> = {}
+  for (const [column, kind] of Object.entries(columns)) {
+    if (isExactKind(kind)) known[column] = kind
+  }
+  return known
+}
+
 const WHITESPACE = new Set([" ", "\t", "\n", "\r"])
 const QUOTE = '"'
 
-/** A numeric literal found as the value of a key, with where it sits in the text. */
+/**
+ * A numeric literal found as the value of a key, or as an element of an array that is, with where
+ * it sits in the text. For an element, `key` and `depth` are those of the column holding the
+ * array, however deeply the element is nested in it.
+ */
 type KeyedNumber = {
   readonly key: string
   readonly depth: number
+  readonly element: boolean
   readonly start: number
   readonly end: number
+}
+
+/** An open `{` or `[`, and the column an array belongs to when it is one's value. */
+type Frame = {
+  readonly container: "{" | "["
+  readonly column: string | null
+  readonly columnDepth: number
+}
+
+/**
+ * The frame for a container just opened. An array that is a key's value belongs to that column, and
+ * so does an array nested directly inside it, which is how a multi-dimensional column arrives.
+ */
+function openFrame(
+  container: "{" | "[",
+  parent: Frame | undefined,
+  valueKey: string | null,
+  depth: number,
+): Frame {
+  if (container === "[" && parent?.container === "[" && parent.column !== null) {
+    return { container, column: parent.column, columnDepth: parent.columnDepth }
+  }
+  if (container === "[" && valueKey !== null) {
+    return { container, column: valueKey, columnDepth: depth }
+  }
+  return { container, column: null, columnDepth: depth }
 }
 
 /**
@@ -44,6 +93,9 @@ function forEachKeyedNumber(body: string, visit: (found: KeyedNumber) => void): 
   let i = 0
   let depth = 0
   let pendingKey: string | null = null
+  // The key whose value is being read, so a `[` can tell which column it opens.
+  let valueKey: string | null = null
+  const frames: Frame[] = []
 
   while (i < body.length) {
     const ch = body.charAt(i)
@@ -52,20 +104,34 @@ function forEachKeyedNumber(body: string, visit: (found: KeyedNumber) => void): 
       const end = endOfString(body, i)
       const raw = body.slice(i, end)
       i = end
+      valueKey = null
       pendingKey = nextMeaningfulChar(body, i) === ":" ? readKey(raw) : null
       continue
     }
 
     if (ch === "{" || ch === "[") {
+      frames.push(openFrame(ch, frames[frames.length - 1], valueKey, depth))
+      valueKey = null
       depth += 1
       i += 1
       continue
     }
 
     if (ch === "}" || ch === "]") {
+      frames.pop()
       depth -= 1
       i += 1
       continue
+    }
+
+    const owner = frames[frames.length - 1]
+    if (owner?.container === "[" && owner.column !== null && (ch === "-" || isDigit(ch))) {
+      const end = endOfNumber(body, i)
+      if (end > i) {
+        visit({ key: owner.column, depth: owner.columnDepth, element: true, start: i, end })
+        i = end
+        continue
+      }
     }
 
     if (ch === ":") {
@@ -73,10 +139,11 @@ function forEachKeyedNumber(body: string, visit: (found: KeyedNumber) => void): 
       while (i < body.length && WHITESPACE.has(body.charAt(i))) i += 1
       const key = pendingKey
       pendingKey = null
+      valueKey = key
       if (key !== null) {
         const end = endOfNumber(body, i)
         if (end > i) {
-          visit({ key, depth, start: i, end })
+          visit({ key, depth, element: false, start: i, end })
           i = end
         }
       }
@@ -103,7 +170,10 @@ export function quoteExactNumbers(body: string, fields: ExactFields): string {
 
   const spans: KeyedNumber[] = []
   forEachKeyedNumber(body, (found) => {
-    if (found.depth === rowDepth && fields[found.key] !== undefined) spans.push(found)
+    if (found.depth !== rowDepth) return
+    const kind = fields[found.key]
+    // An element only counts inside an array column, and a bare value only outside one.
+    if (kind !== undefined && isArrayKind(kind) === found.element) spans.push(found)
   })
   if (spans.length === 0) return body
 
@@ -130,7 +200,9 @@ export function findLossyNumbers(body: string): string[] {
   const names: string[] = []
   const seen = new Set<string>()
   forEachKeyedNumber(body, (found) => {
-    if (seen.has(found.key)) return
+    // Elements are left to the registered kinds: a JSON column holding an array of large numbers
+    // was never refused here, and starting to would break projects that read one today.
+    if (found.element || seen.has(found.key)) return
     if (!isLossy(body.slice(found.start, found.end))) return
     seen.add(found.key)
     names.push(found.key)
@@ -174,14 +246,29 @@ export function coerceRecordKinds(
   let copy: Record<string, unknown> | null = null
 
   for (const [name, kind] of Object.entries(fields)) {
-    if (kind !== "bigint") continue
     const current = source[name]
-    if (typeof current !== "string") continue
-    copy ??= { ...source }
-    copy[name] = BigInt(current)
+    if (kind === "bigint" && typeof current === "string") {
+      copy ??= { ...source }
+      copy[name] = BigInt(current)
+    } else if (kind === "bigint[]" && Array.isArray(current)) {
+      copy ??= { ...source }
+      copy[name] = bigintsIn(current)
+    }
   }
 
   return copy ?? source
+}
+
+function isArrayKind(kind: ExactKind): boolean {
+  return kind === "bigint[]" || kind === "numeric[]"
+}
+
+/** An array with every quoted element a native bigint, at any depth. Null stays null. */
+function bigintsIn(items: readonly unknown[]): unknown[] {
+  return items.map((item) => {
+    if (typeof item === "string") return BigInt(item)
+    return Array.isArray(item) ? bigintsIn(item) : item
+  })
 }
 
 /** Whether parsing this literal as a double changes the value it names. */

@@ -17,8 +17,11 @@
  * to avoid a dependency from the server on the browser client for two string literals.
  */
 
-/** A value JavaScript cannot hold exactly: `bigint` becomes a BigInt, `numeric` stays a string. */
-export type ExactKind = "bigint" | "numeric"
+/**
+ * A value JavaScript cannot hold exactly: `bigint` becomes a BigInt, `numeric` stays a string. The
+ * `[]` forms are Postgres arrays of the same, and every element is treated as the single value is.
+ */
+export type ExactKind = "bigint" | "numeric" | "bigint[]" | "numeric[]"
 
 import { convertedColumnValue } from "./column-values.js"
 
@@ -30,8 +33,8 @@ export type ExactColumns = Record<string, ExactKind>
  * `character varying(80)`. Only the head matters here.
  */
 function baseType(columnType: string): string {
-  const head = columnType.split("(")[0] ?? columnType
-  return head.trim().toLowerCase()
+  // The `[]` of an array type follows the precision: `numeric(19,4)[]`.
+  return columnType.replace(/\([^)]*\)/g, "").trim().toLowerCase()
 }
 
 /** Types whose values must survive as text, and what they become on the client. */
@@ -68,9 +71,16 @@ const ORDINARY_NUMERIC_TYPES = new Set([
 
 /** The exact kind of a wal2json column type, or null when it needs no special handling. */
 export function exactKindOf(columnType: string): ExactKind | null {
-  // An array of bigints is an array, converted element by element, not one exact value.
-  if (columnType.trimEnd().endsWith("[]")) return null
-  return EXACT_TYPES[baseType(columnType)] ?? null
+  const base = baseType(columnType)
+  if (base.endsWith("[]")) {
+    const element = EXACT_TYPES[base.replace(/(\[\])+$/, "").trim()]
+    return element === undefined ? null : arrayKindOf(element)
+  }
+  return EXACT_TYPES[base] ?? null
+}
+
+function arrayKindOf(element: ExactKind): ExactKind {
+  return element === "bigint" ? "bigint[]" : "numeric[]"
 }
 
 /** Whether a column type is a number that should be handed back as a JavaScript number. */
@@ -89,7 +99,8 @@ export function isOrdinaryNumeric(columnType: string): boolean {
  */
 export function valueForColumn(value: unknown, columnType: string | undefined): unknown {
   if (typeof value !== "string" || columnType === undefined) return value
-  if (exactKindOf(columnType) !== null) return value
+  const kind = exactKindOf(columnType)
+  if (kind === "bigint" || kind === "numeric") return value
   if (!isOrdinaryNumeric(columnType)) return convertedColumnValue(value, columnType, valueForColumn)
   const asNumber = Number(value)
   return Number.isNaN(asNumber) && value.trim() !== "NaN" ? value : asNumber

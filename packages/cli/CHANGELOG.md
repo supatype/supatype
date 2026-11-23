@@ -101,6 +101,10 @@ no entries are missing from this file.
 
 ### Bug Fixes
 
+* **push, generate:** the generated client registers array columns of exact values (`"bigint[]"`
+  and `"numeric[]"`, from the array's element type, `NUMERIC(19,4)` included), and types them as
+  the single values are: `bigint[]` for BIGINT elements and `string[]` for NUMERIC, DECIMAL and
+  MONEY. They were `number[]`, which a double rounds. Run `supatype push` to regenerate.
 * **deploy:** the build step puts the app directory's `node_modules/.bin`, and every one above it, on PATH,
   as `npm run` does, so the framework defaults (`vite build`, `astro build`, `next build`) and a bare
   `buildCommand` find their binary. They failed with "'vite' is not recognized" before. The
