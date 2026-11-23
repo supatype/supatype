@@ -23,7 +23,7 @@ import { describeKeyspacePorts, firstFreeKeyspacePort, keyspacePorts } from "./k
 import { KEYSPACE_PORT_BASE, KEYSPACE_PORT_SPAN, nativeKeyspaceLibraryPresent } from "./postgres-ctl.js"
 import { archiveHasKeyspaceAuth, KEYSPACE_AUTH_SINCE } from "./postgres-image.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
-import { answersPing, type RespCredentials } from "./valkey-sidecar.js"
+import { answersPing, namedValkeyAddr, type RespCredentials } from "./valkey-sidecar.js"
 
 /** What the native keyspace decision asks of the machine before Postgres starts. */
 export interface NativeKeyspaceChecks {
@@ -31,6 +31,8 @@ export interface NativeKeyspaceChecks {
   freePort: () => Promise<number | null>
   /** Where `freePort` looks, for the message when it finds none. */
   portsLooked?: string
+  /** The Valkey the project names (SUPATYPE_VALKEY_ADDR), or undefined; it wins over the keyspace. */
+  namedValkey?: () => string | undefined
 }
 
 /** The machine's answers for the project at `cwd`: its keyspace ports are `SUPATYPE_KEYSPACE_PORT`'s, else 6379 on. */
@@ -40,12 +42,17 @@ export function machineKeyspaceChecks(cwd: string): NativeKeyspaceChecks {
     libraryPresent: nativeKeyspaceLibraryPresent,
     freePort: () => firstFreeKeyspacePort(ports),
     portsLooked: describeKeyspacePorts(ports),
+    namedValkey: () => namedValkeyAddr(cwd),
   }
 }
 
 /**
  * The port native Postgres should serve RESP on, or null for the Valkey sidecar. `version` is the
  * archive's, as dev resolved it to find the archive; null when it is not known, as for a local build.
+ *
+ * A Valkey the project names (`SUPATYPE_VALKEY_ADDR`) wins over the keyspace on every OS, whatever
+ * `cache.provider` says: Windows archives carry no pg_keyspace and so always used it, and Linux
+ * ignored it silently (D-52, e2e Y19).
  *
  * `cache.provider: "valkey"` is honoured here, and this is the only place it could be: without
  * asking the config, an archive that carries the library would serve RESP anyway and a project
@@ -58,6 +65,11 @@ export async function nativeKeyspacePort(
   checks: NativeKeyspaceChecks = machineKeyspaceChecks(process.cwd()),
 ): Promise<number | null> {
   if (!nativeKeyspaceWanted(config) || !checks.libraryPresent(pgBinDir)) return null
+  const named = checks.namedValkey?.()
+  if (named) {
+    console.log(`[supatype] SUPATYPE_VALKEY_ADDR names a Valkey (${named}), so the cache uses it rather than the Postgres keyspace.`)
+    return null
+  }
   if (!archiveHasKeyspaceAuth(version)) {
     console.log(
       `[supatype] This Postgres archive (${version ?? "a local build"}) cannot require a keyspace password ` +
