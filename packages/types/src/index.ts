@@ -1461,3 +1461,10 @@ export type LocalizedModel<
   TFields extends Record<string, unknown>,
   TMeta extends LocalizedModelMeta<TFields> = {},
 > = Model<ApplyAutoLocalizedFields<TFields>, TMeta>
+
+export {
+  FUNCTION_SECRET_NAME_PATTERN,
+  FUNCTION_SECRET_NAME_RULE,
+  functionSecretNameProblem,
+  isFunctionSecretName,
+} from "./function-secret-name.js"

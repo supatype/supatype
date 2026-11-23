@@ -36,6 +36,7 @@ import {
   type FunctionsWorkerProject,
 } from "../functions-worker-files.js"
 import { functionsServeKeyPath, sweepStaleServeKeyFiles, writeServiceRoleKeyFileUntilExit } from "../service-role-key-file.js"
+import { functionSecretNameProblem } from "@supatype/types"
 import { loadProjectLink } from "../link.js"
 import { projectRequest, resolveTarget, targetFunctions, type DeployTarget, type TargetStreamPath } from "../resolve-target.js"
 import { targetFetch, targetStream, type TargetFetchOptions } from "../target-client.js"
@@ -874,6 +875,11 @@ async function envSet(cwd: string, keyvalue: string): Promise<void> {
     process.exit(1)
   }
   const key = keyvalue.slice(0, eqIdx)
+  const nameProblem = functionSecretNameProblem(key)
+  if (nameProblem !== undefined) {
+    error(nameProblem)
+    process.exit(1)
+  }
   const value = keyvalue.slice(eqIdx + 1)
   const call = { method: "POST", subpath: "/functions/env", body: { key, value }, restartsWorker: true }
   const outcome = await envWork(cwd, { spinner: `Setting ${key}`, failed: "Failed to set env var", call, guard: isUnknown, local: "write" })
