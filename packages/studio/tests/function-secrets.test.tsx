@@ -24,7 +24,7 @@ interface Call { url: string; path: string; method: string; body: unknown; crede
 const CLIENT = testClient({ url: "http://localhost:8000/studio/proxy", token: "token" })
 const SELF_HOST: PlatformContext = { platformUrl: undefined, projectRef: undefined }
 const CLOUD: PlatformContext = { platformUrl: "/api/control-plane", projectRef: "abc123" }
-const ENV_PATH = /\/admin\/v1\/functions(\/[^/]+)?\/env(\/.*)?$|\/projects\/abc123\/functions\/env(\/.*)?$/
+const ENV_PATH = /\/admin\/v1\/functions(\/[^/]+)?\/env(\/.*)?$|\/projects\/abc123\/functions(\/[^/]+)?\/env(\/.*)?$/
 
 /** Answers every secrets route from `names` and a function list with one function, and records the secrets requests. */
 function serveEnv(names: string[], refuse?: (call: Call) => Response | undefined): Call[] {
@@ -205,11 +205,44 @@ describe("the Functions section's secrets", () => {
     expect(container.querySelector('[aria-label="Secrets for hello"]')).not.toBeNull()
   })
 
-  it("on Cloud offers the shared secrets only, since Cloud has no per-function store", async () => {
+  it("on Cloud shows the shared secrets first, and offers the function's own scope too", async () => {
     const calls = serveEnv(["STRIPE_KEY"])
     const container = await open(CLOUD, <EdgeFunctions />, "/edge-functions/hello/env")
     expect(calls[0]).toMatchObject({ url: "/api/control-plane/projects/abc123/functions/env", method: "GET" })
-    expect(container.textContent).not.toContain("Function (hello)")
+    expect(container.textContent).toContain("Function (hello)")
+  })
+
+  it("on Cloud keeps one function's own secrets at the control plane's per-function route, with the platform session", async () => {
+    const calls = serveEnv(["ONLY_HELLO"])
+    const container = await open(CLOUD, <EdgeFunctions />, "/edge-functions/hello/env")
+    await act(async () => { button(container, "Function (hello)").click() })
+    await settle()
+    expect(calls.at(-1)).toMatchObject({ url: "/api/control-plane/projects/abc123/functions/hello/env", method: "GET", credentials: "include" })
+    expect(container.textContent).toContain("ONLY_HELLO")
+    expect(container.querySelector('[aria-label="Secrets for hello"]')).not.toBeNull()
+    await typeInto(keyInput(container), "API_TOKEN")
+    await typeInto(elementOf(container, 'input[placeholder="value"]', HTMLInputElement), "s3cret")
+    await act(async () => { button(container, "Set secret").click() })
+    await settle()
+    expect(calls.find((c) => c.method === "POST")).toMatchObject({ url: "/api/control-plane/projects/abc123/functions/hello/env", body: { key: "API_TOKEN", value: "s3cret" }, credentials: "include" })
+    await act(async () => { button(container, "Remove").click() })
+    await act(async () => { button(document.body, "Remove secret").click() })
+    await settle()
+    expect(calls.find((c) => c.method === "DELETE")).toMatchObject({ url: "/api/control-plane/projects/abc123/functions/hello/env/ONLY_HELLO", credentials: "include" })
+    expect(calls.every((c) => !c.url.includes("/admin/v1/"))).toBe(true)
+  })
+
+  it("on Cloud never answers a function's scope from the shared store", async () => {
+    const calls = serveEnv(["SHARED_ONLY"])
+    const container = await open(CLOUD, <FunctionSecrets scope={{ kind: "function", name: "hello" }} />)
+    expect(calls.map((c) => c.url)).toEqual(["/api/control-plane/projects/abc123/functions/hello/env"])
+    expect(container.textContent).not.toContain("Cloud keeps secrets for the whole project")
+  })
+
+  it("encodes a function name that is not URL-safe on Cloud, as on self-host", async () => {
+    const calls = serveEnv([])
+    await open(CLOUD, <FunctionSecrets scope={{ kind: "function", name: "a/b" }} />)
+    expect(calls[0]?.url).toBe("/api/control-plane/projects/abc123/functions/a%2Fb/env")
   })
 })
 

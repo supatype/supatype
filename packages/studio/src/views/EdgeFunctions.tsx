@@ -20,7 +20,6 @@ import {
 import { functionsAdminError, functionsAdminFetch, isDataList } from "../lib/functions-admin.js"
 import { useSendAs } from "../hooks/useSendAs.js"
 import { SendAsField } from "../components/SendAsField.js"
-import { usePlatform } from "../hooks/usePlatform.js"
 import { FunctionSecrets } from "./FunctionSecrets.js"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -353,12 +352,12 @@ type SecretsScope = "function" | "shared" | "defaults"
 
 /**
  * The secrets the functions receive: the shared store every function and data hook reads, one
- * function's own (self-host only, Cloud has no such store), and the read-only defaults the runtime
+ * function's own (on self-host and on Cloud), and the read-only defaults the runtime
  * sets. Both stores are the one `FunctionSecrets` component.
  */
-function EnvVarsTab({ functionName, scopes }: { functionName: string; scopes: ReadonlyArray<SecretsScope> }): React.ReactElement {
+function EnvVarsTab({ functionName }: { functionName: string }): React.ReactElement {
   const [scope, setScope] = useState<SecretsScope>("shared")
-  const items = scopeTabs(functionName).filter((tab) => scopes.includes(tab.id))
+  const items = scopeTabs(functionName)
 
   return (
     <div>
@@ -398,8 +397,6 @@ export function EdgeFunctions(): React.ReactElement {
   const client = useStudioClient()
   const navigate = useNavigate()
   const location = useLocation()
-  // Cloud keeps one store of secrets for the project, so a function has none of its own there.
-  const scopes: ReadonlyArray<SecretsScope> = usePlatform().platformUrl === undefined ? ["shared", "function", "defaults"] : ["shared", "defaults"]
   const params = useParams<{ functionSlug?: string; tab?: string }>()
   const activeTab: "logs" | "env" | "invoke" =
     params.tab === "logs"
@@ -500,7 +497,7 @@ export function EdgeFunctions(): React.ReactElement {
                 <LogsTab functionName={selectedFn.name} adminFetch={adminFetch} />
               )}
               {activeTab === "env" && (
-                <EnvVarsTab functionName={selectedFn.name} scopes={scopes} />
+                <EnvVarsTab functionName={selectedFn.name} />
               )}
             </div>
           </div>

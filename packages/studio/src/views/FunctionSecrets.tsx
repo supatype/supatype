@@ -15,8 +15,8 @@ import { secretNameProblem } from "../lib/secret-name.js"
  * so the page can only list names. The server writes the store and the worker reads it on each call,
  * so a change applies on the next call with nothing to restart.
  *
- * `scope` is "shared" (every function and hook; the default, and the only scope Cloud has) or one
- * function's own secrets, which override a shared one of the same name (self-host only). Where the
+ * `scope` is "shared" (every function and hook; the default) or one function's own secrets, which
+ * override a shared one of the same name, on self-host and on Cloud. Where the
  * secrets are served in each deployment mode is `useSecretsFetch`.
  */
 
