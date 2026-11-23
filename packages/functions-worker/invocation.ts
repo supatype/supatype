@@ -67,7 +67,8 @@ export interface FunctionContext {
   /**
    * Values from the functions directory's `.env.local` (or `SUPATYPE_SHARED_ENV_FILE`), then those
    * `functions env set` gave a self-hosted project (`SUPATYPE_FUNCTION_ENV_FILE`), then
-   * `.env.<function>.local`, which wins. Per route, and read again on every call.
+   * `.env.<function>.local`, then the function's own managed values (`fn.<function>.json` beside the managed
+   * file, which Supatype Cloud writes), which win over all of those. Per route, and read again on every call.
    *
    * They are here, never in `Deno.env`: that is the worker's one process environment, shared by
    * every call running at once, so a value put there for one function would reach every other.
