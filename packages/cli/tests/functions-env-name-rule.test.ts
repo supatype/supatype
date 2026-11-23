@@ -44,10 +44,19 @@ describe("functions env set name rule", () => {
   })
 
   // Unset is never held to the rule, so a key that already has a bad name can be cleaned up. The
-  // local file's parser does not read such a line as a variable at all, so there is nothing to remove.
-  it("does not refuse an unset of a name that breaks the rule", async () => {
+  // dotenv parser does not read such a line as a variable, so unset matches the text before the `=`.
+  it("removes a line whose name breaks the rule, and leaves every other line as it is", async () => {
+    writeFileSync(envPath, "# note\nOLD-NAME=1\n  export OLD-NAME = 2\r\nOTHER=2\nOLD-NAME-2=3\n")
     const run = await runCommand(registerFunctions, ["functions", "env", "unset", "OLD-NAME"], project.dir)
     expect(run.exitCode).toBeUndefined()
     expect(run.output).not.toContain("not a valid secret name")
+    expect(run.output).toContain("Removed OLD-NAME from local env file (2 lines).")
+    expect(readFileSync(envPath, "utf8")).toBe("# note\nOTHER=2\nOLD-NAME-2=3\n")
+  })
+
+  it("says so when no line has the key", async () => {
+    const run = await runCommand(registerFunctions, ["functions", "env", "unset", "NOPE-NAME"], project.dir)
+    expect(run.output).toContain("NOPE-NAME was not set in the local env file.")
+    expect(readFileSync(envPath, "utf8")).toBe("OLD-NAME=1\nOTHER=2\n")
   })
 })

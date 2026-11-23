@@ -912,12 +912,12 @@ function unsetLocalEnv(functionsDir: string, key: string): void {
     process.exit(1)
   }
   const { text, removed } = withoutEnvValue(readFileSync(envPath, "utf8"), key)
-  if (!removed) {
+  if (removed === 0) {
     info(`${key} was not set in the local env file.`)
     return
   }
   writeFileSync(envPath, text, "utf8")
-  info(`Removed ${key} from local env file.`)
+  info(removed === 1 ? `Removed ${key} from local env file.` : `Removed ${key} from local env file (${removed} lines).`)
 }
 
 /**
