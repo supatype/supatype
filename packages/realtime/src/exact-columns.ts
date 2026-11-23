@@ -17,8 +17,11 @@
  * to avoid a dependency from the server on the browser client for two string literals.
  */
 
-/** A value JavaScript cannot hold exactly: `bigint` becomes a BigInt, `numeric` stays a string. */
-export type ExactKind = "bigint" | "numeric"
+/**
+ * A value JavaScript cannot hold exactly: `bigint` becomes a BigInt, `numeric` stays a string. The
+ * `[]` forms are Postgres arrays of the same, and every element is treated as the single value is.
+ */
+export type ExactKind = "bigint" | "numeric" | "bigint[]" | "numeric[]"
 
 /** Column name to kind, for the columns of one change that need exact handling. */
 export type ExactColumns = Record<string, ExactKind>
@@ -28,8 +31,8 @@ export type ExactColumns = Record<string, ExactKind>
  * `character varying(80)`. Only the head matters here.
  */
 function baseType(columnType: string): string {
-  const head = columnType.split("(")[0] ?? columnType
-  return head.trim().toLowerCase()
+  // The `[]` of an array type follows the precision: `numeric(19,4)[]`.
+  return columnType.replace(/\([^)]*\)/g, "").trim().toLowerCase()
 }
 
 /** Types whose values must survive as text, and what they become on the client. */
@@ -66,7 +69,68 @@ const ORDINARY_NUMERIC_TYPES = new Set([
 
 /** The exact kind of a wal2json column type, or null when it needs no special handling. */
 export function exactKindOf(columnType: string): ExactKind | null {
-  return EXACT_TYPES[baseType(columnType)] ?? null
+  const base = baseType(columnType)
+  if (base.endsWith("[]")) {
+    const element = EXACT_TYPES[base.replace(/(\[\])+$/, "").trim()]
+    return element === undefined ? null : arrayKindOf(element)
+  }
+  return EXACT_TYPES[base] ?? null
+}
+
+function arrayKindOf(element: ExactKind): ExactKind {
+  return element === "bigint" ? "bigint[]" : "numeric[]"
+}
+
+/**
+ * A Postgres array literal as nested arrays of its elements' text, `NULL` as null.
+ *
+ * wal2json writes an array column as the database's own text form, `{1,2,NULL}`, so a bare quoted
+ * string reaches here and must become the array REST returns. Elements stay text: that is what
+ * keeps them exact. Returns null when the text is not an array literal, so the caller can leave it.
+ */
+export function parsePgArray(text: string): unknown[] | null {
+  // An array with explicit bounds is written `[1:2]={...}`.
+  const body = text.replace(/^\[[^=]*\]=/, "")
+  if (!body.startsWith("{")) return null
+  const cursor: ArrayCursor = { text: body, pos: 0 }
+  const parsed = readArray(cursor)
+  return cursor.pos === body.length ? parsed : null
+}
+
+type ArrayCursor = { text: string; pos: number }
+
+function readArray(cursor: ArrayCursor): unknown[] {
+  const items: unknown[] = []
+  cursor.pos += 1
+  while (cursor.pos < cursor.text.length) {
+    const ch = cursor.text.charAt(cursor.pos)
+    if (ch === "}") {
+      cursor.pos += 1
+      return items
+    }
+    if (ch === ",") cursor.pos += 1
+    else if (ch === "{") items.push(readArray(cursor))
+    else items.push(readElement(cursor))
+  }
+  return items
+}
+
+function readElement(cursor: ArrayCursor): string | null {
+  if (cursor.text.charAt(cursor.pos) === '"') {
+    let out = ""
+    cursor.pos += 1
+    while (cursor.pos < cursor.text.length && cursor.text.charAt(cursor.pos) !== '"') {
+      if (cursor.text.charAt(cursor.pos) === "\\") cursor.pos += 1
+      out += cursor.text.charAt(cursor.pos)
+      cursor.pos += 1
+    }
+    cursor.pos += 1
+    return out
+  }
+  const start = cursor.pos
+  while (cursor.pos < cursor.text.length && !",}".includes(cursor.text.charAt(cursor.pos))) cursor.pos += 1
+  const raw = cursor.text.slice(start, cursor.pos).trim()
+  return raw === "NULL" ? null : raw
 }
 
 /** Whether a column type is a number that should be handed back as a JavaScript number. */
@@ -84,7 +148,9 @@ export function isOrdinaryNumeric(columnType: string): boolean {
  */
 export function valueForColumn(value: unknown, columnType: string | undefined): unknown {
   if (typeof value !== "string" || columnType === undefined) return value
-  if (exactKindOf(columnType) !== null) return value
+  const kind = exactKindOf(columnType)
+  if (kind === "bigint[]" || kind === "numeric[]") return parsePgArray(value) ?? value
+  if (kind !== null) return value
   if (!isOrdinaryNumeric(columnType)) return value
   const asNumber = Number(value)
   return Number.isNaN(asNumber) && value.trim() !== "NaN" ? value : asNumber

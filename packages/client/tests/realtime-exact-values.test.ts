@@ -157,3 +157,21 @@ describe("a change from a table with nothing exact", () => {
     expect(row?.["externalId"]).toBe(9007199254740992)
   })
 })
+
+describe("a change carrying array columns of exact values", () => {
+  it("gives a bigint[] column native bigints, past 2^53 and nested", async () => {
+    const row = await deliver(
+      changeFrame(
+        { ids: ["9007199254740993", "1", null], grid: [["1", "9007199254740995"]] },
+        { ids: "bigint[]", grid: "bigint[]" },
+      ),
+    )
+    expect(row?.["ids"]).toEqual([9007199254740993n, 1n, null])
+    expect(row?.["grid"]).toEqual([[1n, 9007199254740995n]])
+  })
+
+  it("leaves a numeric[] as exact strings", async () => {
+    const row = await deliver(changeFrame({ rates: ["1.10", "2.500"] }, { rates: "numeric[]" }))
+    expect(row?.["rates"]).toEqual(["1.10", "2.500"])
+  })
+})

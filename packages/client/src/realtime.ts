@@ -182,7 +182,7 @@ const isChangeMessage: Guard<ServerChangeMessage> = isShape({
   channel: isString,
   event: isOneOf(["INSERT", "UPDATE", "DELETE"]),
   payload: isShape({ old: isRecordOrNull, new: isRecordOrNull }),
-  exactColumns: optional(isRecordOf(isOneOf(["bigint", "numeric"]))),
+  exactColumns: optional(isRecordOf(isOneOf(["bigint", "numeric", "bigint[]", "numeric[]"]))),
   timestamp: isString,
 })
 
