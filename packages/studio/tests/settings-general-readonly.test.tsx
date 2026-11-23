@@ -15,9 +15,16 @@ import { isolateEachTest, mount, settle, testClient, testConfig } from "./suppor
 
 isolateEachTest()
 
-async function renderGeneral(appName: string | undefined): Promise<HTMLElement> {
+interface Reported {
+  projectName?: string
+  siteUrl?: string
+  appName?: string
+}
+
+async function renderGeneral(reported: Reported): Promise<HTMLElement> {
   vi.stubGlobal("fetch", async () => Response.json({}))
-  const base = testConfig()
+  const { appName, ...values } = reported
+  const base = testConfig(values)
   const config = appName === undefined ? base : { ...base, branding: { ...base.branding, appName } }
   const { container } = await mount(
     <PlatformCtx.Provider value={{ platformUrl: undefined, projectRef: undefined }}>
@@ -34,20 +41,20 @@ async function renderGeneral(appName: string | undefined): Promise<HTMLElement> 
 
 describe("the General settings tab", () => {
   it("has no Save Changes button, since nothing can be saved", async () => {
-    const container = await renderGeneral("Acme")
+    const container = await renderGeneral({ projectName: "Acme" })
     const buttons = [...container.querySelectorAll("button")].map((b) => b.textContent)
     expect(buttons).not.toContain("Save Changes")
   })
 
   it("shows the project name the stack reports, read-only", async () => {
-    const container = await renderGeneral("Acme")
+    const container = await renderGeneral({ projectName: "Acme" })
     const input = [...container.querySelectorAll("input")].find((i) => i.value === "Acme")
     expect(input).toBeDefined()
     expect(input!.readOnly).toBe(true)
   })
 
   it("makes every field read-only and says where the site URL is set", async () => {
-    const container = await renderGeneral("Acme")
+    const container = await renderGeneral({ projectName: "Acme", siteUrl: "https://acme.example.com" })
     const inputs = [...container.querySelectorAll("input")]
     expect(inputs.length).toBeGreaterThan(0)
     expect(inputs.every((i) => i.readOnly)).toBe(true)
@@ -55,8 +62,20 @@ describe("the General settings tab", () => {
     expect(container.textContent).toContain("supatype.config.ts")
   })
 
+  it("shows the site URL the server reports, read-only", async () => {
+    const container = await renderGeneral({ siteUrl: "https://acme.example.com" })
+    const input = [...container.querySelectorAll("input")].find((i) => i.value === "https://acme.example.com")
+    expect(input).toBeDefined()
+    expect(input!.readOnly).toBe(true)
+  })
+
+  it("does not take a branding label for the project name", async () => {
+    const container = await renderGeneral({ appName: "Brand Label" })
+    expect([...container.querySelectorAll("input")].some((i) => i.value === "Brand Label")).toBe(false)
+  })
+
   it("says where the name is set when the stack reports none", async () => {
-    const container = await renderGeneral(undefined)
+    const container = await renderGeneral({})
     expect(container.textContent).toContain("supatype.config.ts")
   })
 })

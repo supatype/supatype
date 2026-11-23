@@ -37,7 +37,8 @@ type SettingsTab = "general" | "keys" | "env" | "cors" | "database" | "integrati
 function GeneralSettings(): React.ReactElement {
   const client = useStudioClient()
   const adminConfig = useAdminConfig()
-  const projectName = adminConfig.branding?.appName ?? ""
+  const projectName = adminConfig.projectName ?? ""
+  const siteUrl = adminConfig.siteUrl ?? ""
 
   return (
     <Card className="p-4">
@@ -53,7 +54,7 @@ function GeneralSettings(): React.ReactElement {
         </div>
         <div>
           <label className="block text-[0.8rem] text-muted-foreground mb-1">Site URL</label>
-          <Input className="text-muted-foreground" value="" readOnly />
+          <Input className="text-muted-foreground" value={siteUrl} readOnly />
           <p className="text-xs text-zinc-600 mt-1">
             Set in <code>supatype.config.ts</code> or <code>SITE_URL</code>. Used for email templates and OAuth redirect URLs.
           </p>

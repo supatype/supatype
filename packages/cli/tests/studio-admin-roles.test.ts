@@ -22,7 +22,14 @@ describe("studioAdminRoles", () => {
 
   it("merges adminRoles into engine admin JSON", () => {
     const merged = withAdminRoles({ models: [] }, { ...baseConfig, admin: { roles: ["ops"] } })
-    expect(merged).toEqual({ models: [], adminRoles: ["ops"] })
+    expect(merged).toEqual({ models: [], adminRoles: ["ops"], projectName: "acme" })
+  })
+})
+
+describe("the project's own name", () => {
+  it("is written into the admin config so Studio can show the real name, not a branding label", () => {
+    const merged = withAdminRoles({ models: [] }, { ...baseConfig, project: { name: "shop" } })
+    expect(merged["projectName"]).toBe("shop")
   })
 })
 
@@ -54,6 +61,6 @@ describe("where the project says its models render", () => {
       { models: [] },
       { ...baseConfig, admin: { roles: ["ops"], livePreview } },
     )
-    expect(merged).toEqual({ models: [], adminRoles: ["ops"], livePreview })
+    expect(merged).toEqual({ models: [], adminRoles: ["ops"], projectName: "acme", livePreview })
   })
 })

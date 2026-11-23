@@ -328,6 +328,8 @@ export function normalizeAdminConfig(raw: unknown): AdminConfig {
   const locale = normalizeLocale(r["localization"])
   const livePreview = normalizeLivePreview(r["livePreview"])
   const adminRoles = normalizeAdminRoles(r["adminRoles"])
+  const projectName = nonEmptyString(r["projectName"])
+  const siteUrl = nonEmptyString(r["siteUrl"])
 
   return {
     models,
@@ -335,6 +337,8 @@ export function normalizeAdminConfig(raw: unknown): AdminConfig {
     navigation: normalizeNavigation(r["navigation"], models, globals),
     ...(locale !== undefined && { locale }),
     ...(adminRoles !== undefined && adminRoles.length > 0 && { adminRoles }),
+    ...(projectName !== undefined && { projectName }),
+    ...(siteUrl !== undefined && { siteUrl }),
     ...(livePreview !== undefined && Object.keys(livePreview).length > 0 && { livePreview }),
   }
 }

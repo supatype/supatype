@@ -13,10 +13,10 @@ export function studioAdminRoles(cfg: SupatypeProjectConfig): string[] {
 /**
  * Merge the project's own settings into engine admin-config JSON for Studio and supatype-server.
  *
- * The engine derives everything it can from the schema. These two cannot be derived from it: which
- * JWT roles may open Studio, and where the project's front end renders each model. Both are facts
- * about a deployment rather than about a shape, so they live in `supatype.config.ts` and are folded
- * in here, at the one place the file is written.
+ * The engine derives everything it can from the schema. These cannot be derived from it: which
+ * JWT roles may open Studio, the project's name, and where the project's front end renders each
+ * model. All are facts about a deployment rather than about a shape, so they live in
+ * `supatype.config.ts` and are folded in here, at the one place the file is written.
  */
 export function withAdminRoles(admin: unknown, cfg: SupatypeProjectConfig): Record<string, unknown> {
   const base = isJsonObject(admin) ? admin : {}
@@ -24,6 +24,8 @@ export function withAdminRoles(admin: unknown, cfg: SupatypeProjectConfig): Reco
   return {
     ...base,
     adminRoles: studioAdminRoles(cfg),
+    // The project's own name, so Studio's General tab shows it rather than a branding label.
+    projectName: cfg.project.name,
     // Omitted rather than written empty: Studio treats an absent entry as "this project has not
     // said", which is what drives the message asking for it.
     ...(livePreview !== undefined && Object.keys(livePreview).length > 0 && { livePreview }),

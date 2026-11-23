@@ -230,6 +230,10 @@ export interface AdminConfig {
   tier?: Tier
   /** Roles allowed to access Studio (from supatype.config.ts admin.roles). */
   adminRoles?: string[]
+  /** The project's own name, from `supatype.config.ts` `project.name`. Not the branding label. */
+  projectName?: string
+  /** The auth server's SITE_URL, reported on the admin-only studio config route. */
+  siteUrl?: string
 }
 
 /** Every kind of dashboard block, so a saved layout can be checked against it. */
