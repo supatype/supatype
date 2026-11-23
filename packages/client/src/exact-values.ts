@@ -15,7 +15,7 @@
  * module exists to remove.
  */
 
-import { isJsonObject } from "./json.js"
+import { isJsonObject, isOneOf } from "./json.js"
 
 /**
  * The shapes a column can need. `numeric` covers both `decimal` and `money`. The `[]` forms are
@@ -25,6 +25,21 @@ export type ExactKind = "bigint" | "numeric" | "bigint[]" | "numeric[]"
 
 /** Column name to kind, for the table being read. */
 export type ExactFields = Readonly<Record<string, ExactKind>>
+
+/** Whether this client knows the kind. A newer generator or service may name ones it does not. */
+export const isExactKind = isOneOf(["bigint", "numeric", "bigint[]", "numeric[]"])
+
+/**
+ * The columns whose kind this client knows. A kind it does not know is ignored, not refused: that
+ * column's value passes through as sent, so a future kind never costs a whole row or change.
+ */
+export function knownExactKinds(columns: Readonly<Record<string, string>>): ExactFields {
+  const known: Record<string, ExactKind> = {}
+  for (const [column, kind] of Object.entries(columns)) {
+    if (isExactKind(kind)) known[column] = kind
+  }
+  return known
+}
 
 const WHITESPACE = new Set([" ", "\t", "\n", "\r"])
 const QUOTE = '"'

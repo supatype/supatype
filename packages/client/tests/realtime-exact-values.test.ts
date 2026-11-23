@@ -175,3 +175,27 @@ describe("a change carrying array columns of exact values", () => {
     expect(row?.["rates"]).toEqual(["1.10", "2.500"])
   })
 })
+
+describe("a change naming a kind this client does not know", () => {
+  it("delivers the frame with the unknown column as sent", async () => {
+    // A newer service can name a kind this client predates. Dropping the whole frame would lose a
+    // change over one column, so the kind is ignored and the value passes through untouched.
+    const row = await deliver(
+      changeFrame({ id: "a", tag: "9007199254740993" }, { tag: "quantum" }),
+    )
+    expect(row).toEqual({ id: "a", tag: "9007199254740993" })
+  })
+
+  it("still coerces the kinds it knows in the same frame", async () => {
+    const row = await deliver(
+      changeFrame(
+        { id: "a", externalId: "9007199254740993", ids: ["1", "2"], rates: ["1.10"], tag: "x" },
+        { externalId: "bigint", ids: "bigint[]", rates: "numeric[]", tag: "uuid[]" },
+      ),
+    )
+    expect(row?.["externalId"]).toBe(9007199254740993n)
+    expect(row?.["ids"]).toEqual([1n, 2n])
+    expect(row?.["rates"]).toEqual(["1.10"])
+    expect(row?.["tag"]).toBe("x")
+  })
+})
