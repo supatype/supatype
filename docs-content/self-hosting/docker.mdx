@@ -69,15 +69,27 @@ SERVICE_ROLE_KEY=
 # Public URLs
 API_EXTERNAL_URL=https://api.your-domain.com
 SITE_URL=https://your-domain.com
-
-# SMTP for auth emails
-SUPATYPE_MAILER_MAILER_PROVIDER=smtp
-SUPATYPE_SMTP_HOST=smtp.sendgrid.net
-SUPATYPE_SMTP_PORT=587
-SUPATYPE_SMTP_USER=apikey
-SUPATYPE_SMTP_PASS=your-smtp-password
-SUPATYPE_SMTP_ADMIN_EMAIL=noreply@your-domain.com
 ```
+
+Email delivery is not set here. `supatype self-host compose` writes the mailer settings into `.env`
+from the `email` block of `supatype.config.ts`, so a provider typed into `.env` by hand is put back
+to the config's value (`console` when the config has no `email`) the next time you run it, and the CLI
+prints a warning naming the key. Set it in the config instead:
+
+```typescript title="supatype.config.ts"
+email: {
+  provider: "smtp",
+  smtp: {
+    host: "smtp.sendgrid.net",
+    port: 587,
+    user: "apikey",
+    pass: process.env.SMTP_PASS,
+    admin_email: "noreply@your-domain.com",
+  },
+},
+```
+
+See [Configuration](/docs/self-hosting/configuration.html#email) for every key.
 
 Generate the API keys from `JWT_SECRET` and write them into `.env`:
 
