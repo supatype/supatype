@@ -85,7 +85,7 @@ import {
   download,
   type PlatformId,
 } from "../binary-cache.js"
-import { assertEngineSupportsSchema } from "../engine-floor.js"
+import { assertEngineSupportsSchema, assertRealtimeSupportsSchema } from "../engine-floor.js"
 import { ensureBinary } from "../ensure-binary.js"
 import {
   assertSupported,
@@ -1109,7 +1109,11 @@ async function readNativeSchema(
 ): Promise<ExtractedSchemaAstV2> {
   const built = await buildNativeAst(cwd, schemaPath, config, skipFieldKinds)
   // The check `supatype push` makes: a pinned engine too old to read part of the schema drops it silently.
-  if (config) assertEngineSupportsSchema(built.ast, pinnedVersion("engine", config))
+  if (config) {
+    assertEngineSupportsSchema(built.ast, pinnedVersion("engine", config))
+    // Native dev runs the realtime it resolves, and one that predates channels enforces none (FF-34).
+    assertRealtimeSupportsSchema(built.ast, pinnedVersion("realtime", config))
+  }
   if (built.adapted.length > 0) {
     console.warn(
       `[supatype] ${built.adapted.length} field(s) replaced with JSONB, required extensions not available:\n` +
