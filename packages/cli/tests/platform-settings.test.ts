@@ -43,6 +43,7 @@ describe("services", () => {
       const lines = serviceEnv(renderSelfHostCompose(config({ services: { storage: false, graphql: false } }), process.cwd(), { devLocal }), "server")
       expect(lines, `devLocal: ${devLocal}`).toContain('SUPATYPE_STORAGE_DISABLED: "true"')
       expect(lines, `devLocal: ${devLocal}`).toContain('SUPATYPE_GRAPHQL_DISABLED: "true"')
+      expect(lines, `devLocal: ${devLocal}`).toContain('SUPATYPE_GRAPHQL_DISABLED_REASON: "project"')
     }
   })
 
@@ -59,6 +60,7 @@ describe("services", () => {
   it("renders only the service that is off", () => {
     const lines = serviceEnv(renderSelfHostCompose(config({ services: { graphql: false } })), "server")
     expect(lines).toContain('SUPATYPE_GRAPHQL_DISABLED: "true"')
+    expect(lines).toContain('SUPATYPE_GRAPHQL_DISABLED_REASON: "project"')
     expect(lines.join("\n")).not.toContain("SUPATYPE_STORAGE_DISABLED")
   })
 
@@ -66,6 +68,7 @@ describe("services", () => {
     const compose = renderSelfHostCompose(config(services === undefined ? {} : { services }))
     expect(compose).not.toContain("SUPATYPE_STORAGE_DISABLED")
     expect(compose).not.toContain("SUPATYPE_GRAPHQL_DISABLED")
+    expect(compose).not.toContain("SUPATYPE_GRAPHQL_DISABLED_REASON")
     expect(serviceSwitchServerEnv(config(services === undefined ? {} : { services }))).toEqual({})
   })
 

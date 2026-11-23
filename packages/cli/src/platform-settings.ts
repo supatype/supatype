@@ -124,11 +124,15 @@ export function validatePlatformSettings(cfg: Readonly<Record<string, unknown>>,
  * What the server is told about `services`: `SUPATYPE_STORAGE_DISABLED` and `SUPATYPE_GRAPHQL_DISABLED`
  * set to `true` for a service switched off, nothing otherwise, so the server's own default (on)
  * applies and a config that never mentions them renders as it did.
+ *
+ * A GraphQL switch also carries `SUPATYPE_GRAPHQL_DISABLED_REASON=project`, so the server answers
+ * "switched off for this project" as Supatype Cloud does. A stack with no pg_graphql sets no
+ * reason, and the server keeps its "not available with the native provider" answer for it.
  */
 export function serviceSwitchServerEnv(cfg: SupatypeProjectConfig): Record<string, string> {
   return {
     ...(cfg.services?.storage === false && { SUPATYPE_STORAGE_DISABLED: "true" }),
-    ...(cfg.services?.graphql === false && { SUPATYPE_GRAPHQL_DISABLED: "true" }),
+    ...(cfg.services?.graphql === false && { SUPATYPE_GRAPHQL_DISABLED: "true", SUPATYPE_GRAPHQL_DISABLED_REASON: "project" }),
   }
 }
 
