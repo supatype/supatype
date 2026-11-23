@@ -4,6 +4,10 @@
 
 ### Bug Fixes
 
+* **push, generate:** the generated client registers array columns of exact values (`"bigint[]"`
+  and `"numeric[]"`, from the array's element type, `NUMERIC(19,4)` included), and types them as
+  the single values are: `bigint[]` for BIGINT elements and `string[]` for NUMERIC, DECIMAL and
+  MONEY. They were `number[]`, which a double rounds. Run `supatype push` to regenerate.
 * **dev:** on Linux the app URL (`http://localhost:18473/`) answered 502 for a Vite app. `supatype
   dev` started Vite on `127.0.0.1`, and Docker Engine on Linux reaches the host through the docker0
   bridge, not the loopback, so the gateway found nothing listening. On Linux Vite now listens on

@@ -38,7 +38,7 @@ export type UnrecognisedFieldKindsDocument = {
 }
 
 const SUPPORTED_VERSION = 1
-const isExactKind = isOneOf(["bigint", "numeric"])
+const isExactKind = isOneOf(["bigint", "numeric", "bigint[]", "numeric[]"])
 const NO_FIELDS: ExactFields = {}
 
 // Module level, and deliberately not per client. Server-side rendering builds a client per

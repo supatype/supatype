@@ -436,15 +436,48 @@ function toTsType(meta: Record<string, unknown>, prose = false): string {
 
 /** An array column's element, from its Postgres element type, as the engine maps it. */
 function arrayElementType(meta: Record<string, unknown>): string {
-  const declared = objectAt(meta, "annotations", "db")?.["elementType"] ?? meta["elementType"]
-  const element = typeof declared === "string" ? declared.toLowerCase() : ""
+  const element = arrayElementPgType(meta)
+  // The same types the single-value kinds get: `bigint` for BIGINT and a string for NUMERIC, since
+  // neither fits a double. A `number[]` here would document the rounding the client now prevents.
+  const exact = exactArrayKind(element)
+  if (exact === "bigint[]") return "bigint"
+  if (exact === "numeric[]") return "string"
   if (NUMERIC_ELEMENT_TYPES.has(element)) return "number"
   return element === "boolean" || element === "bool" ? "boolean" : "string"
 }
 
+/** An array column's Postgres element type, lower-cased and without any `(precision, scale)`. */
+function arrayElementPgType(meta: Record<string, unknown>): string {
+  const declared = objectAt(meta, "annotations", "db")?.["elementType"] ?? meta["elementType"]
+  return typeof declared === "string" ? declared.toLowerCase().replace(/\s*\(.*\)\s*$/, "").trim() : ""
+}
+
+const EXACT_ARRAY_KIND_BY_ELEMENT: Readonly<Record<string, "bigint[]" | "numeric[]">> = {
+  bigint: "bigint[]",
+  int8: "bigint[]",
+  bigserial: "bigint[]",
+  serial8: "bigint[]",
+  numeric: "numeric[]",
+  decimal: "numeric[]",
+  money: "numeric[]",
+}
+
+/**
+ * The exact kind of an array column's elements, or undefined when a double holds them. The one
+ * place the generated types and the registered field kinds decide it, so they cannot disagree.
+ */
+export function exactArrayKind(element: string): "bigint[]" | "numeric[]" | undefined {
+  return EXACT_ARRAY_KIND_BY_ELEMENT[element]
+}
+
+/** The exact kind of an array field's elements, read from its AST entry. */
+export function exactArrayKindOfField(meta: Record<string, unknown>): "bigint[]" | "numeric[]" | undefined {
+  return meta["kind"] === "array" ? exactArrayKind(arrayElementPgType(meta)) : undefined
+}
+
 const NUMERIC_ELEMENT_TYPES = new Set([
-  "integer", "int4", "int", "smallint", "int2", "bigint", "int8", "float",
-  "double precision", "float8", "real", "float4", "numeric",
+  "integer", "int4", "int", "smallint", "int2", "float",
+  "double precision", "float8", "real", "float4",
 ])
 
 function quoteKey(key: string): string {

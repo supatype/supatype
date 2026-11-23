@@ -78,3 +78,15 @@ describe("registerFieldKinds", () => {
     expect(registeredFieldsFor("job_post")).toEqual({ views: "bigint" })
   })
 })
+
+describe("array kinds", () => {
+  it("registers the array kinds a generated document declares", () => {
+    registerFieldKinds({ version: 1, tables: { ledger: { ids: "bigint[]", rates: "numeric[]" } } })
+    expect(registeredFieldsFor("ledger")).toEqual({ ids: "bigint[]", rates: "numeric[]" })
+  })
+
+  it("ignores a kind it does not know without dropping the ones it does", () => {
+    registerFieldKinds({ version: 1, tables: { ledger: { ids: "bigint[]", odd: "uuid[]" } } } as never)
+    expect(registeredFieldsFor("ledger")).toEqual({ ids: "bigint[]" })
+  })
+})

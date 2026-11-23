@@ -255,3 +255,43 @@ export const fromBuild = createClient({
 })
 export const fromPage = createClient({})
 `
+
+describe("generateProjectClient: array columns of exact kinds", () => {
+  const arrayAst = {
+    models: [
+      {
+        name: "Ledger",
+        annotations: { db: { tableName: "ledger" } },
+        fields: {
+          id: { kind: "uuid", required: true },
+          ids: { kind: "array", required: true, annotations: { db: { elementType: "BIGINT" } } },
+          rates: { kind: "array", required: true, annotations: { db: { elementType: "NUMERIC" } } },
+          prices: { kind: "array", required: true, annotations: { db: { elementType: "NUMERIC(19,4)" } } },
+          tags: { kind: "array", required: true, annotations: { db: { elementType: "TEXT" } } },
+          counts: { kind: "array", required: true, annotations: { db: { elementType: "INTEGER" } } },
+        },
+      },
+    ],
+  }
+
+  it("registers bigint[] and numeric[] for the arrays whose elements a double cannot hold", () => {
+    const out = generateProjectClient(arrayAst)
+    expect(out).toContain('"ids": "bigint[]"')
+    expect(out).toContain('"rates": "numeric[]"')
+    expect(out).toContain('"prices": "numeric[]"')
+  })
+
+  it("leaves arrays a double holds exactly out of the registration", () => {
+    const out = generateProjectClient(arrayAst)
+    expect(out).not.toContain('"tags":')
+    expect(out).not.toContain('"counts": "')
+  })
+
+  it("types them as the single values are typed", () => {
+    const out = generateProjectClient(arrayAst)
+    expect(out).toMatch(/ids: bigint\[\]/)
+    expect(out).toMatch(/rates: string\[\]/)
+    expect(out).toMatch(/prices: string\[\]/)
+    expect(out).toMatch(/counts: number\[\]/)
+  })
+})
