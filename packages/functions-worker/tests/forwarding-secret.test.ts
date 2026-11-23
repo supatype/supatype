@@ -11,8 +11,9 @@ import { expectEqual, startWorker, type Worker } from "./worker-harness.ts"
 const SECRET = "s3cret-forwarding-value"
 
 /** Calls the stack, then another host, then a stack path that redirects to that host. */
-const CALLER = `export default async (_req: Request, ctx: { url: string }) => {
-  const other = Deno.env.get("OTHER_ORIGIN") ?? ""
+const CALLER = `export default async (req: Request, ctx: { url: string }) => {
+  // Not Deno.env: the worker removes every variable off its allowlist before a function loads.
+  const other = new URL(req.url).searchParams.get("other") ?? ""
   const forged = { headers: { "St-Forwarded-For": "6.6.6.6", "St-Forwarding-Secret": "forged" } }
   await fetch(ctx.url + "/direct", forged)
   await fetch(other + "/other", forged)
@@ -65,10 +66,9 @@ async function run(
       ...baseEnv(),
       ...urlEnv(stackServer.origin),
       SUPATYPE_PUBLIC_URL: stackServer.origin,
-      OTHER_ORIGIN: otherServer.origin,
       ...(secret !== undefined && { SUPATYPE_FORWARDING_SECRET: secret }),
     })
-    const res = await fetch(`${worker.origin}/functions/v1/caller`, { headers: inbound })
+    const res = await fetch(`${worker.origin}/functions/v1/caller?other=${encodeURIComponent(otherServer.origin)}`, { headers: inbound })
     const body: unknown = await res.json()
     const visible = typeof body === "object" && body !== null && "visible" in body ? (body.visible as string | null) : "bad body"
     return { stack, other, visible }
