@@ -83,8 +83,25 @@ describe("the keyspace password in the compose file", () => {
     expect(renderSelfHostCompose(project("17.2.12"), projectDir())).not.toContain(PASSWORD_ENV)
   })
 
-  it("is left out when the cache is a Valkey sidecar", () => {
-    expect(renderSelfHostCompose(project("17.2.13", "valkey"), projectDir())).not.toContain(PASSWORD_ENV)
+  it("is required of nothing when the cache is a Valkey sidecar", () => {
+    const compose = renderSelfHostCompose(project("17.2.13", "valkey"), projectDir())
+    expect(compose).not.toContain(REQUIRED)
+    expect(serviceBlock(compose, "db")).not.toContain(PASSWORD_ENV)
+  })
+
+  it("is blanked for the server beside a Valkey sidecar, which has none to check", () => {
+    // `init` writes SUPATYPE_KEYSPACE_PASSWORD to .env and the server loads .env itself, so unset
+    // it sent AUTH to a Valkey with no password: WRONGPASS on every cache call. A value compose
+    // sets, even an empty one, is not overridden by a dotenv file.
+    const server = serviceBlock(renderSelfHostCompose(project("17.2.13", "valkey"), projectDir(`${PASSWORD_ENV}=from-init\n`)), "server")
+    expect(server).toContain(`${PASSWORD_ENV}: ""`)
+    expect(server).toContain(`${PASSWORD_ENV}_FILE: ""`)
+  })
+
+  it("is not blanked for the server when the keyspace is in Postgres and takes it", () => {
+    const server = serviceBlock(renderSelfHostCompose(project("17.2.13"), projectDir()), "server")
+    expect(server).not.toContain(`${PASSWORD_ENV}: ""`)
+    expect(server).not.toContain(`${PASSWORD_ENV}_FILE: ""`)
   })
 })
 

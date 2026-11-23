@@ -35,7 +35,7 @@ import {
   KEYSPACE_PASSWORD_CONTAINER_PATH,
   KEYSPACE_PASSWORD_FILE_ENV,
 } from "./keyspace-password-file.js"
-import { postgresImageFor, runningPostgresImage } from "./postgres-image.js"
+import { configuredPostgresImage } from "./postgres-image.js"
 import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
 import { readEnvFile, readEnvValue } from "./env-file.js"
 import { OWN_BUCKET_S3_SETTINGS } from "./local-storage.js"
@@ -130,8 +130,13 @@ function keyspacePasswordMount(config: SupatypeProjectConfig, passwordFile: stri
  * The server's keyspace lines. Besides the environment compose gives it, the server reads the
  * project's .env and .env.local, and refuses to start when it finds the password beside the file,
  * so with a file the password is set blank here, which no dotenv file overrides.
+ *
+ * Beside a Valkey sidecar both are set blank for the same reason: `init` still writes the password
+ * to `.env`, the server loads it, and it would send AUTH as `supatype` to a Valkey that has no
+ * password (WRONGPASS on every cache call).
  */
 function keyspaceServerEnv(config: SupatypeProjectConfig, passwordFile: string | undefined): string {
+  if (!keyspaceInPostgres(config)) return `      ${KEYSPACE_PASSWORD_ENV}: ""\n      ${KEYSPACE_PASSWORD_FILE_ENV}: ""\n`
   const lines = keyspacePasswordEnv(config, passwordFile)
   return lines !== "" && passwordFile !== undefined ? `${lines}      ${KEYSPACE_PASSWORD_ENV}: ""\n` : lines
 }
@@ -240,7 +245,7 @@ export function dockerImageRef(component: DockerPinComponent, version: string): 
  */
 export function composeDockerImageEnv(config: SupatypeProjectConfig): Record<string, string> {
   const env: Record<string, string> = {}
-  const postgres = postgresImageFor(config).ref
+  const postgres = configuredPostgresImage(config).ref
   if (postgres) env.SUPATYPE_POSTGRES_IMAGE = postgres
   const versions = config.versions
   if (!versions) return env
@@ -1090,7 +1095,7 @@ ${keyspaceAuthEnv}`
   # database still needs (roles, extensions, wal_level for realtime).
 `
     : `  db:
-    image: \${SUPATYPE_POSTGRES_IMAGE:-${runningPostgresImage(config)}}
+    image: \${SUPATYPE_POSTGRES_IMAGE:-${configuredPostgresImage(config).ref ?? RELEASE_IMAGES.postgres}}
     # Docker's tini as PID 1, so postgres is not. PID 1 adopts every orphan in the container, and
     # Postgres 17 restarts the whole server when an adopted child it never forked exits non-0/1,
     # which is what a health check killed on timeout leaves behind (an orphaned pg_isready, exit 2).

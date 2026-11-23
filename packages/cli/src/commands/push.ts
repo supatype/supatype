@@ -59,7 +59,7 @@ import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import { ensureFirstAdminUser } from "./admin.js"
 import { withAdminRoles } from "../studio-admin-roles.js"
 import { restoreSystemRelationTargets } from "../restore-system-relation-targets.js"
-import { cacheSeedingNotes, cloudCacheNotes } from "../api-config-cache.js"
+import { cacheKeyspaceNotes, cacheSeedingNotes, cloudCacheNotes } from "../api-config-cache.js"
 import { waitForRestReady } from "../rest-ready.js"
 import type { SupatypeProjectConfig } from "../project-config.js"
 import {
@@ -83,7 +83,7 @@ import {
   cacheSchemaSourcesLocally,
 } from "../schema-sources.js"
 import { confirm, logSkippedConfirm } from "../ui/confirm.js"
-import { error, info, plain } from "../ui/messages.js"
+import { error, info, plain, warn } from "../ui/messages.js"
 import { withSpinner } from "../ui/progress.js"
 import { projectOutputPaths, writeGeneratedTypes } from "../type-generation.js"
 import { isInteractive } from "../ui/interactive.js"
@@ -708,6 +708,7 @@ function emptyDeploy(body: HookDeployBody): boolean {
  */
 async function reportCacheSeeding(cwd: string, ast: unknown): Promise<void> {
   for (const note of await cacheSeedingNotes(cwd, ast)) info(note)
+  for (const note of await cacheKeyspaceNotes(cwd, ast)) warn(note)
 }
 
 /** The generated adapter, flattened to the name handlers were rewritten to import. */

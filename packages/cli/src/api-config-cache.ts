@@ -27,6 +27,7 @@ import { readJsonObjectFile } from "./json-file.js"
 import { isJsonObject } from "@supatype/shared"
 import type { CacheReport } from "./engine-push-output.js"
 import { seedThroughStack, tableEntryFor } from "./api-config-stack.js"
+import { keyspaceConnected } from "./rest-cache-admin.js"
 
 /** The server's own default configuration (apiconfig.DefaultApiConfig), for a stack that has never written one. */
 function defaultApiConfig(): Record<string, unknown> {
@@ -45,6 +46,12 @@ export interface CacheSeedResult {
   declared: string[]
 }
 
+/** The tables the schema declares a cache for, unless it declares it off, sorted. */
+function declaredCacheTables(ast: unknown): string[] {
+  const declared = manifestCache(ast)
+  return Object.keys(declared).filter((t) => declared[t]?.enabled !== false).sort()
+}
+
 /**
  * Bring the local allowlist in line with new declarations, and report what is still in the way.
  *
@@ -55,7 +62,7 @@ export interface CacheSeedResult {
  */
 export function seedApiConfigCache(cwd: string, ast: unknown): CacheSeedResult | null {
   const declared = manifestCache(ast)
-  const declaredTables = Object.keys(declared).filter((t) => declared[t]?.enabled !== false).sort()
+  const declaredTables = declaredCacheTables(ast)
 
   const path = join(cwd, ".supatype", "api-config.json")
   if (!existsSync(path) && declaredTables.length === 0) return null
@@ -102,6 +109,25 @@ export function seedApiConfigCache(cwd: string, ast: unknown): CacheSeedResult |
  * refused it where the read rule varies by caller. Defaulting it off would make the declaration
  * mean nothing until someone ticked a box that the schema had already justified.
  */
+/**
+ * What a push says when the schema declares a cache and the server it just pushed to has no
+ * keyspace to serve it from: a declaration that looks accepted and answers BYPASS on every read.
+ * The server is asked (`/admin/v1/cache`), so this holds for Valkey and pg_keyspace alike. Nothing
+ * is said when no table declares a cache, or when the server cannot say.
+ */
+export async function cacheKeyspaceNotes(
+  cwd: string,
+  ast: unknown,
+  connected: (cwd: string) => Promise<boolean | null> = keyspaceConnected,
+): Promise<string[]> {
+  const declared = declaredCacheTables(ast)
+  if (declared.length === 0 || (await connected(cwd)) !== false) return []
+  return [
+    `No keyspace is connected to the server, so the cache declared for ${declared.join(", ")} is never served: ` +
+      "every read bypasses it. `supatype dev` starts one; on a self-hosted stack, check the `db` or `valkey` service.",
+  ]
+}
+
 /**
  * What a push or a dev boot should say about cache seeding, as lines to print.
  *
