@@ -38,7 +38,6 @@ import {
 } from "../seed-prepare.js"
 import { isSeedResult, isSeedStatus, report, reportSeedStatus } from "../seed-report.js"
 import { linkedTarget, runRemoteSeed } from "../seed-remote.js"
-import { withPublishing } from "../model-versioning.js"
 import { error, info, warn } from "../ui/messages.js"
 
 export { discoverSeedsDir, seedPaths } from "../seed-prepare.js"
