@@ -107,14 +107,21 @@ describe("the REST cache", () => {
   })
 })
 
-describe("an edge function's variables", () => {
-  it("asks before it deletes one", async () => {
-    const answer: Answer = (url) =>
-      url.endsWith("/list") ? Response.json({ data: [{ name: "hello", invocations24h: 0, avgDurationMs: 0 }] })
-      : url.endsWith("/hello/env") ? Response.json({ data: ["API_KEY"] })
-      : Response.json({})
+describe("an edge function's secrets", () => {
+  const answer: Answer = (url) =>
+    url.endsWith("/list") ? Response.json({ data: [{ name: "hello", invocations24h: 0, avgDurationMs: 0 }] })
+    : url.endsWith("/env") ? Response.json({ data: ["API_KEY"] })
+    : Response.json({})
+
+  it("asks before it removes a shared one", async () => {
     const { calls } = await show(<EdgeFunctions />, answer, "/edge-functions/hello/env")
-    await expectAsksThen(calls, { trigger: "Delete", question: "Delete API_KEY?", answer: "Delete variable", write: { method: "DELETE", target: "/hello/env/API_KEY" } })
+    await expectAsksThen(calls, { trigger: "Remove", question: "Remove API_KEY?", answer: "Remove secret", write: { method: "DELETE", target: "/admin/v1/functions/env/API_KEY" } })
+  })
+
+  it("asks before it removes the function's own", async () => {
+    const { calls } = await show(<EdgeFunctions />, answer, "/edge-functions/hello/env")
+    await press("Function (hello)")
+    await expectAsksThen(calls, { trigger: "Remove", question: "Remove API_KEY?", answer: "Remove secret", write: { method: "DELETE", target: "/hello/env/API_KEY" } })
   })
 })
 

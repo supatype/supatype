@@ -5,11 +5,10 @@ import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { bodyErrorText, type Guard, isBoolean, isJsonObject, isNumber, isShape, isString, optional, readJson, readJsonObject } from "../lib/json.js"
-import { Badge, Button, Card, Checkbox, CodeBlock, ConfirmButton, Input, Select, Tabs, Textarea, type DestructiveQuestion, type TabsSpec } from "../components/ui.js"
+import { Badge, Button, Card, Checkbox, CodeBlock, ConfirmButton, Input, Select, Tabs, Textarea, TextLink, type DestructiveQuestion, type TabsSpec } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ConnectionStringPanel } from "../components/database/ConnectionStringPanel.js"
 import { ApiCorsSettings } from "./ApiCorsSettings.js"
-import { FunctionSecrets } from "./FunctionSecrets.js"
 import { RoleGate, useRoleRefusalText, type RoleRequirement } from "../components/RoleGate.js"
 import { proxyFailure, unlessRoleRefused } from "../lib/role-refusal.js"
 
@@ -579,12 +578,28 @@ const SETTINGS_TAB_BAR: TabsSpec<SettingsTab> = {
   items: SETTINGS_TABS.map((t) => ({ id: t.key, label: t.label })),
 }
 
+/**
+ * Secrets are managed in one place, the Functions section, because data hooks run as functions and
+ * read the same store. This tab says so and links there.
+ */
+function EnvironmentNote(): React.ReactElement {
+  return (
+    <Card className="p-4">
+      <h3 className="m-0">Environment</h3>
+      <p className="text-[0.8rem] text-muted-foreground mt-1">
+        Function and data hook secrets are managed in the <TextLink to="/edge-functions?tab=env">Functions section</TextLink>, where
+        the same secrets arrive in each function&apos;s and hook&apos;s <code>ctx.env</code>.
+      </p>
+    </Card>
+  )
+}
+
 function SettingsTabBody({ tab, demoMode }: { tab: SettingsTab; demoMode: boolean }): React.ReactElement {
   const client = useStudioClient()
   switch (tab) {
     case "general": return <GeneralSettings />
     case "keys": return <ApiKeysSettings />
-    case "env": return <FunctionSecrets />
+    case "env": return <EnvironmentNote />
     case "cors": return <CorsSettings demoMode={demoMode} />
     case "database": return <DatabaseSettings client={client} />
     case "integrations": return <IntegrationsSettings />
