@@ -356,13 +356,13 @@ describe("functions invoke on a Cloud link with no session", () => {
     expect(seen).toEqual([])
   })
 
-  it("asks for a login when --auth wants a token, sending nothing", async () => {
+  it("refuses --auth on a Cloud link, logged in or not, sending nothing", async () => {
     writeConfig(project.dir)
     linkToCloud(project.dir)
     const seen = invokedWith()
     const run = await runCommand(registerFunctions, ["functions", "invoke", "hello", "--auth"], project.dir)
     expect(run.exitCode).toBe(1)
-    expect(run.output).toContain("supatype login")
+    expect(run.output).toContain("--auth is not available on a Cloud link")
     expect(seen).toEqual([])
   })
 })

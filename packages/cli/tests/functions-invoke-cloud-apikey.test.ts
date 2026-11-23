@@ -60,14 +60,25 @@ describe("functions invoke on a Cloud link", () => {
     expect(calls[0]?.headers.get("Authorization")).toBeNull()
   })
 
-  it("with --auth also sends the Cloud session as the bearer token", async () => {
+  it("refuses --auth, saying what to do instead, and sends nothing to the function", async () => {
+    const run = await runCommand(registerFunctions, ["functions", "invoke", "hello", "--auth"], project.dir)
+    expect(run.exitCode).toBe(1)
+    expect(run.output).toContain("--auth is not available on a Cloud link")
+    expect(run.output).toContain("Cloud session")
+    expect(run.output).toContain("signed-in user's access token")
+    expect(calls).toEqual([])
+  })
+
+  it("never sends the Cloud session to the function, with or without --auth", async () => {
     await runCommand(registerFunctions, ["functions", "invoke", "hello", "--auth"], project.dir)
-    expect(calls[0]?.headers.get("apikey")).toBe("anon-jwt")
-    expect(calls[0]?.headers.get("Authorization")).toBe("Bearer cloud-session")
+    await runCommand(registerFunctions, ["functions", "invoke", "hello"], project.dir)
+    const sent = calls.flatMap((c) => [...c.headers.values()])
+    expect(sent.some((v) => v.includes("cloud-session"))).toBe(false)
   })
 
   it("never sends the service role key", async () => {
-    await runCommand(registerFunctions, ["functions", "invoke", "hello", "--auth"], project.dir)
+    await runCommand(registerFunctions, ["functions", "invoke", "hello"], project.dir)
+    expect(calls).toHaveLength(1)
     expect([...(calls[0]?.headers.values() ?? [])].some((v) => v.includes("service-jwt"))).toBe(false)
   })
 
