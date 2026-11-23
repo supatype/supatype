@@ -167,7 +167,7 @@ function namedDotEnvValue(cwd: string, name: string): string | undefined {
 async function startContainer(name: string, port: number, deps: ValkeySidecarDeps): Promise<boolean> {
   const run = await deps.docker(valkeyRunArgs(name, port))
   if (run.status === 0) {
-    pushStartUndo(() => stopValkeySidecar(name, deps.docker), { container: `the Valkey sidecar container (${name})` })
+    pushStartUndo(async () => { await stopValkeySidecar(name, deps.docker) }, { container: `the Valkey sidecar container (${name})` })
     return true
   }
   await stopValkeySidecar(name, deps.docker)
@@ -197,7 +197,8 @@ export function valkeyRunArgs(name: string, port: number): string[] {
   return ["run", "-d", "--name", name, "-p", `${DEFAULT_HOST}:${port}:6379`, IMAGE]
 }
 
-export async function stopValkeySidecar(containerName: string | null, docker: DockerCaller = askDockerFor): Promise<void> {
-  if (!containerName) return
-  await docker(["rm", "-f", containerName])
+/** Removes the container; true when Docker did, so a caller that says so does not say it falsely. */
+export async function stopValkeySidecar(containerName: string | null, docker: DockerCaller = askDockerFor): Promise<boolean> {
+  if (!containerName) return true
+  return (await docker(["rm", "-f", containerName])).status === 0
 }
