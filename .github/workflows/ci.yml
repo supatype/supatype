@@ -177,6 +177,11 @@ jobs:
       - name: Build the CLI and what it depends on
         run: pnpm turbo run build --filter=@supatype/cli...
 
+      # The CLI runs dist, not src. A dist built before the pin changed pins tags the CDN does not
+      # have (the e2e rerun3 CLI did), so compare the compiled pins with release/images.json.
+      - name: The CLI's built pins are release/images.json
+        run: node scripts/release-images.mjs check-dist
+
       # The key lets the source-built CLI fetch the schema engine `generate` runs, as in
       # integration.yml. The test release itself is signed with a throwaway key.
       - name: Test the packed CLI
@@ -230,6 +235,11 @@ jobs:
 
       - name: Build the CLI and what it depends on
         run: pnpm turbo run build --filter=@supatype/cli...
+
+      # The CLI runs dist, not src. A dist built before the pin changed pins tags the CDN does not
+      # have (the e2e rerun3 CLI did), so compare the compiled pins with release/images.json.
+      - name: The CLI's built pins are release/images.json
+        run: node scripts/release-images.mjs check-dist
 
       - name: Test the CLI
         run: pnpm --filter @supatype/cli test
