@@ -59,6 +59,8 @@ export const REMOTE_SEED_REFUSALS = [
   "seed_busy",
   "schema_not_pushed",
   "payload_too_large",
+  "seed_too_large_for_plan",
+  "server_busy",
 ] as const
 
 export type RemoteSeedRefusal = (typeof REMOTE_SEED_REFUSALS)[number]
@@ -67,6 +69,16 @@ export type RemoteSeedRefusal = (typeof REMOTE_SEED_REFUSALS)[number]
 export function isRemoteSeedRefusal(value: unknown): value is RemoteSeedRefusal {
   return REMOTE_SEED_REFUSALS.some((code) => code === value)
 }
+
+/** A seed the plan cannot run: the plan, the seed's size, and the most that plan takes. */
+export interface RemoteSeedPlanLimit {
+  readonly plan: string
+  readonly seedBytes: number
+  readonly maxBytes: number
+}
+
+/** A size as whole megabytes, rounded up so a limit is never shown as less than it is over. */
+const megabytes = (bytes: number): string => `${Math.max(1, Math.ceil(bytes / (1024 * 1024)))} MB`
 
 /** What a request over a cap names: the byte size, or the file count. */
 export type RemoteSeedLimit = { readonly maxBytes: number } | { readonly maxFiles: number }
@@ -90,6 +102,11 @@ export const REMOTE_SEED_MESSAGES = {
     "maxBytes" in said
       ? `A seed request may be at most ${said.maxBytes} bytes.`
       : `At most ${said.maxFiles} seed files can be sent at once.`,
+  seed_too_large_for_plan: (said: RemoteSeedPlanLimit): string =>
+    `This seed is ${megabytes(said.seedBytes)}, more than the ${said.plan} plan can run at once (up to ${megabytes(said.maxBytes)}). ` +
+    "Split it into smaller seed files and seed them one after another, or move to a larger plan.",
+  server_busy: (): string =>
+    "The server is taking as many seed uploads as it can right now. Wait a moment and send the seed again.",
 } as const
 
 /** A refusal as the CLI prints it: its code in brackets, then its message. */
@@ -97,7 +114,7 @@ export function formatRemoteSeedRefusal(code: RemoteSeedRefusal, message: string
   return `[${code}] ${message}`
 }
 
-/** A refusal body: 400, 409 or 413, with no engine run. */
+/** A refusal body: 400, 409, 413 or 503, with no engine run. */
 export interface RemoteSeedRefused {
   readonly error: RemoteSeedRefusal
   readonly message: string

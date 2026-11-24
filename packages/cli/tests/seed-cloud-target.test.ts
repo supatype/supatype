@@ -411,6 +411,16 @@ describe("answers to exit codes", () => {
     })
   }
 
+  // The Job-based seed adds two refusals: a seed over the plan's size (413) and a full upload budget (503).
+  it.each([
+    [413, "seed_too_large_for_plan"],
+    [503, "server_busy"],
+  ])("shows a %i %s refusal with its code and exits 2", async (status, code) => {
+    answer = (call) => (isSeedPost(call) ? refuse(status, code) : defaultAnswer(call))
+    expect(await runSeed(undefined, flags({ env: "staging" }))).toBe(2)
+    expect(said.errors.join("\n")).toContain(`[${code}] The server said no.`)
+  })
+
   it("shows the server's message for a refusal", async () => {
     answer = (call) => (isSeedPost(call) ? refuse(409, "seed_busy") : defaultAnswer(call))
     await runSeed(undefined, flags({ env: "staging" }))
