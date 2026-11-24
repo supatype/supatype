@@ -9,9 +9,9 @@
  * line under it. Without one, each step prints a start line and a done line with its time, and the
  * package manager's output passes through as before (D1).
  */
-import { spawn, type ChildProcess, type StdioOptions } from "node:child_process"
+import { spawn, type ChildProcess } from "node:child_process"
 import { stripAnsi } from "./dev-log-filter.js"
-import { errorMessage } from "./error-message.js"
+import { errorMessage, redactSecrets } from "./error-message.js"
 import type { ClackSpinner } from "./ui/clack-api.js"
 
 /** How to run a package manager's install. */
@@ -29,36 +29,167 @@ export function installCommand(pm: string): InstallCommand {
 /** How many of the package manager's last lines a failed install prints, when its output was read. */
 const FAILURE_TAIL_LINES = 20
 
+/** The longest a printed line of that output is, so one minified blob cannot fill the terminal. */
+const FAILURE_LINE_CHARS = 300
+
+/** What a failed install can say about itself. */
+export interface InstallFailure {
+  /** The lifecycle script that was running when it failed (`prepare`, `postinstall`), when the output named one. */
+  script?: string
+  /** Where that script lives: the package, or its path under node_modules. */
+  where?: string
+  /** What the script ran, as the package manager printed it. */
+  command?: string
+  exitCode: number | null
+  /** The last lines of the output, with secrets hidden. */
+  tail: string[]
+  /** Set when the package manager could not be run at all. */
+  cause?: string
+}
+
+/** The result of {@link installDependencies}. */
+export type InstallResult = { ok: true } | { ok: false; failure: InstallFailure }
+
+/** The lifecycle script a package manager's output says is running or has failed, as far as it has said. */
+interface ScriptMark {
+  script: string
+  where?: string
+  command?: string
+}
+
+/** npm 7+ prints `> pkg@1.0.0 prepare` and then `> <command>` as a script starts. */
+const NPM_SCRIPT_HEADER = /^> (\S+@\S+)\s+(\S+)$/
+const NPM_SCRIPT_COMMAND = /^> (.+)$/
+/** pnpm prints `<package path> <script>$ <command>` as a script starts, and `<path> <script>: Failed` when it fails. */
+const PNPM_SCRIPT_START = /^(\S+)\s+([\w:.-]+)\$\s+(.+)$/
+const PNPM_SCRIPT_FAILED = /^(\S+)\s+([\w:.-]+): Failed$/
+/** npm and yarn say what they ran: `npm error command sh -c <command>`, `Command: <command>`. */
+const FAILED_COMMAND = /^(?:npm (?:error|ERR!) command sh -c |Command: )(.+)$/
+
+/** Reads a package manager's output line by line and keeps the script it last said was running or failed. */
+class ScriptTracker {
+  private running: ScriptMark | undefined
+  private failed: ScriptMark | undefined
+
+  see(line: string): void {
+    const failed = PNPM_SCRIPT_FAILED.exec(line)
+    if (failed?.[1] !== undefined && failed[2] !== undefined) {
+      const known = this.running?.script === failed[2] ? this.running : undefined
+      this.failed = { ...known, script: failed[2], where: failed[1] }
+      return
+    }
+    const pnpm = PNPM_SCRIPT_START.exec(line)
+    if (pnpm?.[1] !== undefined && pnpm[2] !== undefined && pnpm[3] !== undefined) {
+      this.running = { script: pnpm[2], where: pnpm[1], command: pnpm[3] }
+      return
+    }
+    const header = NPM_SCRIPT_HEADER.exec(line)
+    if (header?.[1] !== undefined && header[2] !== undefined) {
+      this.running = { script: header[2], where: header[1] }
+      return
+    }
+    const command = NPM_SCRIPT_COMMAND.exec(line)
+    if (command?.[1] !== undefined && this.running !== undefined && this.running.command === undefined) {
+      this.running = { ...this.running, command: command[1] }
+      return
+    }
+    const ran = FAILED_COMMAND.exec(line)
+    if (ran?.[1] !== undefined && this.running !== undefined) this.running = { ...this.running, command: ran[1] }
+  }
+
+  /** The script that failed: the one a package manager said failed, else the last one it started. */
+  mark(): ScriptMark | undefined {
+    return this.failed ?? this.running
+  }
+}
+
+/** Secret-looking values in a line of output, which must not reach a terminal or a CI log. */
+const SECRET_PATTERNS: readonly RegExp[] = [
+  /npm_[A-Za-z0-9]{20,}/g,
+  /((?:_auth(?:Token)?|_password)=)\S+/gi,
+  /(Bearer\s+)\S+/gi,
+  /\b([A-Z][A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASS|KEY|CREDENTIAL)S?=)\S+/g,
+]
+
+/** One line of output, shortened and with every secret-looking value hidden. */
+function safeLine(line: string): string {
+  const hidden = SECRET_PATTERNS.reduce(
+    (out, pattern) => out.replace(pattern, (_all: string, keep: string | undefined) => `${typeof keep === "string" ? keep : ""}***`),
+    redactSecrets(line, []),
+  )
+  return hidden.length > FAILURE_LINE_CHARS ? `${hidden.slice(0, FAILURE_LINE_CHARS)}...` : hidden
+}
+
 /**
- * Run an install in `dir`, true when it succeeds. With `onLine`, its output is read, each line handed
- * over, and the last lines printed if it fails; without, its output passes through to this terminal.
+ * Run an install in `dir`, and say how it went. The output is always read, for the failure: with
+ * `onLine` each line is handed over as it arrives, and without it the output also passes through to
+ * this terminal as the package manager wrote it.
  */
 export function installDependencies(
   dir: string,
   command: InstallCommand,
   onLine?: (line: string) => void,
-): Promise<boolean> {
+): Promise<InstallResult> {
   return new Promise((resolve) => {
-    const stdio: StdioOptions = onLine === undefined ? "inherit" : ["ignore", "pipe", "pipe"]
-    const child: ChildProcess = spawn(command.file, [...command.args], { cwd: dir, stdio, shell: command.shell })
+    const child: ChildProcess = spawn(command.file, [...command.args], {
+      cwd: dir,
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: command.shell,
+    })
     const tail: string[] = []
-    if (onLine !== undefined) followLines(child, (line) => keepTail(tail, line, onLine))
+    const scripts = new ScriptTracker()
+    if (onLine === undefined) passThrough(child)
+    followLines(child, (line) => {
+      scripts.see(line)
+      keepTail(tail, safeLine(line))
+      onLine?.(line)
+    })
     child.once("error", (err) => {
-      console.error(`Could not run ${command.file}: ${errorMessage(err)}`)
-      resolve(false)
+      resolve({ ok: false, failure: { exitCode: null, tail: [], cause: `Could not run ${command.file}: ${errorMessage(err)}` } })
     })
     child.once("close", (code) => {
-      if (code !== 0 && tail.length > 0) console.error(tail.join("\n"))
-      resolve(code === 0)
+      if (code === 0) return resolve({ ok: true })
+      const mark = scripts.mark()
+      resolve({
+        ok: false,
+        failure: {
+          ...(mark?.script !== undefined && { script: mark.script }),
+          ...(mark?.where !== undefined && { where: mark.where }),
+          ...(mark?.command !== undefined && { command: safeLine(mark.command) }),
+          exitCode: code,
+          tail,
+        },
+      })
     })
   })
 }
 
-/** Keep `line` among the last {@link FAILURE_TAIL_LINES}, and hand it on. */
-function keepTail(tail: string[], line: string, onLine: (line: string) => void): void {
+/** Write what the child prints to this process's own streams, as inheriting them would. */
+function passThrough(child: ChildProcess): void {
+  child.stdout?.pipe(process.stdout)
+  child.stderr?.pipe(process.stderr)
+}
+
+/**
+ * The message for a failed install: what failed, how, the last lines it printed, and what to run.
+ * The lines are already bounded and have their secrets hidden ({@link installDependencies}).
+ */
+export function describeInstallFailure(pm: string, failure: InstallFailure): string {
+  const run = `Run "${pm} install" in the project directory, then "supatype update".`
+  if (failure.cause !== undefined) return `Dependency install failed. ${failure.cause}. ${run}`
+  const script =
+    failure.script === undefined
+      ? undefined
+      : `the "${failure.script}" script${failure.where === undefined ? "" : ` of ${failure.where}`}${failure.command === undefined ? "" : ` (${failure.command})`}`
+  const how = failure.exitCode === null ? "was stopped" : `ended with exit code ${failure.exitCode}`
+  const lines = failure.tail.length === 0 ? "" : `\nLast lines of its output:\n${failure.tail.map((l) => `  ${l}`).join("\n")}\n`
+  return `Dependency install failed: ${script ?? `${pm} install`} ${how}.${lines}${run}`
+}
+
+/** Keep `line` among the last {@link FAILURE_TAIL_LINES}. */
+function keepTail(tail: string[], line: string): void {
   tail.push(line)
   if (tail.length > FAILURE_TAIL_LINES) tail.shift()
-  onLine(line)
 }
 
 /** Each non-blank line a child prints on stdout or stderr, without colour codes. */

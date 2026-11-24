@@ -5,11 +5,13 @@ import { randomBytes } from "node:crypto"
 import { p, runClackFlow } from "../ui/clack.js"
 import { withProgressView } from "../ui/progress.js"
 import {
+  describeInstallFailure,
   installCommand,
   installDependencies,
   plainStepView,
   runTimedStep,
   spinnerStepView,
+  type InstallFailure,
   type StepView,
   type TimedStep,
 } from "../init-setup-steps.js"
@@ -709,6 +711,8 @@ interface SetupWants {
 /** What init's setup steps did: each true only when it ran and succeeded. */
 interface SetupOutcome {
   installOk: boolean
+  /** Why the install failed, when it did and its output said. */
+  installFailure?: InstallFailure
   keysGenerated: boolean
   binariesReady: boolean
 }
@@ -723,7 +727,15 @@ async function withStepView<T>(run: (view: StepView) => Promise<T>): Promise<T> 
 
 /** Install, then keys, then the component binaries an install makes possible, each timed on `view`. */
 async function runSetupSteps(dir: string, pm: PackageManager, wants: SetupWants, view: StepView): Promise<SetupOutcome> {
-  const installOk = wants.install && (await runTimedStep(view, installStep(dir, pm, view.live)))
+  let installFailure: InstallFailure | undefined
+  const installOk =
+    wants.install &&
+    (await runTimedStep(
+      view,
+      installStep(dir, pm, view.live, (failure) => {
+        installFailure = failure
+      }),
+    ))
   const keysGenerated =
     wants.keys &&
     (await runTimedStep(view, {
@@ -738,22 +750,39 @@ async function runSetupSteps(dir: string, pm: PackageManager, wants: SetupWants,
       run: () => ensureInitBinaries(dir),
       done: (ok) => (ok ? "Component binaries ready" : "Some binaries are missing"),
     }))
-  return { installOk, keysGenerated, binariesReady }
+  return { installOk, ...(installFailure !== undefined && { installFailure }), keysGenerated, binariesReady }
 }
 
 /** The install step: in a terminal its output is read for the spinner, otherwise it passes through. */
-function installStep(dir: string, pm: PackageManager, live: boolean): TimedStep<boolean> {
+function installStep(
+  dir: string,
+  pm: PackageManager,
+  live: boolean,
+  onFailure: (failure: InstallFailure) => void,
+): TimedStep<boolean> {
+  let script: string | undefined
   return {
     label: `Installing dependencies with ${pm}`,
-    run: (detail) => installDependencies(dir, installCommand(pm), live ? detail : undefined),
-    done: (ok) => (ok ? "Dependencies installed" : "Dependency install failed"),
+    run: async (detail) => {
+      const result = await installDependencies(dir, installCommand(pm), live ? detail : undefined)
+      if (!result.ok) {
+        script = result.failure.script
+        onFailure(result.failure)
+      }
+      return result.ok
+    },
+    done: (ok) => (ok ? "Dependencies installed" : `Dependency install failed${script === undefined ? "" : ` in the "${script}" script`}`),
   }
 }
 
 /** Stop init, naming what to run, when a setup step it was asked for failed. */
 function exitOnFailedSetup(outcome: SetupOutcome, wants: SetupWants, pm: PackageManager): void {
   if (wants.install && !outcome.installOk) {
-    error(`Dependency install failed. Run "${pm} install" in the project directory, then "supatype update".`)
+    error(
+      outcome.installFailure === undefined
+        ? `Dependency install failed. Run "${pm} install" in the project directory, then "supatype update".`
+        : describeInstallFailure(pm, outcome.installFailure),
+    )
     process.exit(1)
   }
   if (wants.keys && !outcome.keysGenerated) {
