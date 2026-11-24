@@ -65,6 +65,23 @@ describe("the remote seed message table", () => {
     expect(said).toContain('"production"')
   })
 
+  it("names the plan, the seed and the most that plan takes in the seed_too_large_for_plan message", () => {
+    const said = REMOTE_SEED_MESSAGES.seed_too_large_for_plan({ plan: "free", seedBytes: 9 * 1024 * 1024, maxBytes: 3 * 1024 * 1024 })
+    expect(said).toContain("free plan")
+    expect(said).toContain("9 MB")
+    expect(said).toContain("3 MB")
+  })
+
+  it("answers a full upload budget with a message that says to try again", () => {
+    expect(REMOTE_SEED_MESSAGES.server_busy()).toMatch(/try again|send .* again/i)
+  })
+
+  it("lists the codes a control plane that runs seeds as Jobs may refuse with", () => {
+    expect(REMOTE_SEED_REFUSALS).toContain("seed_too_large_for_plan")
+    expect(REMOTE_SEED_REFUSALS).toContain("server_busy")
+    expect(isRemoteSeedRefusal("server_busy")).toBe(true)
+  })
+
   it("prints a refusal as [code] message", () => {
     expect(formatRemoteSeedRefusal("seed_busy", "Another seed is running.")).toBe("[seed_busy] Another seed is running.")
   })
