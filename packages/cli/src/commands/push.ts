@@ -382,7 +382,9 @@ export async function finishTargetPush(
   }
   // A linked push writes what the project's own one does: types, client and seed builder describe
   // the schema just applied, and the next seed is refused when they describe an older one.
-  await generateTypesLocal(cwd, ast, config, false)
+  // Without the local public values: the push just sent this target its own, and the self-host stack
+  // in this folder serves the manifest those would be written into.
+  await generateTypesLocal(cwd, ast, config, false, { syncPublicEnv: false })
   reportTargetPush(target, pushResult, stepFailed)
 }
 
@@ -742,13 +744,14 @@ async function generateTypesLocal(
   ast: unknown,
   config: SupatypeProjectConfig,
   ownDatabase: boolean,
+  { syncPublicEnv = true }: { syncPublicEnv?: boolean } = {},
 ): Promise<{ hooksModuleWritten: boolean }> {
   // Independent of `output`: a project with hooks needs its handler types whether or not it asked
   // for client types, and the module is written next to the functions that import it.
   // The row cache is configured at postmaster start, so this is the one cache setting a push
   // cannot make take effect on its own. Only for the project's own database: `.env` configures that
   // container, and a push to any other database has no container to recreate (A2-N4).
-  const { lines, rowCache, hooksModuleWritten } = writeAppliedAstArtifacts(cwd, config, ast, { rowCacheEnv: ownDatabase })
+  const { lines, rowCache, hooksModuleWritten } = writeAppliedAstArtifacts(cwd, config, ast, { rowCacheEnv: ownDatabase, syncPublicEnv })
   for (const line of lines) info(line)
   if (rowCache !== null) {
     info(
