@@ -15,6 +15,24 @@ containers, PostgREST's roles, the object store's credentials) are fixed in the 
 Variables marked **Required** have no default: Compose stops before starting anything and names the
 one that is missing, for example `POSTGRES_PASSWORD is missing from .env`.
 
+## The managed block in `.env`
+
+Some lines in `.env` are written by the CLI from `supatype.config.ts`, each under a comment that
+starts `# supatype:managed`. On a self-hosted stack these are the mailer settings that `email` in the
+config gives.
+
+- **Do not edit a line under that marker.** Every `self-host compose up` (and the other commands that
+  start the stack) rewrites it from `supatype.config.ts`. A hand edit made in place, under the
+  marker, is replaced **without a warning**, because the CLI treats the line as its own.
+- **A line outside the block is warned about, then replaced if the config sets that name.** Put your
+  own value below the managed block, not under the marker. If it conflicts with what the config
+  gives, the CLI prints a warning naming the key with its old and new value, then writes the config's
+  value in its place. To keep a value for a managed name, set it in `supatype.config.ts`.
+- **A marked line for a name the config no longer gives is removed**; a value outside the block for
+  a name the config does not set is left alone.
+
+The warning is only for a value that differs from the config's and is not blank.
+
 ## Database
 
 | Variable | Default | Description |
@@ -115,7 +133,7 @@ email: {
 
 Do not set `SUPATYPE_MAILER_MAILER_PROVIDER` in `.env`: the next `self-host compose` command replaces it
 with the config's value, `console` when the config has no `email`, and prints a warning naming the key
-with its old and new value (a password or key is shown as `***`). With the `console` provider no email
+with its old and new value (a password or key is shown as `***`). This holds for a value outside the managed block; see above for one under the marker. With the `console` provider no email
 leaves the server, whatever the SMTP variables say. The generated file passes only these settings, so
 on a self-hosted stack use `console` or `smtp`.
 
