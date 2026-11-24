@@ -167,7 +167,8 @@ Turn SAML on with `auth.sso.saml.enabled` in `supatype.config.ts` first. The `ss
 | `self-host compose status` | Show compose service status |  |
 | `self-host compose logs` | Tail compose logs | `--service <name>`, `-f, --follow` |
 | `add domain [domain]` | Add a custom domain with automatic HTTPS (self-host) | `--email <email>` for Let's Encrypt |
-| `link` | Link this project to cloud or self-host (unified .supatype/link.json) | `--url <url>`, `--token <token>`, `--env <name>`, `--fix-gitignore` |
+| `link` | Link this project to cloud or self-host (unified .supatype/link.json). Refuses a different project or host than the one already linked, unless `--force` | `--url <url>`, `--token <token>`, `--env <name>`, `--fix-gitignore`, `--force` |
+| `unlink` | Remove this folder's link (`.supatype/link.json`, and the legacy `cloud.json` and `linked.json` if present) and say what was removed |  |
 | `envs list` | List linked environments, and the default commands use: `environments` in supatype.config.ts when it names one, else this checkout&apos;s |  |
 | `envs use <name>` | Set this checkout&apos;s default environment. `environments.default` in supatype.config.ts wins over it, and `envs use` says so |  |
 | `build [command...]` | Run your app's production build with the deployment's API URL and anon key under every front-end name (VITE_, PUBLIC_, NEXT_PUBLIC_, EXPO_PUBLIC_). Runs the package.json build script unless a command follows --. Refuses to start when either value is missing | `--env <name>`, `--allow-local`, `-- <command...>` |
@@ -186,7 +187,7 @@ Commands that reach the local stack's database or API need that stack running: `
 
 For a self-hosted stack, `link --url` takes the stack's gateway URL and `--token` its `SERVICE_ROLE_KEY`. The link is made to the project the server says it serves, whatever this folder is called.
 
-A folder holds one link, to Supatype Cloud or to a self-hosted server: linking the other replaces it, and `envs use` chooses between environments of that one link. To work against both, keep a folder for each (a second clone or a `git worktree`) and link each to its own host. The full walkthrough is in [Self-host](/docs/#self-host) and [Deploy to a VM with GitHub Actions](/docs/guides/deploy-vm-github-actions.html).
+A folder holds one link, to Supatype Cloud or to a self-hosted server, and `envs use` chooses between environments of that one link. `link` to a different project, or to the other kind of host, refuses and names the link that is there: run `supatype unlink` to remove it, or pass `--force` to replace it with a fresh one. Linking the same project again (to refresh a token, or to add an environment with `--env`) always works. To work against both hosts at once, keep a folder for each (a second clone or a `git worktree`) and link each to its own host. The full walkthrough is in [Self-host](/docs/#self-host) and [Deploy to a VM with GitHub Actions](/docs/guides/deploy-vm-github-actions.html).
 
 <h2 id="cloud">Supatype Cloud</h2>
 
