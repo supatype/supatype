@@ -13,7 +13,7 @@
  * Only when the project has a functions directory: writing `_shared/` into a project that has no
  * functions would create the thing it describes out of nothing.
  */
-import { existsSync } from "node:fs"
+import { existsSync, readdirSync } from "node:fs"
 import { join, relative } from "node:path"
 import { toPosixPath } from "@supatype/shared"
 import { ensureFunctionsDenoTypes } from "./functions-deno-types.js"
@@ -26,7 +26,10 @@ import { preferredFunctionsPathFromProject, type SupatypeProjectConfig } from ".
  */
 export function refreshFunctionsContext(cwd: string, config: SupatypeProjectConfig): string | undefined {
   const functionsDir = preferredFunctionsPathFromProject(config, cwd)
-  if (!existsSync(functionsDir)) return undefined
+  // An empty directory is not a project with functions: the self-host compose writer creates one
+  // for the server's writable bind, and scaffolding a context module into it would give every
+  // project function types it does not use.
+  if (!existsSync(functionsDir) || readdirSync(functionsDir).length === 0) return undefined
   if (!ensureFunctionsDenoTypes(cwd, functionsDir).wroteContextModule) return undefined
   return toPosixPath(relative(cwd, join(functionsDir, "_shared", "context.ts")))
 }
