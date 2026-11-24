@@ -32,6 +32,7 @@ import {
   resolveAppConfig,
   validateStaticMode,
   validateBuildOutput,
+  spaIndexError,
   detectPackageManager,
   type ResolvedAppConfig,
 } from "../app/framework.js"
@@ -315,6 +316,12 @@ export function registerDeploy(program: Command): void {
           process.exit(1)
         }
 
+        const spaError = spaIndexError(appConfig.outputDirectory, appConfig.spa)
+        if (spaError) {
+          error(spaError)
+          process.exit(1)
+        }
+
         // Deploy (--local never uploads to cloud, even if linked)
         let url: string | undefined
         if (link && !opts.local) {
@@ -322,6 +329,7 @@ export function registerDeploy(program: Command): void {
             preview: opts.preview ?? false,
             env: envName,
             spa: appConfig.spa,
+            spaFromConfig: config.build.spa !== undefined,
           })
         } else {
           deploySelfHost(appConfig.outputDirectory, cwd)
@@ -471,7 +479,7 @@ function printDeploymentStatus(data: CurrentDeployment): void {
 async function deployStaticSite(
   cwd: string,
   outputDir: string,
-  opts: { preview?: boolean; env?: string; spa: boolean },
+  opts: { preview?: boolean; env?: string; spa: boolean; spaFromConfig: boolean },
 ): Promise<string> {
   const target = resolveTarget(cwd, { env: opts.env })
   const token = target.token
@@ -519,7 +527,7 @@ async function deployStaticSite(
   const deployed = await deploySite(
     { apiBaseUrl: target.apiBaseUrl, projectRef: target.projectRef, token, orgId: target.orgId, environment: target.environment },
     outputDir,
-    { spa: opts.spa, preview: opts.preview ?? false },
+    { spa: opts.spa, spaFromConfig: opts.spaFromConfig, preview: opts.preview ?? false },
   )
   return deployed.url
 }

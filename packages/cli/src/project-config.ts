@@ -497,9 +497,8 @@ export interface SupatypeProjectConfig {
      */
     outputDirectory?: string
     /**
-     * Serve index.html for a missing page, on Supatype Cloud and on a self-hosted stack alike. Default:
-     * on for a plain static site, Vite and Remix SPA; off for the other frameworks on Cloud, and on for
-     * a self-hosted static app.
+     * Serve index.html for a missing page, on Supatype Cloud and on a self-hosted stack alike. Default,
+     * the same on both: on for a plain static site, Vite and Remix SPA; off for the other frameworks.
      */
     spa?: boolean
     /** Environment variables injected at build time. */

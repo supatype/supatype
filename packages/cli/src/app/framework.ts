@@ -88,6 +88,32 @@ export function detectPackageManager(dir: string): "npm" | "pnpm" | "yarn" {
 }
 
 /**
+ * Whether a missing page serves index.html: `build.spa` when the config sets it, else the detected
+ * (or named) framework's default, else on. The one answer `supatype deploy` sends to Cloud and a
+ * self-host compose gives the gateway, so both hosts agree for every framework.
+ */
+export function resolveSpaFallback(
+  build: { framework?: AppFramework; directory?: string; spa?: boolean } | undefined,
+  cwd: string,
+): boolean {
+  if (build?.spa !== undefined) return build.spa
+  const framework = build?.framework ?? detectFramework(resolve(cwd, build?.directory || "."))
+  return framework === undefined ? true : FRAMEWORK_DEFAULTS[framework].spa
+}
+
+/**
+ * The refusal for a deploy whose fallback is on but whose build has no root index.html: Cloud would
+ * reject the upload, and a self-host site would answer a missing page with nothing. Null when fine.
+ */
+export function spaIndexError(outputDir: string, spa: boolean): string | null {
+  if (!spa || existsSync(join(outputDir, "index.html"))) return null
+  return (
+    `The SPA fallback is on but ${outputDir} has no index.html at its root, so a missing page would have nothing to serve. ` +
+    "Add an index.html there, or set build.spa: false in supatype.config.ts to answer 404 for a missing page."
+  )
+}
+
+/**
  * Resolve the full app configuration from user config + auto-detection.
  */
 export function resolveAppConfig(

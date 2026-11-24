@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { resolveAppConfig } from "../src/app/framework.js"
+import { resolveAppConfig, resolveSpaFallback, spaIndexError } from "../src/app/framework.js"
 import type { AppFramework } from "../src/config.js"
 import { renderSelfHostCompose } from "../src/self-host-compose.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
@@ -31,14 +31,76 @@ describe("self-host: build.spa reaches the gateway", () => {
     expect(compose).toContain('SUPATYPE_APP_SPA_FALLBACK: "true"')
   })
 
-  it("leaves the gateway's own default (on) when build.spa is not set", () => {
-    expect(renderSelfHostCompose(baseConfig)).not.toContain("SUPATYPE_APP_SPA_FALLBACK")
-    expect(renderSelfHostCompose({ ...baseConfig, build: { framework: "static" } })).not.toContain("SUPATYPE_APP_SPA_FALLBACK")
+  it.each([
+    ["vite", "true"],
+    ["remix-spa", "true"],
+    ["static", "true"],
+    ["nextjs", "false"],
+    ["astro", "false"],
+    ["sveltekit", "false"],
+    ["nuxt", "false"],
+  ] as const)("emits Cloud's default for %s when build.spa is not set: %s", (framework, value) => {
+    const compose = renderSelfHostCompose({ ...baseConfig, build: { framework } })
+    expect(compose).toContain(`SUPATYPE_APP_SPA_FALLBACK: "${value}"`)
+  })
+
+  it("emits on when there is no build section and no framework to take a default from", () => {
+    expect(renderSelfHostCompose(baseConfig)).toContain('SUPATYPE_APP_SPA_FALLBACK: "true"')
+  })
+
+  it("lets build.spa override the framework default", () => {
+    expect(renderSelfHostCompose({ ...baseConfig, build: { framework: "nextjs", spa: true } })).toContain('SUPATYPE_APP_SPA_FALLBACK: "true"')
+  })
+
+  it("says the config set it only when build.spa is set", () => {
+    expect(renderSelfHostCompose({ ...baseConfig, build: { spa: false } })).toContain('SUPATYPE_APP_SPA_FALLBACK_FROM_CONFIG: "true"')
+    expect(renderSelfHostCompose({ ...baseConfig, build: { framework: "vite" } })).not.toContain("SUPATYPE_APP_SPA_FALLBACK_FROM_CONFIG")
+    expect(renderSelfHostCompose(baseConfig)).not.toContain("SUPATYPE_APP_SPA_FALLBACK_FROM_CONFIG")
   })
 
   it("emits nothing when the app is not a static one", () => {
     const compose = renderSelfHostCompose({ ...baseConfig, app: { mode: "none" }, build: { spa: false } })
     expect(compose).not.toContain("SUPATYPE_APP_SPA_FALLBACK")
+  })
+
+  it("detects the framework from the app directory when asked to resolve for a folder", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-spa-resolve-"))
+    try {
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ dependencies: { next: "15.0.0" } }))
+      expect(resolveSpaFallback(undefined, dir)).toBe(false)
+      expect(resolveSpaFallback({ spa: true }, dir)).toBe(true)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe("a deploy with the fallback on needs a root index.html", () => {
+  let out: string
+
+  beforeEach(() => {
+    out = mkdtempSync(join(tmpdir(), "supatype-spa-out-"))
+  })
+
+  afterEach(() => {
+    rmSync(out, { recursive: true, force: true })
+  })
+
+  it("refuses, naming index.html and build.spa: false, when it is missing", () => {
+    mkdirSync(join(out, "docs"))
+    writeFileSync(join(out, "docs", "index.html"), "<html></html>")
+    const message = spaIndexError(out, true)
+    expect(message).toMatch(/index.html/)
+    expect(message).toMatch(/build.spa: false/)
+  })
+
+  it("passes when index.html is at the root", () => {
+    writeFileSync(join(out, "index.html"), "<html></html>")
+    expect(spaIndexError(out, true)).toBeNull()
+  })
+
+  it("passes without one when the fallback is off", () => {
+    expect(spaIndexError(out, false)).toBeNull()
   })
 })
 

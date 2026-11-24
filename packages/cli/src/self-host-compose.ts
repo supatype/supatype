@@ -69,6 +69,7 @@ import { postgrestHookActorEnv } from "./hook-actor.js"
 import { IN_REPO_IMAGE_ENV, RELEASE_IMAGES, unpinnedImagesNote, type InRepoImage } from "./release-images.js"
 import { configEmailEnabled, configMailerAutoconfirm, EMAIL_ENABLED_ENV } from "./mailer-autoconfirm.js"
 import { mailerUrlPathsEnv } from "./mailer-env.js"
+import { resolveSpaFallback } from "./app/framework.js"
 import {
   composeAllowListLine,
   composeDisableSignupFallback,
@@ -634,16 +635,16 @@ function serviceSwitchesForCompose(config: SupatypeProjectConfig): string {
     .join("")
 }
 
-function serverAppEnvForCompose(config: SupatypeProjectConfig, devLocal: boolean): string {
+function serverAppEnvForCompose(config: SupatypeProjectConfig, devLocal: boolean, cwd: string): string {
   const mode = config.app.mode ?? "none"
   const lines = [`      SUPATYPE_APP_MODE: ${mode}`]
   if (mode === "static") {
     const dir = appStaticDir(config)
     lines.push(`      SUPATYPE_APP_STATIC_DIR: /project/${dir.replace(/^\.\//, "")}`)
-    // `build.spa` is the one SPA setting, the one `supatype deploy` sends to Cloud. Unset leaves the gateway's default (on).
-    if (config.build?.spa !== undefined) {
-      lines.push(`      SUPATYPE_APP_SPA_FALLBACK: "${config.build.spa}"`)
-    }
+    // Always the resolved value (`build.spa`, else the framework's default), the one `supatype deploy` sends to
+    // Cloud, so the gateway and Cloud agree. The second line lets Studio say the config set it.
+    lines.push(`      SUPATYPE_APP_SPA_FALLBACK: "${resolveSpaFallback(config.build, cwd)}"`)
+    if (config.build?.spa !== undefined) lines.push('      SUPATYPE_APP_SPA_FALLBACK_FROM_CONFIG: "true"')
   } else if (mode === "proxy" && config.app.upstream?.trim()) {
     lines.push(`      SUPATYPE_APP_UPSTREAM: ${proxyUpstreamForCompose(config.app.upstream, devLocal)}`)
   }
@@ -802,7 +803,7 @@ export function renderSelfHostCompose(
   // Hooks, captcha, password, session, MFA, phone and rate limit settings: only what the config states.
   const authGroupsEnv = composeAuthGroupsEnv(config)
   const studioHostDev = devLocal && hasStudioOverride(config)
-  const appEnv = serverAppEnvForCompose(config, devLocal)
+  const appEnv = serverAppEnvForCompose(config, devLocal, cwd)
   const staticDir = appStaticDir(config)
   // functions.path and the project root, as the containers see them. These were hardcoded to
   // /project/functions and /project/hooks, so a project keeping its functions anywhere else had every
