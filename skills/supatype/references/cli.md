@@ -32,13 +32,15 @@ All targets use `.supatype/link.json` with an `environments` map:
 |---------|---------|
 | `supatype link --project <ref>` | Link to Supatype Cloud (uses platform access token) |
 | `supatype link --url <api> --token <key>` | Link to self-host (the server's `SERVICE_ROLE_KEY`, which `supatype keys` puts in its `.env`) |
-| `supatype link --env staging --url ... --token ...` | Add another environment |
+| `supatype link --env staging --url ... --token ...` | Add another environment to the same project |
+| `supatype link --force ...` | Replace the folder's link with a fresh one to a different project or host. Without `--force`, `link` refuses a project or host other than the one linked, naming the existing link |
+| `supatype unlink` | Remove the folder's link (`link.json`, and legacy `cloud.json` / `linked.json`) and say what was removed |
 | `supatype envs list` | List linked environments and the default commands use (`environments` in supatype.config.ts wins over `envs use`) |
 | `supatype envs use <name>` | Set this checkout's default environment; warns when the config names another |
 | `supatype envs create <staging\|preview>` | Create a Supatype Cloud environment and add it to link.json (cloud link only; any other name is refused). For self-host, use `supatype link --env <name> --url ... --token ...` |
 | `supatype domains list` / `add <domain>` / `verify <id>` / `remove <id>` | Cloud custom domains; `verify` and `remove` take the ID `list` prints |
 
-Legacy `.supatype/cloud.json` and `.supatype/linked.json` migrate into `link.json` on first read.
+A folder holds one link (one project on one host). To work against another project or host, run `supatype unlink` first, or use a second folder. Legacy `.supatype/cloud.json` and `.supatype/linked.json` migrate into `link.json` on first read.
 
 Auth flag: `--token` (cloud = platform PAT; self-host = `SERVICE_ROLE_KEY`). `--service-role-key` is a deprecated alias.
 

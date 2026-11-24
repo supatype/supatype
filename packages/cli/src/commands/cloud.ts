@@ -8,7 +8,7 @@ import { loadProjectLink, migrateLegacyLinkFiles } from "../link.js"
 import { targetFetch } from "../target-client.js"
 import { isArrayOf, isShape, isString, isUnknown, nullable, optional, type Guard } from "@supatype/shared"
 import { readJsonFile } from "../json-file.js"
-import { registerEnvs, registerLinkOptions, runLinkAction } from "./link-helpers.js"
+import { registerEnvs, registerLinkOptions, registerUnlink, runLinkAction } from "./link-helpers.js"
 import { resolveTarget, targetSchemaPush, schemaPgSchema } from "../resolve-target.js"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { schemaPathFromProject } from "../project-config.js"
@@ -165,6 +165,7 @@ export async function deploySchemaToLinkedProject(
 
 export function registerCloud(program: Command): void {
   registerEnvs(program)
+  registerUnlink(program)
 
   const linkCmd = program
     .command("link")
@@ -178,6 +179,7 @@ export function registerCloud(program: Command): void {
     serviceRoleKey?: string
     env?: string
     fixGitignore?: boolean
+    force?: boolean
   }) => {
     await runLinkAction(opts)
   })

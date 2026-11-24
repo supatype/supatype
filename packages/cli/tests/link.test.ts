@@ -158,8 +158,9 @@ describe("createCloudLink", () => {
     expect(createCloudLink({ ...base, existing }).ref).toBe("prj_1")
   })
 
-  it("does not carry a ref over to a different project", () => {
+  it("does not carry a ref over to a different project, which only --force may link", () => {
     const existing = createCloudLink({ ...base, ref: "prj_1" })
-    expect(createCloudLink({ ...base, projectRef: "other", existing }).ref).toBeUndefined()
+    expect(() => createCloudLink({ ...base, projectRef: "other", existing })).toThrow(/supatype unlink/)
+    expect(createCloudLink({ ...base, projectRef: "other", existing, force: true }).ref).toBeUndefined()
   })
 })

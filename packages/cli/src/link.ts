@@ -1,5 +1,5 @@
 import { DEFAULT_API_URL, trimApiUrl } from "./api-url.js"
-import { existsSync, mkdirSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { isNumber, isOneOf, isRecordOf, isShape, isString, optional, type Guard } from "@supatype/shared"
 import { readJsonFileOrThrow } from "./json-file.js"
@@ -163,6 +163,76 @@ export function resolveEnvironmentToken(link: ProjectLink, env: EnvironmentTarge
   return env.token ?? link.token
 }
 
+/** How a link names its host in a message. */
+function kindLabel(kind: ProjectLinkKind): string {
+  return kind === "cloud" ? "Supatype Cloud" : kind === "self-host" ? "self-host" : "local"
+}
+
+/** A folder holds one link; this is raised when another project or kind of host would share it. */
+export class LinkConflictError extends Error {
+  constructor(existing: ProjectLink) {
+    const where = existing.cloudApiUrl ?? Object.values(existing.environments)[0]?.apiUrl
+    super(
+      `This folder is already linked to the ${kindLabel(existing.kind)} project "${existing.projectRef}"` +
+        `${where === undefined ? "" : ` (${where})`}. A folder holds one link. ` +
+        "Run `supatype unlink` to remove it, or pass --force to replace it.",
+    )
+    this.name = "LinkConflictError"
+  }
+}
+
+/**
+ * The link to build on: `existing` when it is for the same project on the same kind of host,
+ * nothing under `force` (a fresh link), and a LinkConflictError otherwise.
+ */
+function linkToBuildOn(
+  existing: ProjectLink | null | undefined,
+  target: { kind: ProjectLinkKind; projectRef: string },
+  force: boolean | undefined,
+): ProjectLink | null {
+  if (!existing || force === true) return null
+  if (existing.kind !== target.kind || existing.projectRef !== target.projectRef) throw new LinkConflictError(existing)
+  return existing
+}
+
+/** Throws a LinkConflictError when linking `target` would share the folder's link with another project or host. */
+export function assertLinkCompatible(
+  existing: ProjectLink | null | undefined,
+  target: { kind: ProjectLinkKind; projectRef: string },
+  force: boolean | undefined,
+): void {
+  linkToBuildOn(existing, target, force)
+}
+
+/** What `supatype unlink` took away: the link it held, and each file it deleted. */
+export interface UnlinkResult {
+  link: ProjectLink | null
+  removed: string[]
+}
+
+/** Removes the folder's link and any legacy cloud.json / linked.json, without migrating them first. */
+export function unlinkProject(cwd: string): UnlinkResult {
+  let link: ProjectLink | null = null
+  try {
+    link = existsSync(linkPath(cwd)) ? readJsonFileOrThrow(linkPath(cwd), isProjectLink, "a project link") : null
+  } catch {
+    link = null
+  }
+  const removed: string[] = []
+  for (const file of [LINK_FILE, LEGACY_CLOUD_FILE, LEGACY_LINKED_FILE]) {
+    const path = resolve(cwd, file)
+    if (!existsSync(path)) continue
+    rmSync(path)
+    removed.push(file)
+  }
+  return { link, removed }
+}
+
+/** The link as a person reads it: its host and project. */
+export function describeLink(link: ProjectLink): string {
+  return `${kindLabel(link.kind)} project "${link.projectRef}"`
+}
+
 let migrationWarned = false
 
 /** Merge legacy cloud.json + linked.json into link.json once. */
@@ -230,8 +300,11 @@ export function createSelfHostLink(params: {
   token: string
   envName?: string
   existing?: ProjectLink | null
+  /** Replace a link to another project or host with this one, instead of refusing. */
+  force?: boolean
 }): ProjectLink {
   const envName = params.envName ?? "production"
+  const existing = linkToBuildOn(params.existing, { kind: "self-host", projectRef: params.projectRef }, params.force)
   const now = new Date().toISOString()
   const env: EnvironmentTarget = {
     name: envName,
@@ -240,15 +313,13 @@ export function createSelfHostLink(params: {
     linkedAt: now,
   }
 
-  if (params.existing) {
+  if (existing) {
     return {
-      ...params.existing,
-      kind: params.existing.kind === "cloud" ? "self-host" : params.existing.kind,
-      projectRef: params.projectRef,
-      defaultEnvironment: params.existing.defaultEnvironment || envName,
+      ...existing,
+      defaultEnvironment: existing.defaultEnvironment || envName,
       linkedAt: now,
       environments: {
-        ...params.existing.environments,
+        ...existing.environments,
         [envName]: env,
       },
     }
@@ -275,7 +346,10 @@ export function createCloudLink(params: {
   orgId?: string | undefined
   environments?: Array<{ name: string; apiUrl: string }>
   existing?: ProjectLink | null
+  /** Replace a link to another project or host with this one, instead of refusing. */
+  force?: boolean
 }): ProjectLink {
+  const existing = linkToBuildOn(params.existing, { kind: "cloud", projectRef: params.projectRef }, params.force)
   const now = new Date().toISOString()
   const envMap: Record<string, EnvironmentTarget> = {}
   const envs = params.environments?.length
@@ -290,8 +364,8 @@ export function createCloudLink(params: {
     }
   }
 
-  const refreshToken = params.refreshToken ?? params.existing?.refreshToken
-  const ref = params.ref ?? (params.existing?.projectRef === params.projectRef ? params.existing.ref : undefined)
+  const refreshToken = params.refreshToken ?? existing?.refreshToken
+  const ref = params.ref ?? existing?.ref
 
   return {
     version: LINK_VERSION,
@@ -302,9 +376,7 @@ export function createCloudLink(params: {
     token: params.token,
     cloudApiUrl: trimApiUrl(params.cloudApiUrl),
     linkedAt: now,
-    environments: params.existing
-      ? { ...params.existing.environments, ...envMap }
-      : envMap,
+    environments: existing ? { ...existing.environments, ...envMap } : envMap,
     ...(params.orgId !== undefined ? { orgId: params.orgId } : {}),
     ...(refreshToken !== undefined ? { refreshToken } : {}),
   }

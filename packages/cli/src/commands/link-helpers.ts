@@ -4,11 +4,15 @@ import { pickApiUrl, trimApiUrl } from "../api-url.js"
 import { envAccessToken, loadCloudCredentials } from "../cloud-credentials.js"
 import { readEnvFile } from "../env-file.js"
 import {
+  assertLinkCompatible,
   createCloudLink,
   createSelfHostLink,
+  describeLink,
+  LinkConflictError,
   loadProjectLink,
   resolveEnvironmentName,
   saveProjectLink,
+  unlinkProject,
   type ProjectLink,
 } from "../link.js"
 import { ensureSupatypeGitignore, warnIfLinkNotGitignored } from "../gitignore.js"
@@ -87,6 +91,22 @@ const CREATABLE_CLOUD_ENVIRONMENTS = ["staging", "preview"] as const
 function configDefaultEnvironment(cwd: string): string | undefined {
   const config = projectConfigIfAny(cwd)
   return config === undefined ? undefined : configEnvironment(cwd, config)
+}
+
+/** Removes the folder's link, so another project or host can be linked, and says what it removed. */
+export function registerUnlink(program: Command): void {
+  program
+    .command("unlink")
+    .description("Remove this folder's link (.supatype/link.json and any legacy cloud.json or linked.json)")
+    .action(() => {
+      const { link, removed } = unlinkProject(process.cwd())
+      if (removed.length === 0) {
+        info("Not linked: there is no link to remove.")
+        return
+      }
+      const was = link === null ? "the link" : `the link to the ${describeLink(link)}`
+      info(`Removed ${was}: ${removed.join(", ")}`)
+    })
 }
 
 export function registerEnvs(program: Command): void {
@@ -210,6 +230,18 @@ export function registerLinkOptions(linkCmd: Command): void {
     .option("--service-role-key <key>", "Deprecated alias for --token on self-host")
     .option("--env <name>", "Environment name (default: production)", "production")
     .option("--fix-gitignore", "Add .env, .supatype/ and Supatype's other local files to .gitignore where missing")
+    .option("--force", "Replace the folder's link when it is to another project or host (a folder holds one link)")
+}
+
+/** Runs a link step, turning a LinkConflictError into the refusal message and exit code 1. */
+function refuseOnConflict<T>(step: () => T): T {
+  try {
+    return step()
+  } catch (err) {
+    if (!(err instanceof LinkConflictError)) throw err
+    error(err.message)
+    process.exit(1)
+  }
 }
 
 export async function runLinkAction(opts: {
@@ -220,6 +252,7 @@ export async function runLinkAction(opts: {
   serviceRoleKey?: string
   env?: string
   fixGitignore?: boolean
+  force?: boolean
 }): Promise<void> {
   const cwd = process.cwd()
   const config = loadConfig(cwd)
@@ -276,6 +309,7 @@ export async function runLinkAction(opts: {
     }
     const apiUrl = trimApiUrl(url)
     const serverRef = await serverProjectRef(apiUrl, token, projectRef)
+    refuseOnConflict(() => assertLinkCompatible(existing, { kind: "self-host", projectRef: serverRef }, opts.force))
     await probeSelfHostLink(apiUrl, serverRef, token)
     const link = createSelfHostLink({
       projectRef: serverRef,
@@ -283,6 +317,7 @@ export async function runLinkAction(opts: {
       token,
       envName,
       existing,
+      ...(opts.force !== undefined && { force: opts.force }),
     })
     saveProjectLink(cwd, link)
     info(`Linked to self-host environment "${envName}" at ${apiUrl}`)
@@ -301,11 +336,15 @@ export async function runLinkAction(opts: {
 
   const creds = loadCloudCredentials()
   const cloudApiUrl = pickApiUrl(opts.apiUrl, process.env["SUPATYPE_API_URL"], creds?.apiUrl)
-  const refreshToken =
-    (creds !== null && trimApiUrl(creds.apiUrl) === cloudApiUrl ? creds.refreshToken : undefined) ??
-    existing?.refreshToken
 
   if (project) {
+    const slug = project
+    refuseOnConflict(() => assertLinkCompatible(existing, { kind: "cloud", projectRef: slug }, opts.force))
+    // A forced link starts fresh, so it keeps nothing of the link it replaces, the refresh token included.
+    const kept = opts.force === true ? null : existing
+    const refreshToken =
+      (creds !== null && trimApiUrl(creds.apiUrl) === cloudApiUrl ? creds.refreshToken : undefined) ??
+      kept?.refreshToken
     const one = await targetFetch(
       cloudApiUrl,
       "/api/v1",
@@ -341,6 +380,7 @@ export async function runLinkAction(opts: {
       orgId: one.orgId,
       environments,
       existing,
+      ...(opts.force !== undefined && { force: opts.force }),
       ...(refreshToken !== undefined ? { refreshToken } : {}),
     })
     saveProjectLink(cwd, link)
