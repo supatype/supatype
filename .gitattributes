@@ -2,3 +2,8 @@
 # the CDN and run by `curl | bash`; a CRLF committed from a Windows worktree makes the very
 # first line fail with `$'\r': command not found`, on every user's machine at once.
 *.sh text eol=lf
+
+# A script with a shebang line that a test imports through Vite must keep LF. With core.autocrlf on
+# Windows the checkout gives `#!/usr/bin/env node` a trailing CR and Vite stops on it with
+# "SyntaxError: Invalid or unexpected token" (packages/cli/tests/check-cli-release.test.ts).
+*.mjs text eol=lf
