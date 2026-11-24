@@ -43,17 +43,15 @@ describe("installDependencies", () => {
 
   it("hands each output line to the caller, without colour codes", async () => {
     const seen: string[] = []
-    const ok = await installDependencies(dir, fakeInstall(0, ["\u001b[32madded 3 packages\u001b[0m", "", "done"]), (line) => seen.push(line))
-    expect(ok).toBe(true)
+    const result = await installDependencies(dir, fakeInstall(0, ["\u001b[32madded 3 packages\u001b[0m", "", "done"]), (line) => seen.push(line))
+    expect(result.ok).toBe(true)
     expect(seen).toEqual(["added 3 packages", "done"])
   })
 
-  it("reports a failed install, and prints what it said last", async () => {
-    const printed: string[] = []
-    vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => void printed.push(args.join(" ")))
-    const ok = await installDependencies(dir, fakeInstall(0, ["npm ERR! code E404"], 1), () => undefined)
-    expect(ok).toBe(false)
-    expect(printed.join("\n")).toContain("npm ERR! code E404")
+  it("reports a failed install, and keeps what it said last", async () => {
+    const result = await installDependencies(dir, fakeInstall(0, ["npm ERR! code E404"], 1), () => undefined)
+    expect(result.ok).toBe(false)
+    expect(result.ok ? [] : result.failure.tail).toContain("npm ERR! code E404")
   })
 })
 
