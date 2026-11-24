@@ -21,6 +21,8 @@ interface SiteStatus {
   static_dir?: string
   upstream?: string
   spa_fallback: boolean
+  /** True when `build.spa` in the config set `spa_fallback`; absent from a gateway that does not say. */
+  spa_fallback_from_config?: boolean
   serving: boolean
   file_count: number
   total_bytes: number
@@ -29,11 +31,12 @@ interface SiteStatus {
 
 const isCacheControl = isShape({ html: isString, hashed_assets: isString, prefixes: isRecordOf(isString) })
 
-const isSiteStatus: Guard<SiteStatus> = isShape({
+export const isSiteStatus: Guard<SiteStatus> = isShape({
   mode: isOneOf(["none", "static", "proxy"] as const),
   static_dir: optional(isString),
   upstream: optional(isString),
   spa_fallback: isBoolean,
+  spa_fallback_from_config: optional(isBoolean),
   serving: isBoolean,
   file_count: isNumber,
   total_bytes: isNumber,
@@ -94,16 +97,17 @@ function headersOf(status: SiteStatus): SiteHeader[] {
 }
 
 /**
- * The mode and the SPA fallback reach the gateway from `supatype.config.ts` (`app`): the CLI writes
- * them into the stack's environment. The cache headers are environment or built-in defaults, so they
- * are not marked as the config's.
+ * The mode reaches the gateway from `supatype.config.ts` (`app`): the CLI writes it into the stack's
+ * environment. The SPA fallback is the config's only when the gateway says so (`build.spa` is set);
+ * otherwise it is the framework's default. The cache headers are environment or built-in defaults, so
+ * they are not marked as the config's.
  */
-function settingsOf(status: SiteStatus): StaticSiteSettings {
+export function settingsOf(status: SiteStatus): StaticSiteSettings {
   return {
     mode: status.mode,
     spaFallback: status.mode === "static" && status.spa_fallback,
     headers: headersOf(status),
-    fromConfig: ["mode", "spaFallback"],
+    fromConfig: status.spa_fallback_from_config === true ? ["mode", "spaFallback"] : ["mode"],
   }
 }
 

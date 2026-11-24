@@ -61,6 +61,8 @@ The first source holding a value decides it. A local address there, such as `loc
 
 <h2 id="supatype-hosts">Supatype hosts it</h2>
 
+A missing page on a plain static site serves `index.html`, on a self-hosted stack and on Supatype Cloud alike, so a single-page app's routes load on a refresh. Set `spa: false` in the `build` section of `supatype.config.ts` to answer 404 instead, and `spa: true` to turn the fallback on for a framework whose Cloud default is off. `supatype deploy` sends the setting to Cloud and `supatype self-host compose` gives it to the self-hosted server. With nothing set, both hosts take the same default from the framework: on for a plain static site, Vite and Remix SPA, off for Next.js, Astro, SvelteKit and Nuxt, whose pages are pre-rendered. A deploy with the fallback on refuses when the build has no `index.html` at its root: add one, or set `spa: false`.
+
 When a self-hosted stack serves your app (`app.mode: "static"`), its server answers `/supatype-env.js` with its own address and anon key:
 
 ```sh

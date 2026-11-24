@@ -74,4 +74,20 @@ describe("deploySite create call", () => {
       files: [{ path: "index.html", size: 13, sha256: sha256("<html></html>") }],
     })
   })
+
+  it("says whether the config set spa, only when the caller knows", async () => {
+    write("index.html", "<html></html>")
+    for (const fromConfig of [true, false]) {
+      await site?.close()
+      site = await mockSite((req, res) => {
+        if (req.method === "POST" && req.url.endsWith("/deployments")) {
+          sendJson(res, 201, { data: { deploymentId: "d1", version: "v1", uploadUrl: `${site?.base ?? ""}/blobs`, missing: [], limits: {} } })
+          return
+        }
+        sendJson(res, 200, { data: { version: "v1", status: "live", url: "https://demo.example.test" } })
+      })
+      await deploySite(site.target, project.dir, { spa: true, preview: false, spaFromConfig: fromConfig })
+      expect(JSON.parse(site.seen[0]?.body.toString() ?? "{}")).toMatchObject({ spa: true, spaFromConfig: fromConfig })
+    }
+  })
 })

@@ -118,6 +118,8 @@ const DEFAULT_RETRY_DELAY_MS = 500
 
 export interface DeploySiteOptions {
   spa: boolean
+  /** Whether `build.spa` in the config set `spa`, so Studio can say so. Left out when the caller does not know. */
+  spaFromConfig?: boolean
   preview: boolean
   /** Base wait before an upload or finalize is retried, multiplied by the attempt number. Tests set 0. */
   retryDelayMs?: number
@@ -251,7 +253,12 @@ export async function deploySite(target: SiteTarget, outputDir: string, opts: De
       environment: target.environment,
       method: "POST",
       path: `/projects/${target.projectRef}/deployments`,
-      body: { preview: opts.preview, spa: opts.spa, files: manifestOf(files) },
+      body: {
+        preview: opts.preview,
+        spa: opts.spa,
+        ...(opts.spaFromConfig !== undefined && { spaFromConfig: opts.spaFromConfig }),
+        files: manifestOf(files),
+      },
     },
     isCreatedDeployment,
   )
