@@ -24,13 +24,15 @@ export interface AppliedAstArtifacts {
 /**
  * Writes what describes the applied `ast`. `rowCacheEnv`: whether `.env`'s row-cache setting is
  * this project's to write, which it is for the project's own database container and not for
- * native Postgres or a database elsewhere.
+ * native Postgres or a database elsewhere. `syncPublicEnv` is false for a push to a linked project:
+ * the manifest in this folder is the one a self-host stack here serves, and the values that push
+ * sent were the target's own, not the `local` ones this would write over them.
  */
 export function writeAppliedAstArtifacts(
   cwd: string,
   config: SupatypeProjectConfig,
   ast: unknown,
-  { rowCacheEnv }: { rowCacheEnv: boolean },
+  { rowCacheEnv, syncPublicEnv = true }: { rowCacheEnv: boolean; syncPublicEnv?: boolean },
 ): AppliedAstArtifacts {
   const lines: string[] = []
   // Independent of `output`: a project with hooks needs its handler types whether or not it asked
@@ -45,6 +47,6 @@ export function writeAppliedAstArtifacts(
   // The server watches the manifest, so a hook or validator added to the schema takes effect
   // without a restart.
   if (syncManifestHooks(cwd, ast)) lines.push(HOOK_MAPS_WRITTEN)
-  if (syncManifestPublicEnv(cwd, config)) lines.push(PUBLIC_ENV_WRITTEN)
+  if (syncPublicEnv && syncManifestPublicEnv(cwd, config)) lines.push(PUBLIC_ENV_WRITTEN)
   return { lines, rowCache: rowCacheEnv ? syncRowCacheEnv(cwd, ast) : null, hooksModuleWritten: hooksModule !== null }
 }
