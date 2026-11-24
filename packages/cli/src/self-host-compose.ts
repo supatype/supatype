@@ -414,8 +414,18 @@ function bindMount(source: string, target: string, readOnly: boolean): string {
   ].join("\n")
 }
 
+/**
+ * The server's writable bind for the functions directory, or undefined when that directory is the
+ * project root. The auth server's admin env routes write `.env.local` and `.env.<name>.local` there.
+ */
+function functionsMount(root: string, functionsHostDir: string): string | undefined {
+  const rel = relative(root, functionsHostDir)
+  if (rel === "") return undefined
+  return bindMount(functionsHostDir, `/project/${rel.split(sep).join("/")}`, false)
+}
+
 /** The bind mounts the generated stack uses, each naming its host path absolutely. */
-function projectMounts(cwd: string) {
+function projectMounts(cwd: string, functionsHostDir: string) {
   const root = resolve(cwd)
   const paths = selfHostComposePaths(cwd)
   return {
@@ -423,6 +433,9 @@ function projectMounts(cwd: string) {
     projectWritable: bindMount(root, "/project", false),
     engineProject: bindMount(root, ENGINE_SERVICE.projectDir, false),
     projectState: bindMount(join(root, ".supatype"), "/project/.supatype", false),
+    // Undefined when the functions are the project root itself: a writable bind there would make the
+    // whole project writable, which the read-only mount exists to prevent.
+    functionsDir: functionsMount(root, functionsHostDir),
     kong: bindMount(paths.kongPath, "/etc/kong/kong.yml", true),
     seaweed: bindMount(paths.s3ConfigPath, "/etc/seaweedfs/s3.json", true),
   }
@@ -759,7 +772,17 @@ export function renderSelfHostCompose(
   cwd: string = process.cwd(),
   options?: SelfHostComposeOptions,
 ): string {
-  const mounts = projectMounts(cwd)
+  const mounts = projectMounts(cwd, preferredFunctionsPathFromProject(config, cwd))
+  // The server alone gets the functions directory writable (see functionsMount); the worker keeps
+  // the read-only project.
+  const functionsBind =
+    mounts.functionsDir === undefined
+      ? ""
+      : `      # The functions directory is writable too: setting a function secret makes the auth server write
+      # .env.local and .env.<name>.local into it, which failed with "read-only file system" under the
+      # project mount above.
+${mounts.functionsDir}
+`
   const external = usesExternalDatabase(config)
   // Both halves come from the caller because both need the schema loaded, which this renderer does
   // not do. See `SelfHostComposeOptions`. One call, so the exposed schemas and the search path
@@ -1314,7 +1337,7 @@ ${mounts.projectReadOnly}
       # declared and never actually switched on. A narrower bind than making the whole project
       # writable, because the rest of the tree keeps the guarantee.
 ${mounts.projectState}
-${keyspaceMount}    working_dir: /project
+${functionsBind}${keyspaceMount}    working_dir: /project
     environment:
       SUPATYPE_MODE: ${devLocal ? "dev" : "standalone"}
       SUPATYPE_MANIFEST_PATH: .supatype/manifest.json
@@ -1729,11 +1752,17 @@ export function writeSelfHostCompose(
   if (keyspacePasswordRequired(config) && keyspacePasswordFile === undefined) ensureKeyspacePassword(cwd)
   // The SAML signing key too, once SAML is on: the file requires it, and it must never change.
   ensureSamlPrivateKey(cwd, config)
-  // No functions/ or hooks/ here: the worker mounts the whole project and treats a missing root as
-  // nothing to serve, while an empty functions/ made `dev` scaffold function types into projects
-  // that have no functions. `functions new` and `init` create it when there is one.
+  // No hooks/ here: the worker mounts the whole project and treats a missing root as nothing to
+  // serve. The functions directory is made below, for the server's bind; it stays empty, and an
+  // empty one is not scaffolded into (refreshFunctionsContext), so a project with no functions
+  // still gets no function types.
   ensureComposeManifest(cwd, config)
-  writeFileSync(paths.composePath, renderSelfHostCompose(config, cwd, resolved), "utf8")
+  const rendered = renderSelfHostCompose(config, cwd, resolved)
+  // The server binds the functions directory writable, and a bind whose host path is missing is
+  // refused when the stack starts. Created only after the render, which refuses a path outside the
+  // project; and not when the directory is the project root, which is there already.
+  mkdirSync(preferredFunctionsPathFromProject(config, cwd), { recursive: true })
+  writeFileSync(paths.composePath, rendered, "utf8")
   // The object store's login, from the same `.env` values the compose file reads, generated first
   // when the project has none.
   // Not for a stack on the project's own bucket, which runs no object store.

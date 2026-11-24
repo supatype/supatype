@@ -1,9 +1,10 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, posix, resolve, win32 } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { composeProjectName, writeSelfHostCompose } from "../src/self-host-compose.js"
 import type { SupatypeProjectConfig } from "../src/project-config.js"
+import { refreshFunctionsContext } from "../src/functions-context-refresh.js"
 import { DENO_RELEASE_PIN } from "../src/release-pins.js"
 import { isString } from "@supatype/shared"
 import { parseJsonAs } from "./support/json.js"
@@ -240,5 +241,63 @@ describe("self-host compose functions worker", () => {
     const [controlPlaneRoot] = envValues(compose, "SUPATYPE_PROJECT_ROOT")
     expect(controlPlaneRoot).toBe("/project")
     expect(envValues(compose, "SUPATYPE_FUNCTION_ENV_FILE")).toEqual(["/project/.supatype/function-env.json"])
+  })
+})
+
+/**
+ * D-86: the auth server writes `.env.local` and `.env.<name>.local` into the functions directory
+ * when a function secret is set, and the project is mounted read-only, so the write failed with
+ * `read-only file system`. The functions directory gets its own writable bind on the server only.
+ */
+describe("self-host compose functions directory is writable for the server (D-86)", () => {
+  const serverBlock = (compose: string): string =>
+    compose.slice(compose.indexOf("\n  server:")).split(/\n  [a-z]/)[1] ?? ""
+  const workerBlock = (compose: string): string =>
+    compose.slice(compose.indexOf("  functions-worker:")).split(/\n  [a-z]/)[0] ?? ""
+
+  function mountOf(block: string, target: string): string | undefined {
+    const lines = block.split("\n")
+    const at = lines.findIndex((l) => l.trim() === `target: ${target}`)
+    return at < 0 ? undefined : lines.slice(at - 2, at + 3).join("\n")
+  }
+
+  it("binds the functions directory writable on the server", () => {
+    const cwd = projectDir()
+    const compose = readFileSync(writeSelfHostCompose(cwd, config).composePath, "utf8")
+    const mount = mountOf(serverBlock(compose), "/project/functions")
+    expect(mount).toBeDefined()
+    expect(mount).toContain(normalized(join(cwd, "functions")))
+    expect(mount).not.toContain("read_only")
+  })
+
+  it("follows functions.path", () => {
+    const cwd = projectDir()
+    const compose = readFileSync(
+      writeSelfHostCompose(cwd, { ...config, functions: { path: "api/functions" } }).composePath,
+      "utf8",
+    )
+    const mount = mountOf(serverBlock(compose), "/project/api/functions")
+    expect(mount).toContain(normalized(join(cwd, "api", "functions")))
+    expect(mount).not.toContain("read_only")
+  })
+
+  it("creates the host directory, so the bind cannot fail on a missing source", () => {
+    const cwd = projectDir()
+    writeSelfHostCompose(cwd, config)
+    expect(existsSync(join(cwd, "functions"))).toBe(true)
+  })
+
+  it("leaves the worker with the project read-only and no functions bind", () => {
+    const compose = readFileSync(writeSelfHostCompose(projectDir(), config).composePath, "utf8")
+    const block = workerBlock(compose)
+    expect(block).toMatch(/target: \/project\n\s+read_only: true/)
+    expect(mountOf(block, "/project/functions")).toBeUndefined()
+  })
+
+  it("leaves a fresh empty functions directory without context files from a push", () => {
+    const cwd = projectDir()
+    writeSelfHostCompose(cwd, config)
+    expect(refreshFunctionsContext(cwd, config)).toBeUndefined()
+    expect(existsSync(join(cwd, "functions", "_shared"))).toBe(false)
   })
 })
