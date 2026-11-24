@@ -38,7 +38,7 @@ import { isPortInUse, portCheckCommand } from "../postgres-ctl.js"
 import { retireCliMailerAutoconfirm } from "../mailer-autoconfirm.js"
 import { fatalError } from "../ui/fatal.js"
 import { warnIfHandWrittenUrlSilent } from "../database-url-owner.js"
-import { warnMissingStackSettings } from "../stack-setting-warnings.js"
+import { warnMissingStackSettings, warnSpaIndexMissing } from "../stack-setting-warnings.js"
 import { file, error, info, plain, warn } from "../ui/messages.js"
 import { confirm } from "../ui/confirm.js"
 import { isInteractive } from "../ui/interactive.js"
@@ -95,6 +95,7 @@ export function registerSelfHost(program: Command): void {
       syncConfigMailerEnv(cwd, config)
       // Before the spinner, so the warnings are not drawn over.
       warnMissingStackSettings(cwd, config)
+      warnSpaIndexMissing(cwd, config)
       noteUnpinnedImages(cwd)
       const renderOptions = composeRenderOptions(cwd, config.project.name)
       // DATABASE_URL in .env is not moved to this stack's port. That line is dev's, and moving it
@@ -327,6 +328,7 @@ function runCompose(args: string[], use: ComposeFileUse): number {
     requireUrlSafeComposePasswords(cwd, config)
     retireCliMailerAutoconfirm(cwd)
     syncConfigMailerEnv(cwd, config)
+    warnSpaIndexMissing(cwd, config)
   }
   const composePath =
     use === "on-disk"
