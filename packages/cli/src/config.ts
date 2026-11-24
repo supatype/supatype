@@ -80,7 +80,7 @@ export interface AppConfig {
   buildCommand?: string
   /** Output directory (inferred from framework if not specified). */
   outputDirectory?: string
-  /** Enable SPA fallback routing (default: true for Vite/CRA, false for SSG frameworks). */
+  /** Serve index.html for a missing page (default: true for static sites, Vite and Remix SPA; false for the other frameworks). */
   spa?: boolean
   /** Environment variables to inject during build. */
   env?: Record<string, string>

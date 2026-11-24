@@ -32,7 +32,8 @@ const FRAMEWORK_DEFAULTS: Record<AppFramework, FrameworkDefaults> = {
   "remix-spa": { buildCommand: "remix vite:build", outputDirectory: "build/client", spa: true },
   sveltekit: { buildCommand: "vite build", outputDirectory: "build", spa: false },
   nuxt: { buildCommand: "nuxt generate", outputDirectory: "dist", spa: false },
-  static: { buildCommand: "", outputDirectory: ".", spa: false },
+  // A missing page serves index.html, as a self-host gateway does by default; `build.spa: false` turns it off.
+  static: { buildCommand: "", outputDirectory: ".", spa: true },
 }
 
 // Maps package.json dependency names to framework identifiers

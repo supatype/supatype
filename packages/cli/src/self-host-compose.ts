@@ -640,6 +640,10 @@ function serverAppEnvForCompose(config: SupatypeProjectConfig, devLocal: boolean
   if (mode === "static") {
     const dir = appStaticDir(config)
     lines.push(`      SUPATYPE_APP_STATIC_DIR: /project/${dir.replace(/^\.\//, "")}`)
+    // `build.spa` is the one SPA setting, the one `supatype deploy` sends to Cloud. Unset leaves the gateway's default (on).
+    if (config.build?.spa !== undefined) {
+      lines.push(`      SUPATYPE_APP_SPA_FALLBACK: "${config.build.spa}"`)
+    }
   } else if (mode === "proxy" && config.app.upstream?.trim()) {
     lines.push(`      SUPATYPE_APP_UPSTREAM: ${proxyUpstreamForCompose(config.app.upstream, devLocal)}`)
   }

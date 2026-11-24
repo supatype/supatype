@@ -496,7 +496,11 @@ export interface SupatypeProjectConfig {
      * write `"dist"`, not `"web/dist"`. Inferred from framework when omitted.
      */
     outputDirectory?: string
-    /** Enable SPA fallback routing. */
+    /**
+     * Serve index.html for a missing page, on Supatype Cloud and on a self-hosted stack alike. Default:
+     * on for a plain static site, Vite and Remix SPA; off for the other frameworks on Cloud, and on for
+     * a self-hosted static app.
+     */
     spa?: boolean
     /** Environment variables injected at build time. */
     env?: Record<string, string>
