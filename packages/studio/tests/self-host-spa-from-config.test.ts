@@ -5,7 +5,7 @@ import { isSiteStatus, settingsOf } from "../src/lib/self-host-static-site.js"
  * The "Set in supatype.config.ts" label on the SPA fallback is shown only when the gateway says the
  * config set it (`spa_fallback_from_config`), not for a default.
  */
-const STATUS = { mode: "static", spa_fallback: true, serving: true, file_count: 1, total_bytes: 1 }
+const STATUS = { mode: "static" as const, spa_fallback: true, serving: true, file_count: 1, total_bytes: 1 }
 
 describe("self-host site settings", () => {
   it("label the SPA fallback as the config's when the gateway says the config set it", () => {
