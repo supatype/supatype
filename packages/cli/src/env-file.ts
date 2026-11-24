@@ -3,6 +3,7 @@ import { join } from "node:path"
 import { parseEnvText, splitAssignment } from "./dotenv-parse.js"
 import { assertEnvValues } from "./env-value.js"
 import { redact } from "./error-message.js"
+import { digestValue, readManagedRecord, writeManagedRecord, type ManagedRecord } from "./env-managed-record.js"
 
 export { parseEnvText }
 
@@ -90,14 +91,14 @@ export interface UpsertOptions {
   /** The file in `cwd` to merge into: `.env` unless given, `.env.development.local` for instance. */
   file?: string
   /**
-   * Called with the `managed` keys whose value was written by hand and is now replaced by a
-   * different one. A blank value (a scaffold to fill in) and a line the CLI wrote are not hand edits.
+   * Called with the `managed` keys whose value was written by hand, or edited in place under the
+   * marker since the CLI last wrote it (env-managed-record.ts), and is now replaced by a different one. A blank value (a scaffold to fill in) and a line the CLI wrote are not hand edits.
    * See {@link warnHandEditedValues}.
    */
   onHandEdited?: (changes: readonly HandEditedValue[]) => void
 }
 
-/** A value someone set in `.env` by hand that the CLI replaced with what `supatype.config.ts` gives. */
+/** A value someone set or edited in `.env` by hand that the CLI replaced with what `supatype.config.ts` gives. */
 export interface HandEditedValue {
   key: string
   from: string
@@ -153,12 +154,15 @@ export function upsertEnvFile(
   const file = opts.file ?? ".env"
   assertEnvValues(updates, file)
 
-  const plan = upsertPlan(updates, opts)
+  const plan = upsertPlan(updates, opts, readManagedRecord(cwd, file))
   const envPath = join(cwd, file)
   const existing = existsSync(envPath) ? readFileSync(envPath, "utf8") : ""
   const { kept, written, handEdited } = mergeLines(parseLines(existing), plan)
   const body = [...kept.map((l) => l.text), ...appendedLines(plan, written)].join("\n")
   const next = `${body.replace(/\n+$/, "")}\n`
+  // Before the unchanged-file return below: the first run after an upgrade changes no text, and still
+  // has to leave the record a later in-place edit is compared with.
+  writeManagedRecord(cwd, file, nextRecord(plan))
   // Not written when nothing changed. `.env` is compose's input, and a command that only read the
   // stack (push or doctor with dev running) has no business touching it.
   if (next === existing.replace(/\r\n/g, "\n")) return
@@ -176,9 +180,11 @@ interface UpsertPlan {
   managed: ReadonlySet<string>
   label: string
   noteAt: UpsertOptions["noteAt"]
+  /** What the CLI last wrote for each managed key of this file, as digests. */
+  recorded: ManagedRecord
 }
 
-function upsertPlan(updates: Readonly<Record<string, string>>, opts: UpsertOptions): UpsertPlan {
+function upsertPlan(updates: Readonly<Record<string, string>>, opts: UpsertOptions, recorded: ManagedRecord): UpsertPlan {
   return {
     updates,
     removeManaged: new Set(opts.removeManaged ?? []),
@@ -186,7 +192,28 @@ function upsertPlan(updates: Readonly<Record<string, string>>, opts: UpsertOptio
     managed: new Set(opts.managed ?? []),
     label: opts.label ?? MANAGED_MARKER,
     noteAt: opts.noteAt,
+    recorded,
   }
+}
+
+/** The record after this write: the keys taken out dropped, the managed keys written added. */
+function nextRecord(plan: UpsertPlan): ManagedRecord {
+  const next: Record<string, string> = { ...plan.recorded }
+  for (const key of [...plan.removeManaged, ...plan.removeAlways]) delete next[key]
+  for (const [key, value] of Object.entries(plan.updates)) if (plan.managed.has(key)) next[key] = digestValue(value)
+  return next
+}
+
+/**
+ * The value on a line to treat as hand-edited, or undefined. A line outside the marker is one;
+ * a line under it is only when its value is not the one the CLI last wrote. No record (a first
+ * run after an upgrade) is not an edit.
+ */
+function handValue(line: EnvLine, key: string, recorded: ManagedRecord): string | undefined {
+  const value = parseEnvText(line.text)[key]
+  if (!line.managed) return value
+  const last = recorded[key]
+  return last !== undefined && value !== undefined && digestValue(value) !== last ? value : undefined
 }
 
 /** Puts `text` at the end of `kept`, above the marker there if there is one, so the marker stays with its line. */
@@ -227,7 +254,7 @@ function mergeLines(
       continue
     }
     const wantsMarker = plan.managed.has(key)
-    const was = wantsMarker && !line.managed ? parseEnvText(line.text)[key] : undefined
+    const was = wantsMarker ? handValue(line, key, plan.recorded) : undefined
     const now = plan.updates[key]
     if (was !== undefined && now !== undefined && was.trim() !== "" && was !== now) handEdited.push({ key, from: was, to: now })
     relabel(kept, wantsMarker ? plan.label : undefined)

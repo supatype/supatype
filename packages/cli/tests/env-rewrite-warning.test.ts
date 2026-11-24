@@ -102,3 +102,61 @@ describe("the config-derived writers warn", () => {
     expect(text).toContain(composeDockerImageEnv(config(undefined, { server: "0.9.9" })).SUPATYPE_SERVER_IMAGE)
   })
 })
+
+describe("a hand edit under the managed marker (D-98a)", () => {
+  const KEY = "SUPATYPE_MAILER_MAILER_PROVIDER"
+  const record = () => readFileSync(join(dir, ".supatype", "env-managed.json"), "utf8")
+
+  /** A first run, which leaves the key under the marker and the record behind. */
+  function firstRun(): void {
+    syncConfigMailerEnv(dir, config(undefined))
+    warn.mockClear()
+  }
+
+  it("warns, with from and to, when the line under the marker was edited in place", () => {
+    firstRun()
+    writeFileSync(join(dir, ".env"), env().replace(`${KEY}=console`, `${KEY}=smtp`))
+    syncConfigMailerEnv(dir, config(undefined))
+    const text = warned()
+    expect(text).toContain(KEY)
+    expect(text).toContain("smtp")
+    expect(text).toContain("console")
+    expect(env()).toContain(`${KEY}=console`)
+  })
+
+  it("does not warn when the line under the marker is as the CLI left it", () => {
+    firstRun()
+    syncConfigMailerEnv(dir, config(undefined))
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it("does not warn on the first run after an upgrade, when there is no record yet", () => {
+    writeFileSync(join(dir, ".env"), `${MANAGED_MARKER}\n${KEY}=smtp\n`)
+    syncConfigMailerEnv(dir, config(undefined))
+    expect(warn).not.toHaveBeenCalled()
+    expect(env()).toContain(`${KEY}=console`)
+  })
+
+  it("does not warn when the value changed in supatype.config.ts and not by hand", () => {
+    firstRun()
+    syncConfigMailerEnv(dir, config({ provider: "smtp", smtp: { host: "h", pass: "p" } }))
+    expect(warn).not.toHaveBeenCalled()
+    expect(env()).toContain(`${KEY}=smtp`)
+  })
+
+  it("keeps no secret value in plain text in the record", () => {
+    syncConfigMailerEnv(dir, config({ provider: "smtp", smtp: { host: "h", pass: "from-config-secret" } }))
+    expect(record()).toContain("SUPATYPE_SMTP_PASS")
+    expect(record()).not.toContain("from-config-secret")
+  })
+
+  it("masks a secret edited in place under the marker", () => {
+    syncConfigMailerEnv(dir, config({ provider: "smtp", smtp: { host: "h", pass: "from-config-secret" } }))
+    warn.mockClear()
+    writeFileSync(join(dir, ".env"), env().replace("from-config-secret", "hunter2-by-hand"))
+    syncConfigMailerEnv(dir, config({ provider: "smtp", smtp: { host: "h", pass: "from-config-secret" } }))
+    const text = warned()
+    expect(text).toContain("SUPATYPE_SMTP_PASS")
+    expect(text).not.toContain("hunter2-by-hand")
+  })
+})
