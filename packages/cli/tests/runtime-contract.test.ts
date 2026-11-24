@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { runtimeRouteSpec } from "../src/runtime-routes.js"
@@ -489,15 +489,16 @@ describe("runtime contract", () => {
     }
   })
 
-  it("leaves a project with no functions or hooks without those directories", () => {
-    // Creating them on every `dev` made the context refresh, which runs when `functions/` exists,
-    // scaffold `_shared/`, Deno types and a root tsconfig exclude into projects that have no
-    // functions. The worker needs neither: it mounts the whole project and treats a missing root
-    // as nothing to serve. `functions new` and `init` create the directory when there is a function.
+  it("leaves a project with no functions or hooks with no hooks directory and an empty functions one", () => {
+    // The server binds the functions directory writable (function secrets are written into it), and
+    // a bind whose host path is missing is refused when the stack starts, so the directory is made.
+    // It stays empty: an empty one is not scaffolded into (`_shared/`, Deno types, a root tsconfig
+    // exclude), so a project with no functions still gets none of that. The worker mounts the whole
+    // project and treats a missing hooks root as nothing to serve.
     const dir = mkdtempSync(join(tmpdir(), "supatype-no-fn-"))
     try {
       writeSelfHostCompose(dir, baseConfig)
-      expect(existsSync(join(dir, "functions"))).toBe(false)
+      expect(readdirSync(join(dir, "functions"))).toEqual([])
       expect(existsSync(join(dir, "hooks"))).toBe(false)
     } finally {
       rmSync(dir, { recursive: true, force: true })
