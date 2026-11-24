@@ -5387,7 +5387,7 @@ PATCH /admin/v1/config/rest Authorization: Bearer <service role key> { "cache_ma
 | `functions invoke <name>` | Invoke a local or deployed function; exits 1 when it answers 400 or above | `--data <json>`, `--auth`, `--local` (a running `functions serve` if one answers, else the dev API), `--port <port>` (of that serve, default 18472) |
 | `functions deploy` | Deploy all functions (or `--only <name>` for one) to the linked project | `--only <name>`, `--env <name>`, `--dry-run` |
 | `functions list` **Cloud** | List all deployed functions for the linked project |  |
-| `functions delete <name>` **Cloud** | Remove a deployed function |  |
+| `functions delete <name>` | Remove a deployed function and its env values from the linked project, on Cloud or on a self-hosted server. On a project that is not linked it removes nothing and says so |  |
 | `functions logs <name>` **Cloud** | Tail logs for a deployed function | `--since <duration>` (default 1h) |
 | `functions env list`, `set <KEY=value>`, `unset <key>` **Cloud** | Manage function environment variables |  |
 | `hooks new <name>` | Scaffold a hook handler |  |

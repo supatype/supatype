@@ -92,8 +92,10 @@ export function registerFunctionRoutes(
   route(routes, "DELETE", "/projects/:ref/functions/:name", async (ctx) => {
     assertProject(ctx.params["ref"]!)
     const name = ctx.params["name"]!
-    // Whichever form the project keeps it in, both when both are there.
+    // Whichever form the project keeps it in, both when both are there. Its own secrets file goes
+    // too, so a new function of the same name does not inherit them. A function with no env file is deleted all the same.
     const dir = functionDir(name)
+    await removeAll([join(functionsRoot(), `.env.${name}.local`)])
     await removeAll([dir, `${dir}.ts`])
     await answerWithWorkerCurrent(ctx.res, { deleted: name })
   })

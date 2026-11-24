@@ -223,7 +223,7 @@ Authorization: Bearer &lt;service role key&gt;
         <tr><td><code>functions invoke &lt;name&gt;</code></td><td>Invoke a local or deployed function; exits 1 when it answers 400 or above</td><td><code>--data &lt;json&gt;</code>, <code>--auth</code>, <code>--local</code> (a running <code>functions serve</code> if one answers, else the dev API), <code>--port &lt;port&gt;</code> (of that serve, default 18472)</td></tr>
         <tr><td><code>functions deploy</code></td><td>Deploy all functions (or <code>--only &lt;name&gt;</code> for one) to the linked project</td><td><code>--only &lt;name&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--dry-run</code></td></tr>
         <tr><td><code>functions list</code> <strong>Cloud</strong></td><td>List all deployed functions for the linked project</td><td></td></tr>
-        <tr><td><code>functions delete &lt;name&gt;</code> <strong>Cloud</strong></td><td>Remove a deployed function</td><td></td></tr>
+        <tr><td><code>functions delete &lt;name&gt;</code></td><td>Remove a deployed function and its env values from the linked project, on Cloud or on a self-hosted server. On a project that is not linked it removes nothing and says so</td><td></td></tr>
         <tr><td><code>functions logs &lt;name&gt;</code> <strong>Cloud</strong></td><td>Tail logs for a deployed function</td><td><code>--since &lt;duration&gt;</code> (default 1h)</td></tr>
         <tr><td><code>functions env list</code>, <code>set &lt;KEY=value&gt;</code>, <code>unset &lt;key&gt;</code> <strong>Cloud</strong></td><td>Manage function environment variables</td><td></td></tr>
         <tr><td><code>hooks new &lt;name&gt;</code></td><td>Scaffold a hook handler</td><td></td></tr>

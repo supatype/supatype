@@ -635,8 +635,23 @@ function listLocalFunctions(cwd: string): void {
 
 // ─── Delete ──────────────────────────────────────────────────────────────────
 
+/**
+ * Deletes a function from the linked project, through the project's own route on Cloud and on a
+ * self-hosted server alike. A self-hosted server removes the function's env file with its code. A
+ * project that is not linked has no server to delete from, so the command says so rather than
+ * removing files from the working directory.
+ */
 async function deleteFunction(cwd: string, name: string): Promise<void> {
-  const target = requireLinkedTarget(cwd)
+  const problem = functionNameProblem(name)
+  if (problem !== undefined) {
+    error(problem)
+    process.exit(1)
+  }
+  const target = linkedTarget(cwd, undefined)
+  if (target === null) {
+    error(`${NOT_LINKED}. Nothing was deleted: a function is deleted from a linked project's server, and this project is not linked. To stop serving it locally, remove its files from the functions directory.`)
+    process.exit(1)
+  }
   const call = { method: "DELETE", subpath: `/functions/${encodeURIComponent(name)}`, restartsWorker: true }
   await askTarget(target, `Failed to delete "${name}"`, call, isUnknown)
   info(`Function "${name}" deleted. It will return 404 immediately.`)
