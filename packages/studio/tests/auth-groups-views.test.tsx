@@ -8,7 +8,7 @@ import { isAuthSettingsView } from "../src/hooks/useCloudAuthSettings.js"
 import { AttackProtectionView } from "../src/views/auth/AttackProtectionView.js"
 import { AuthHooksView } from "../src/views/auth/AuthHooksView.js"
 import { usePendingChoice, type CloudAuthEditor, type PendingChoiceSpec } from "../src/views/auth/CloudAuthParts.js"
-import type { AuthSettingsEdit, AuthSettingsView } from "../src/hooks/useCloudAuthSettings.js"
+import type { AuthSettingsEdit } from "../src/hooks/useCloudAuthSettings.js"
 import { ConfigurationView } from "../src/views/auth/ConfigurationView.js"
 import { groupRequiredSecretKeys, SMS_PROVIDERS } from "@supatype/types"
 import { ANONYMOUS_SPECS, CAPTCHA_SPECS, MFA_SPECS, PASSWORD_SPECS, PHONE_COMMON_SPECS, RATE_LIMIT_SPECS, SAML_SPECS, SESSION_SPECS, smsProviderFields } from "../src/views/auth/authGroupSpecs.js"
@@ -90,6 +90,16 @@ const button = (label: string): HTMLButtonElement | undefined =>
 
 const byLabel = (label: string): Element | null => container.querySelector(`[aria-label="${label}"]`)
 
+/** The control behind an aria-label, narrowed by its element type so no test casts it. */
+function byControl<T extends HTMLElement>(label: string, kind: new () => T): T {
+  const found = byLabel(label)
+  if (!(found instanceof kind)) throw new Error(`no ${kind.name} labelled ${label}`)
+  return found
+}
+const byButton = (label: string): HTMLButtonElement => byControl(label, HTMLButtonElement)
+const byInput = (label: string): HTMLInputElement => byControl(label, HTMLInputElement)
+const bySelect = (label: string): HTMLSelectElement => byControl(label, HTMLSelectElement)
+
 async function type(input: HTMLInputElement, value: string): Promise<void> {
   const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
   await act(async () => {
@@ -119,37 +129,37 @@ describe("the Cloud Attack Protection page", () => {
 
   it("saves the CAPTCHA switch as a set body", async () => {
     await render(CLOUD, <AttackProtectionView />, { body: viewBody({ "auth.captcha.enabled": field(false) }) })
-    await act(async () => { (byLabel("CAPTCHA enabled") as HTMLButtonElement).click() })
+    await act(async () => { byButton("CAPTCHA enabled").click() })
     expect(puts()[0]?.body).toEqual({ set: { "auth.captcha.enabled": true } })
   })
 
   it("shows the control plane's refusal when CAPTCHA is enabled without its secret", async () => {
     const refuse = (): Response => Response.json({ message: "captcha.secret is required while CAPTCHA is enabled" }, { status: 400 })
     await render(CLOUD, <AttackProtectionView />, { body: viewBody({ "auth.captcha.enabled": field(false) }), put: refuse })
-    await act(async () => { (byLabel("CAPTCHA enabled") as HTMLButtonElement).click() })
+    await act(async () => { byButton("CAPTCHA enabled").click() })
     expect(container.textContent).toContain("captcha.secret is required while CAPTCHA is enabled")
   })
 
   it("sets the CAPTCHA secret write-only", async () => {
     await render(CLOUD, <AttackProtectionView />, { body: viewBody({ "auth.captcha.enabled": field(false) }, { "captcha.secret": unset }) })
     expect(container.textContent).toContain("not set")
-    await type(byLabel("CAPTCHA secret") as HTMLInputElement, "hcaptcha-key")
+    await type(byInput("CAPTCHA secret"), "hcaptcha-key")
     await act(async () => { button("Set CAPTCHA secret")!.click() })
     expect(puts()[0]?.body).toEqual({ secrets: { "captcha.secret": "hcaptcha-key" } })
-    expect((byLabel("CAPTCHA secret") as HTMLInputElement).value).toBe("")
+    expect(byInput("CAPTCHA secret").value).toBe("")
     expect(container.innerHTML).not.toContain("hcaptcha-key")
   })
 
   it("saves required characters as a list in the order of the options", async () => {
     await render(CLOUD, <AttackProtectionView />, { body: viewBody({ "auth.password.requiredCharacters": field(["upper"]) }) })
-    await act(async () => { (byLabel("Required characters lower") as HTMLInputElement).click() })
+    await act(async () => { byInput("Required characters lower").click() })
     expect(puts()[0]?.body).toEqual({ set: { "auth.password.requiredCharacters": ["lower", "upper"] } })
   })
 
   it("saves a rate limit as a number and says it applies after a restart", async () => {
     await render(CLOUD, <AttackProtectionView />, { body: viewBody({ "auth.rateLimits.otp": field(30) }) })
     expect(container.textContent).toContain("take effect after this environment's auth server restarts")
-    await type(byLabel("OTP requests per 5 minutes") as HTMLInputElement, "60")
+    await type(byInput("OTP requests per 5 minutes"), "60")
     await act(async () => { button("Save OTP requests per 5 minutes")!.click() })
     expect(puts()[0]?.body).toEqual({ set: { "auth.rateLimits.otp": 60 } })
   })
@@ -182,23 +192,23 @@ describe("the Cloud Auth Hooks page", () => {
 
   it("saves a hook's URI and switch", async () => {
     await render(CLOUD, <AuthHooksView />, { body: viewBody({ "auth.hooks.sendEmail.uri": field("https://old.example.com"), "auth.hooks.sendEmail.enabled": field(true) }) })
-    await type(byLabel("Send email hook URI") as HTMLInputElement, "https://fn.example.com/send")
+    await type(byInput("Send email hook URI"), "https://fn.example.com/send")
     await act(async () => { button("Save Send email hook URI")!.click() })
     expect(puts()[0]?.body).toEqual({ set: { "auth.hooks.sendEmail.uri": "https://fn.example.com/send" } })
-    await act(async () => { (byLabel("Send email hook enabled") as HTMLButtonElement).click() })
+    await act(async () => { byButton("Send email hook enabled").click() })
     expect(puts()[1]?.body).toEqual({ set: { "auth.hooks.sendEmail.enabled": false } })
   })
 
   it("shows a hook nothing switches as on only once its URI is set, as the server reads it", async () => {
     // Every unset hook showed as on, while the server ran none of them.
     await render(CLOUD, <AuthHooksView />, { body: viewBody({ "auth.hooks.sendEmail.uri": field("https://fn.example.com"), "auth.hooks.sendEmail.enabled": field(null), "auth.hooks.sendSms.uri": field(null), "auth.hooks.sendSms.enabled": field(null) }) })
-    expect((byLabel("Send email hook enabled") as HTMLButtonElement).getAttribute("aria-checked")).toBe("true")
-    expect((byLabel("Send SMS hook enabled") as HTMLButtonElement).getAttribute("aria-checked")).toBe("false")
+    expect(byButton("Send email hook enabled").getAttribute("aria-checked")).toBe("true")
+    expect(byButton("Send SMS hook enabled").getAttribute("aria-checked")).toBe("false")
   })
 
   it("sets a hook's signing secret under its own key", async () => {
     await render(CLOUD, <AuthHooksView />, { body: viewBody({ "auth.hooks.sendSms.uri": field("https://x.example.com") }, { "hooks.sendSms.secrets": unset }) })
-    await type(byLabel("Send SMS hook secret") as HTMLInputElement, "v1,whsec_abc")
+    await type(byInput("Send SMS hook secret"), "v1,whsec_abc")
     await act(async () => { button("Set Send SMS hook secret")!.click() })
     expect(puts()[0]?.body).toEqual({ secrets: { "hooks.sendSms.secrets": "v1,whsec_abc" } })
   })
@@ -221,14 +231,14 @@ describe("the Cloud Configuration page, new sections", () => {
 
   it("saves a session limit in seconds", async () => {
     await render(CLOUD, <ConfigurationView />, { body: viewBody({ "auth.sessions.timebox": field(3600) }) })
-    await type(byLabel("Session time limit (seconds)") as HTMLInputElement, "7200")
+    await type(byInput("Session time limit (seconds)"), "7200")
     await act(async () => { button("Save Session time limit (seconds)")!.click() })
     expect(puts()[0]?.body).toEqual({ set: { "auth.sessions.timebox": 7200 } })
   })
 
   it("shows a setting that is on by default as on while nothing sets it", async () => {
     await render(CLOUD, <ConfigurationView />, { body: viewBody({ "auth.security.refreshTokenRotation": field(null) }) })
-    expect((byLabel("Refresh token rotation") as HTMLButtonElement).getAttribute("aria-checked")).toBe("true")
+    expect(byButton("Refresh token rotation").getAttribute("aria-checked")).toBe("true")
   })
 
   it("flags a Studio value masking config on a new row and resets it by path", async () => {
@@ -249,7 +259,7 @@ describe("the Cloud Configuration page, new sections", () => {
 
   it("sets the chosen provider's secret write-only", async () => {
     await render(CLOUD, <ConfigurationView />, { body: viewBody({ "auth.phone.provider": field("twilio") }, { "phone.twilio.authToken": unset }) })
-    await type(byLabel("Twilio auth token secret") as HTMLInputElement, "tw-token")
+    await type(byInput("Twilio auth token secret"), "tw-token")
     await act(async () => { button("Set Twilio auth token secret")!.click() })
     expect(puts()[0]?.body).toEqual({ secrets: { "phone.twilio.authToken": "tw-token" } })
   })
@@ -258,12 +268,12 @@ describe("the Cloud Configuration page, new sections", () => {
     const refuse = (): Response => Response.json({ message: "phone.twilio.authToken is required for the twilio provider" }, { status: 400 })
     await render(CLOUD, <ConfigurationView />, { body: viewBody({ "auth.phone.provider": field(null) }, { "phone.twilio.authToken": unset }), put: refuse })
     await act(async () => {
-      const select = byLabel("SMS provider") as HTMLSelectElement
+      const select = bySelect("SMS provider")
       const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set
       set?.call(select, "twilio")
       select.dispatchEvent(new Event("change", { bubbles: true }))
     })
-    await type(byLabel("Twilio auth token secret") as HTMLInputElement, "x")
+    await type(byInput("Twilio auth token secret"), "x")
     await act(async () => { button("Set Twilio auth token secret")!.click() })
     expect(container.textContent).toContain("phone.twilio.authToken is required for the twilio provider")
   })
@@ -285,14 +295,14 @@ describe("the Cloud Configuration page, new sections", () => {
     await render(CLOUD, <ConfigurationView />, { body: viewBody({ "auth.phone.provider": field(null), "auth.phone.twilio.accountSid": field(null) }, { "phone.twilio.authToken": unset }) })
     expect(byLabel("Twilio auth token secret")).toBeNull()
     await act(async () => {
-      const select = byLabel("SMS provider") as HTMLSelectElement
+      const select = bySelect("SMS provider")
       const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set
       set?.call(select, "twilio")
       select.dispatchEvent(new Event("change", { bubbles: true }))
     })
     expect(puts()).toHaveLength(0)
     expect(byLabel("Twilio account SID")).not.toBeNull()
-    await type(byLabel("Twilio auth token secret") as HTMLInputElement, "tw-token")
+    await type(byInput("Twilio auth token secret"), "tw-token")
     await act(async () => { button("Set Twilio auth token secret")!.click() })
     expect(puts()).toHaveLength(1)
     expect(puts()[0]?.body).toEqual({ set: { "auth.phone.provider": "twilio" }, secrets: { "phone.twilio.authToken": "tw-token" } })
@@ -303,16 +313,16 @@ describe("the Cloud Configuration page, new sections", () => {
     await render(CLOUD, <ConfigurationView />, { body: viewBody({ "email.provider": field(null) }, unsetKeys) })
     expect(byLabel("SES access key ID secret")).toBeNull()
     await act(async () => {
-      const select = byLabel("Mail provider") as HTMLSelectElement
+      const select = bySelect("Mail provider")
       const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set
       set?.call(select, "ses")
       select.dispatchEvent(new Event("change", { bubbles: true }))
     })
     expect(puts()).toHaveLength(0)
-    await type(byLabel("SES access key ID secret") as HTMLInputElement, "AKIA1")
+    await type(byInput("SES access key ID secret"), "AKIA1")
     await act(async () => { button("Set SES access key ID secret")!.click() })
     expect(puts()).toHaveLength(0)
-    await type(byLabel("SES secret access key secret") as HTMLInputElement, "s3cret")
+    await type(byInput("SES secret access key secret"), "s3cret")
     await act(async () => { button("Set SES secret access key secret")!.click() })
     expect(puts()).toHaveLength(1)
     expect(puts()[0]?.body).toEqual({
@@ -326,12 +336,12 @@ describe("the Cloud Configuration page, new sections", () => {
     const secrets = { "email.ses_access_key_id": held, "email.ses_secret_access_key": unset }
     await render(CLOUD, <ConfigurationView />, { body: viewBody({ "email.provider": field(null) }, secrets) })
     await act(async () => {
-      const select = byLabel("Mail provider") as HTMLSelectElement
+      const select = bySelect("Mail provider")
       const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set
       set?.call(select, "ses")
       select.dispatchEvent(new Event("change", { bubbles: true }))
     })
-    await type(byLabel("SES secret access key secret") as HTMLInputElement, "s3cret")
+    await type(byInput("SES secret access key secret"), "s3cret")
     await act(async () => { button("Set SES secret access key secret")!.click() })
     expect(puts()).toHaveLength(1)
     expect(puts()[0]?.body).toEqual({ set: { "email.provider": "ses" }, secrets: { "email.ses_secret_access_key": "s3cret" } })
@@ -341,7 +351,7 @@ describe("the Cloud Configuration page, new sections", () => {
     const held = { set: true, fingerprint: "ab12", source: "studio", updatedAt: null, updatedBy: null }
     await render(CLOUD, <ConfigurationView />, { body: viewBody({ "email.provider": field(null) }, { "email.ses_access_key_id": held, "email.ses_secret_access_key": held }) })
     await act(async () => {
-      const select = byLabel("Mail provider") as HTMLSelectElement
+      const select = bySelect("Mail provider")
       const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set
       set?.call(select, "ses")
       select.dispatchEvent(new Event("change", { bubbles: true }))
@@ -399,12 +409,12 @@ describe("defaults on rows nothing sets", () => {
 
   it("shows the effective default as the placeholder and in the source of every Attack Protection row", async () => {
     await render(CLOUD, <AttackProtectionView />, { body: unsetBody() })
-    expect((byLabel("OTP requests per 5 minutes") as HTMLInputElement).placeholder).toBe("30")
+    expect(byInput("OTP requests per 5 minutes").placeholder).toBe("30")
     expect(sourceOf("OTP requests per 5 minutes")).toBe("default: 30")
-    expect((byLabel("Token refreshes per 5 minutes") as HTMLInputElement).placeholder).toBe("150")
-    expect((byLabel("MFA challenges and verifies per minute") as HTMLInputElement).placeholder).toBe("15")
+    expect(byInput("Token refreshes per 5 minutes").placeholder).toBe("150")
+    expect(byInput("MFA challenges and verifies per minute").placeholder).toBe("15")
     // The fallback sent is 0 and the server raises it to 6, so 6 is what applies.
-    expect((byLabel("Minimum password length") as HTMLInputElement).placeholder).toBe("6")
+    expect(byInput("Minimum password length").placeholder).toBe("6")
     expect(sourceOf("Minimum password length")).toBe("default: 6")
     expect(sourceOf("CAPTCHA enabled")).toBe("default: off")
     expect(sourceOf("Leaked password check")).toBe("default: off")
@@ -415,7 +425,7 @@ describe("defaults on rows nothing sets", () => {
 
   it("shows the effective default on every Configuration row that has one", async () => {
     await render(CLOUD, <ConfigurationView />, { body: unsetBody() })
-    expect((byLabel("Assertion rate limit per 5 minutes") as HTMLInputElement).placeholder).toBe("15")
+    expect(byInput("Assertion rate limit per 5 minutes").placeholder).toBe("15")
     expect(sourceOf("Relay state validity (seconds)")).toBe("default: 120")
     expect(sourceOf("Code length (digits)")).toBe("default: 6")
     expect(sourceOf("Code lifetime (seconds)")).toBe("default: 60")
@@ -467,7 +477,9 @@ describe("a pending provider choice", () => {
   /** The editor the hook wraps: key a is held, key b is not. Every edit it is finally given is recorded. */
   async function harness(): Promise<{ editor: () => CloudAuthEditor; saved: AuthSettingsEdit[] }> {
     const saved: AuthSettingsEdit[] = []
-    const view = { ...viewBody({ choice: field(null) }, { "k.a": held, "k.b": unset }) } as unknown as AuthSettingsView
+    const body = viewBody({ choice: field(null) }, { "k.a": held, "k.b": unset })
+    if (!isAuthSettingsView(body)) throw new Error("viewBody did not build a settings view")
+    const view = { ...body }
     const inner: CloudAuthEditor = { view, loading: false, error: null, canEdit: true, busy: false, save: async (edit) => { saved.push(edit); return true } }
     let current: CloudAuthEditor = inner
     function Probe(): null {
