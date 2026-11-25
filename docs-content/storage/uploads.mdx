@@ -157,7 +157,7 @@ export type Documents = Bucket<"documents", {
 User `a` can then upload `a/report.pdf` and not `b/report.pdf`, and a file at the root, which has no
 first folder, is refused. On `update` the rule is checked against the old name and the new one, so
 a rename cannot move a file into another user's folder. Upload with the folder in the path:
-`upload(`${user.id}/report.pdf`, file)`.
+`` upload(`${user.id}/report.pdf`, file) ``.
 
 A bucket rule may use `Public`, `Private`, `LoggedIn`, `BucketOwner`, `Role`, `AuthUid`, `AuthRole`,
 `Claim`, `Literal` and `Folder`, joined with `Any`, `All` and `Not`. A rule that names a column of
