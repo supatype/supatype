@@ -17,6 +17,12 @@ import { projectConfig as configWith } from "./support/project-config.js"
 
 const projectConfig = configWith({ project: { name: "acme" }, database: { provider: "docker" } })
 
+// `docker ps` for a running server answers "none": a CI runner has no Docker to ask, and the dev
+// session these tests read is the lock file, not a container.
+vi.mock("../src/docker-exec.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/docker-exec.js")>()),
+  askDockerState: () => ({ status: 0, stdout: "", stderr: "", timedOut: false, missing: false }),
+}))
 vi.mock("../src/config.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/config.js")>()
   return { ...actual, loadConfig: () => projectConfig }
