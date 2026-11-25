@@ -179,13 +179,14 @@ async function uploadBlob(target: SiteTarget, uploadUrl: string, file: SiteFile,
 
 /** Run `work` over `items`, at most `limit` at a time; the first failure stops new work and is thrown. */
 async function inPool<T>(items: readonly T[], limit: number, work: (item: T) => Promise<void>): Promise<void> {
-  let next = 0
+  const queue = items[Symbol.iterator]()
   let failed: unknown
   const worker = async (): Promise<void> => {
-    while (failed === undefined && next < items.length) {
-      const item = items[next++] as T
+    while (failed === undefined) {
+      const step = queue.next()
+      if (step.done === true) return
       try {
-        await work(item)
+        await work(step.value)
       } catch (err) {
         failed = err
       }

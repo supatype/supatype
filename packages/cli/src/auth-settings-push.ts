@@ -153,7 +153,7 @@ function missingVariables(err: unknown): string[] | undefined {
   const missing = err.details?.["missing"]
   if (!Array.isArray(missing)) return []
   return missing.flatMap((entry: unknown) => {
-    const name = (entry as { envName?: unknown } | null)?.envName
+    const name = typeof entry === "object" && entry !== null && "envName" in entry ? entry.envName : undefined
     return typeof name === "string" ? [name] : []
   })
 }
