@@ -56,6 +56,12 @@ export interface RealtimeServerDeps {
   channelDb?: ChannelDatabase | undefined
   /** The inspector's message tap; one is created when not given. */
   tap?: Tap | undefined
+  /**
+   * Called once when startup fails in a way that retrying cannot fix (a wrong password, a missing
+   * privilege). Defaults to stopping the server and exiting with that code, so the orchestrator
+   * restarts it; a test gives one that records the call.
+   */
+  onFatal?: ((exitCode: number) => void) | undefined
 }
 
 /** One subscriber of one table, as the dispatch loop walks them. */
@@ -156,6 +162,9 @@ export class RealtimeServer {
   private replicationStartup: Promise<void> = Promise.resolve()
   /** Set by `stop()`, so a startup abandoned by the shutdown is not reported as a failure. */
   private stopping = false
+  /** Set when startup failed for good: liveness then fails so the orchestrator restarts the process. */
+  private fatal = false
+  private readonly onFatal: (exitCode: number) => void
 
   /** Cached project routes for multi-tenant JWT verification + tier limits. */
   private projectRoutes = new Map<string, ProjectRoute>()
@@ -170,6 +179,7 @@ export class RealtimeServer {
   constructor(env: RealtimeEnv, deps: RealtimeServerDeps = {}) {
     this.env = env
     this.tap = deps.tap ?? new Tap()
+    this.onFatal = deps.onFatal ?? ((code) => this.stopAndExit(code))
     this.channels = new ChannelManager()
     this.replication = new ReplicationListener({
       databaseUrl: env.databaseUrl,
@@ -204,8 +214,10 @@ export class RealtimeServer {
       // replication was up: so a database that was merely slow took the container down instead of
       // reporting itself as not ready yet.
       if (path === "/health" || path === "/health/live") {
-        res.writeHead(200, { "Content-Type": "application/json" })
-        res.end(JSON.stringify({ status: "ok" }))
+        // A process that failed startup for good must not report itself alive: it would never be
+        // restarted, and the project would never become ready.
+        res.writeHead(this.fatal ? 503 : 200, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ status: this.fatal ? "failed" : "ok" }))
         return
       }
       if (path === "/health/ready") {
@@ -279,7 +291,16 @@ export class RealtimeServer {
       // Anything else non-transient is a broken process, not a missing feature.
       console.error("[realtime] replication failed to start:", err)
       process.exitCode = 1
+      this.fatal = true
+      this.onFatal(1)
     })
+  }
+
+  /** The default fatal handler: shut down cleanly, then exit non-zero whatever the shutdown did. */
+  private stopAndExit(code: number): void {
+    this.stop()
+      .catch((err: unknown) => console.error("[realtime] shutdown after fatal error failed:", err))
+      .finally(() => process.exit(code))
   }
 
   /**
