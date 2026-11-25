@@ -23,13 +23,26 @@ export default () => Response.json({ atImport, atCall: read() })
 
 type Report = Record<string, string | null>
 
+/** The reports route's JSON, narrowed without a cast so a changed shape fails here and says so. */
+function reportsOf(body: unknown): { atImport: Report; atCall: Report } {
+  if (typeof body === "object" && body !== null && "atImport" in body && "atCall" in body) {
+    const { atImport, atCall } = body
+    if (isReport(atImport) && isReport(atCall)) return { atImport, atCall }
+  }
+  throw new Error(`unexpected reports body: ${JSON.stringify(body)}`)
+}
+
+function isReport(value: unknown): value is Report {
+  return typeof value === "object" && value !== null
+}
+
 Deno.test("function code finds no variable off the allowlist in Deno.env, at import or on a call", async () => {
   const env: Record<string, string> = { ...Deno.env.toObject() }
   for (const name of SECRETS) env[name] = "secret"
   for (const name of KEPT) env[name] = `http://kept/${name}`
   const worker = await startWorker({ reports: REPORTS_ENV }, env)
   try {
-    const body: { atImport: Report; atCall: Report } = await (await fetch(`${worker.origin}/functions/v1/reports`)).json()
+    const body = reportsOf(await (await fetch(`${worker.origin}/functions/v1/reports`)).json())
     for (const when of ["atImport", "atCall"] as const) {
       for (const name of SECRETS) expectEqual(body[when][name], null, `${name} ${when}`)
       for (const name of KEPT) expectEqual(body[when][name], `http://kept/${name}`, `${name} ${when}`)
