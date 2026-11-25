@@ -1,11 +1,12 @@
-import { sql } from "@supatype/cli/seed"
+import type { SeedContext } from "@supatype/cli/seed"
 
 /**
  * Enough of a conference for both front ends to have something to show.
  *
- * Seeds run as direct SQL, which is the interesting part rather than an aside: every rule in
- * `schema/index.ts` that compiles to a `CHECK` or a `CONSTRAINT` applies here, so a talk whose
- * `starts_at` is after its `ends_at` is refused by Postgres, at that line, with no API in the way.
+ * Every write goes through `db.$sql`, which is the interesting part rather than an aside: it is raw
+ * SQL in the seed's own transaction, so every rule in `schema/index.ts` that compiles to a `CHECK`
+ * or a `CONSTRAINT` applies here: a talk whose `starts_at` is after its `ends_at` is refused by
+ * Postgres, with no API in the way.
  * The rules that do *not* apply are the ones the API enforces: access rules and the per-field
  * validator. That asymmetry is the whole reason `constraints` exist alongside `validate`.
  *
@@ -26,20 +27,13 @@ import { sql } from "@supatype/cli/seed"
  */
 
 /**
- * `DATABASE_URL` from `.env`, which `pnpm seed` loads with `--env-file-if-exists`.
- *
- * Nothing loaded it before, so this always fell through to a hardcoded guess, and the guess named
- * a port and a database this stack does not use. The failure is `ECONNREFUSED` against a port
- * nothing is listening on, which says nothing about where the real one is. The compose db
- * publishes 5432 and the database is named for the project, both of which `.env` already records
- * correctly, so the fix is to read it rather than to guess better.
+ * This file exports a default function, which is the only shape a seed sent to a linked project may
+ * have: a file with no default export runs its writes when it is imported, and the CLI refuses to
+ * send one. The runner (`supatype seed`) supplies the connection and the transaction, so nothing
+ * here reads `DATABASE_URL` or opens a client. `$sql` collects each statement rather than running it,
+ * which is why a row's id is looked up inside the statement that needs it instead of being read back
+ * into a variable.
  */
-const db = sql(
-  process.env["DATABASE_URL"] ??
-    `postgresql://${process.env["POSTGRES_USER"] ?? "supatype_admin"}:${
-      process.env["POSTGRES_PASSWORD"] ?? "postgres"
-    }@127.0.0.1:5432/${process.env["POSTGRES_DB"] ?? "kitchen-sink"}?sslmode=disable`,
-)
 
 /**
  * One paragraph of Lexical state, what Studio's rich text editor saves. A rich text column has a
@@ -150,6 +144,8 @@ const TALKS: Array<[string, string, string, string, Date, number, number, boolea
   ["unfinished-thoughts-on-indexes", "Unfinished thoughts on indexes", "tomasz-leclerc", "Workshop Room", DAY_TWO, 15, 45, false],
 ]
 
+const ROOMS = [["Main Hall", 400], ["Side Room", 120], ["Workshop Room", 40]] as const
+
 const SPONSORS = [
   ["Northwind Databases", "platinum", "#00684a", "https://example.com/northwind", "Managed Postgres for people who would rather not."],
   ["Tessellate Cloud", "gold", "#3b5bdb", "https://example.com/tessellate", "Regions you have heard of, and three you have not."],
@@ -157,149 +153,115 @@ const SPONSORS = [
   ["The Local Coffee Co-op", "community", "#8a5a2b", "https://example.com/coffee", "Responsible for the only queue at this event."],
 ] as const
 
-/** The `id` of the first row a statement returned, or undefined when it returned none. */
-function firstId(result: { rows: unknown[] }): string | undefined {
-  const row = result.rows[0]
-  return typeof row === "object" && row !== null && "id" in row && typeof row.id === "string"
-    ? row.id
-    : undefined
-}
-
-/** The `id` an `INSERT ... RETURNING id` handed back, which it always should. */
-function insertedId(result: { rows: unknown[] }, what: string): string {
-  const id = firstId(result)
-  if (id === undefined) throw new Error(`inserting ${what} returned no id`)
-  return id
-}
-
-async function seed(): Promise<void> {
-  console.log("Seeding kitchen-sink…")
+export default async function seed({ db, log }: SeedContext): Promise<void> {
+  log("Seeding kitchen-sink...")
 
   // The singleton an editor owns in Studio, and what the app puts in its title bar. Its table is
   // named for the global rather than the model, which is what `singleton: true` does.
-  await db`
-    INSERT INTO _global_site_settings (id, "conferenceName", tagline, "supportEmail")
-    SELECT
-      gen_random_uuid(),
-      'Kitchen Sink Conference',
-      ${JSON.stringify({ en: "Two days of people explaining their schemas", fr: "Deux jours d'explications de schémas" })}::jsonb,
-      'hello@example.com'
-    WHERE NOT EXISTS (SELECT 1 FROM _global_site_settings)
-  `
+  db.$sql(
+    `INSERT INTO _global_site_settings (id, "conferenceName", tagline, "supportEmail")
+     SELECT gen_random_uuid(), 'Kitchen Sink Conference', $1::jsonb, 'hello@example.com'
+     WHERE NOT EXISTS (SELECT 1 FROM _global_site_settings)`,
+    [JSON.stringify({ en: "Two days of people explaining their schemas", fr: "Deux jours d'explications de schémas" })],
+  )
 
   // `title` is `Localized<string>`, so the column is jsonb holding every language at once, not
   // text. A bare string is refused by Postgres as invalid JSON rather than stored as a one-locale
   // value, which is the right answer: a localized column with no locale key is unreadable by
   // anything that asks for a language. `summary` is not localized and stays text.
-  await db`
-    INSERT INTO page (title, slug, summary, body, published_at)
-    VALUES (
-      ${JSON.stringify({ en: "Kitchen Sink Conference", fr: "La conférence évier de cuisine" })}::jsonb,
-      'home',
-      'One schema, two front ends, every feature that ships.',
-      ${JSON.stringify([HERO, PROSE, SPEAKER_GRID])}::jsonb,
-      NOW()
-    )
-    ON CONFLICT (slug) DO NOTHING
-  `
+  db.$sql(
+    `INSERT INTO page (title, slug, summary, body, published_at)
+     VALUES ($1::jsonb, 'home', $2, $3::jsonb, NOW())
+     ON CONFLICT (slug) DO NOTHING`,
+    [
+      JSON.stringify({ en: "Kitchen Sink Conference", fr: "La conférence évier de cuisine" }),
+      "One schema, two front ends, every feature that ships.",
+      JSON.stringify([HERO, PROSE, SPEAKER_GRID]),
+    ],
+  )
 
-  const rooms = new Map<string, string>()
-  for (const [name, capacity] of [["Main Hall", 400], ["Side Room", 120], ["Workshop Room", 40]] as const) {
-    // `db` answers with a pg QueryResult, so the inserted row is in `.rows` rather than the result
-    // itself. Spelled out because a seed that reads `result[0]` gets `undefined` and inserts a null
-    // foreign key without complaining.
-    const existing = firstId(await db`SELECT id FROM room WHERE name = ${name}`)
-    if (existing !== undefined) {
-      rooms.set(name, existing)
-      continue
-    }
-    const created = await db`
-      INSERT INTO room (name, capacity) VALUES (${name}, ${capacity}) RETURNING id
-    `
-    rooms.set(name, insertedId(created, `room ${name}`))
+  // A room is inserted only when none has its name, so a re-seed keeps the ids talks already point
+  // at. Talks below find their room by name inside their own statement.
+  for (const [name, capacity] of ROOMS) {
+    db.$sql(
+      `INSERT INTO room (name, capacity)
+       SELECT $1, $2::int WHERE NOT EXISTS (SELECT 1 FROM room WHERE name = $1)`,
+      [name, capacity],
+    )
   }
 
-  const speakers = new Map<string, string>()
   for (const person of SPEAKERS) {
-    const row = await db`
-      INSERT INTO speaker (name, slug, bio, links, email, published_at)
-      VALUES (
-        ${person.name}, ${person.slug},
-        ${JSON.stringify(person.bio)}::jsonb,
-        ${JSON.stringify(person.links)}::jsonb,
-        ${person.email}, NOW()
-      )
-      ON CONFLICT (slug) DO UPDATE SET
-        name = EXCLUDED.name,
-        bio = EXCLUDED.bio,
-        links = EXCLUDED.links,
-        email = EXCLUDED.email,
-        published_at = EXCLUDED.published_at
-      RETURNING id
-    `
-    speakers.set(person.slug, insertedId(row, `speaker ${person.slug}`))
+    db.$sql(
+      `INSERT INTO speaker (name, slug, bio, links, email, published_at)
+       VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, NOW())
+       ON CONFLICT (slug) DO UPDATE SET
+         name = EXCLUDED.name,
+         bio = EXCLUDED.bio,
+         links = EXCLUDED.links,
+         email = EXCLUDED.email,
+         published_at = EXCLUDED.published_at`,
+      [person.name, person.slug, JSON.stringify(person.bio), JSON.stringify(person.links), person.email],
+    )
   }
 
   for (const [slug, title, speakerSlug, roomName, day, hour, minutes, published] of TALKS) {
-    await db`
-      INSERT INTO talk (title, slug, speaker_id, room_id, day, starts_at, ends_at, length, abstract, published_at)
-      VALUES (
-        ${title}, ${slug},
-        ${speakers.get(speakerSlug)!}, ${rooms.get(roomName)!},
-        ${isoDay(day)}::date,
-        ${at(day, hour)}::timestamptz,
-        ${at(day, hour, minutes)}::timestamptz,
-        ${JSON.stringify({ ms: minutes * 60_000 })}::jsonb,
-        ${JSON.stringify({ en: `A talk in the ${roomName.toLowerCase()}, and the abstract an editor would have written.` })}::jsonb,
-        ${published ? new Date().toISOString() : null}
-      )
-      ON CONFLICT (slug) DO UPDATE SET
-        title = EXCLUDED.title,
-        speaker_id = EXCLUDED.speaker_id,
-        room_id = EXCLUDED.room_id,
-        day = EXCLUDED.day,
-        starts_at = EXCLUDED.starts_at,
-        ends_at = EXCLUDED.ends_at,
-        length = EXCLUDED.length,
-        abstract = EXCLUDED.abstract,
-        published_at = EXCLUDED.published_at
-    `
+    // The speaker and the room are looked up by their natural keys here. Were either missing, the
+    // subselect is NULL and Postgres refuses the row, rather than a null foreign key slipping in.
+    db.$sql(
+      `INSERT INTO talk (title, slug, speaker_id, room_id, day, starts_at, ends_at, length, abstract, published_at)
+       VALUES (
+         $1, $2,
+         (SELECT id FROM speaker WHERE slug = $3),
+         (SELECT id FROM room WHERE name = $4),
+         $5::date, $6::timestamptz, $7::timestamptz, $8::jsonb, $9::jsonb, $10::timestamptz
+       )
+       ON CONFLICT (slug) DO UPDATE SET
+         title = EXCLUDED.title,
+         speaker_id = EXCLUDED.speaker_id,
+         room_id = EXCLUDED.room_id,
+         day = EXCLUDED.day,
+         starts_at = EXCLUDED.starts_at,
+         ends_at = EXCLUDED.ends_at,
+         length = EXCLUDED.length,
+         abstract = EXCLUDED.abstract,
+         published_at = EXCLUDED.published_at`,
+      [
+        title, slug, speakerSlug, roomName,
+        isoDay(day),
+        at(day, hour),
+        at(day, hour, minutes),
+        JSON.stringify({ ms: minutes * 60_000 }),
+        JSON.stringify({ en: `A talk in the ${roomName.toLowerCase()}, and the abstract an editor would have written.` }),
+        published ? new Date().toISOString() : null,
+      ],
+    )
   }
 
   for (const [name, tier, brandColor, website, blurb] of SPONSORS) {
-    await db`
-      INSERT INTO sponsor (name, tier, "brandColor", website, blurb, published_at)
-      VALUES (
-        ${name}, ${tier}, ${brandColor}, ${website},
-        ${JSON.stringify({ en: blurb })}::jsonb,
-        NOW()
-      )
-      ON CONFLICT (name) DO UPDATE SET
-        tier = EXCLUDED.tier,
-        "brandColor" = EXCLUDED."brandColor",
-        website = EXCLUDED.website,
-        blurb = EXCLUDED.blurb,
-        published_at = EXCLUDED.published_at
-    `
+    db.$sql(
+      `INSERT INTO sponsor (name, tier, "brandColor", website, blurb, published_at)
+       VALUES ($1, $2, $3, $4, $5::jsonb, NOW())
+       ON CONFLICT (name) DO UPDATE SET
+         tier = EXCLUDED.tier,
+         "brandColor" = EXCLUDED."brandColor",
+         website = EXCLUDED.website,
+         blurb = EXCLUDED.blurb,
+         published_at = EXCLUDED.published_at`,
+      [name, tier, brandColor, website, JSON.stringify({ en: blurb })],
+    )
   }
 
-  await db`
-    INSERT INTO chat_message (room, body, "authorName")
-    SELECT * FROM (VALUES
-      ('lobby', 'Morning. Is the coffee queue always like this?', 'Mira'),
-      ('lobby', 'It is the only queue here that scales linearly.', 'Rune')
-    ) AS seed(room, body, author)
-    WHERE NOT EXISTS (SELECT 1 FROM chat_message WHERE room = 'lobby')
-  `
+  db.$sql(
+    `INSERT INTO chat_message (room, body, "authorName")
+     SELECT * FROM (VALUES
+       ('lobby', 'Morning. Is the coffee queue always like this?', 'Mira'),
+       ('lobby', 'It is the only queue here that scales linearly.', 'Rune')
+     ) AS seed(room, body, author)
+     WHERE NOT EXISTS (SELECT 1 FROM chat_message WHERE room = 'lobby')`,
+  )
 
-  await db.end()
-  console.log(
-    `Done. ${SPEAKERS.length} speakers, ${TALKS.length} talks (one unpublished), 3 rooms, ` +
+  log(
+    `Done. ${SPEAKERS.length} speakers, ${TALKS.length} talks (one unpublished), ${ROOMS.length} rooms, ` +
       `${SPONSORS.length} sponsors, one page, site settings and two lobby messages.`,
   )
 }
-
-seed().catch((e) => {
-  console.error(e)
-  process.exit(1)
-})

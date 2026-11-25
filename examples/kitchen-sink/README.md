@@ -178,9 +178,12 @@ stack's key. Re-minting keys needs no rebuild.
 Then, in another terminal:
 
 ```bash
-pnpm seed            # one page, one speaker, two talks (one published), one sponsor
+pnpm seed            # `supatype seed --local`: five speakers, eight talks (one unpublished), a page, sponsors
 pnpm verify          # the assertions a browser cannot make
 ```
+
+`seed.ts` exports a default function, so the same file can be sent to a linked project with
+`supatype seed --confirm-production`; a seed with no default export is refused there.
 
 The marketing site runs beside the stack rather than inside it:
 
