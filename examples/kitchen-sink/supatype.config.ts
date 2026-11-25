@@ -21,6 +21,8 @@ export default defineConfig({
     mode: "static",
     static_dir: "./apps/app/dist",
   },
+  // What `supatype deploy` builds and uploads: the same SPA the local server serves above.
+  build: { directory: "./apps/app", framework: "vite", spa: true },
   email: { provider: "console" },
   storage: { provider: "local", local_path: ".supatype/storage" },
   // issue-ticket checks the caller's own token, then writes the ticket with the service role, so
