@@ -75,6 +75,8 @@ export interface RemoteSeedPlanLimit {
   readonly plan: string
   readonly seedBytes: number
   readonly maxBytes: number
+  /** True for a staging or preview seed, which is sized and capped as Free whatever the project's plan. */
+  readonly nonProduction?: boolean
 }
 
 /** A size as whole megabytes, rounded up so a limit is never shown as less than it is over. */
@@ -103,8 +105,11 @@ export const REMOTE_SEED_MESSAGES = {
       ? `A seed request may be at most ${said.maxBytes} bytes.`
       : `At most ${said.maxFiles} seed files can be sent at once.`,
   seed_too_large_for_plan: (said: RemoteSeedPlanLimit): string =>
-    `This seed is ${megabytes(said.seedBytes)}, more than the ${said.plan} plan can run at once (up to ${megabytes(said.maxBytes)}). ` +
-    "Split it into smaller seed files and seed them one after another, or move to a larger plan.",
+    said.nonProduction === true
+      ? `This seed is ${megabytes(said.seedBytes)}. Staging and preview environments run at Free size on every plan and take seeds up to ${megabytes(said.maxBytes)}, ` +
+        "so no plan raises that. Split it into smaller seed files and seed them one after another, or seed production."
+      : `This seed is ${megabytes(said.seedBytes)}, more than the ${said.plan} plan can run at once (up to ${megabytes(said.maxBytes)}). ` +
+        "Split it into smaller seed files and seed them one after another, or move to a larger plan.",
   server_busy: (): string =>
     "The server is taking as many seed uploads as it can right now. Wait a moment and send the seed again.",
 } as const

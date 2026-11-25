@@ -72,6 +72,22 @@ describe("the remote seed message table", () => {
     expect(said).toContain("3 MB")
   })
 
+  it("tells a non-production seed that staging and preview run at Free size, and does not say to move to a larger plan", () => {
+    const said = REMOTE_SEED_MESSAGES.seed_too_large_for_plan({ plan: "pro", seedBytes: 9 * 1024 * 1024, maxBytes: 8 * 1024 * 1024, nonProduction: true })
+    expect(said).toMatch(/staging and preview/i)
+    expect(said).toContain("Free size")
+    expect(said).toContain("9 MB")
+    expect(said).toContain("8 MB")
+    expect(said).toMatch(/seed production/i)
+    expect(said).not.toMatch(/larger plan/i)
+    expect(said).not.toMatch(/pro plan/i)
+  })
+
+  it("keeps the production seed_too_large_for_plan wording when nonProduction is false", () => {
+    const said = REMOTE_SEED_MESSAGES.seed_too_large_for_plan({ plan: "free", seedBytes: 9 * 1024 * 1024, maxBytes: 3 * 1024 * 1024, nonProduction: false })
+    expect(said).toContain("larger plan")
+  })
+
   it("answers a full upload budget with a message that says to try again", () => {
     expect(REMOTE_SEED_MESSAGES.server_busy()).toMatch(/try again|send .* again/i)
   })
