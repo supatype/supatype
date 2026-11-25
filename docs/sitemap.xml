@@ -2,7 +2,7 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://www.supatype.com/</loc>
-    <lastmod>2026-11-11</lastmod>
+    <lastmod>2026-11-18</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/docs/</loc>
@@ -14,7 +14,7 @@
   </url>
   <url>
     <loc>https://www.supatype.com/docs/client.html</loc>
-    <lastmod>2026-11-15</lastmod>
+    <lastmod>2026-11-25</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/docs/frameworks.html</loc>
@@ -22,7 +22,7 @@
   </url>
   <url>
     <loc>https://www.supatype.com/docs/auth.html</loc>
-    <lastmod>2026-11-21</lastmod>
+    <lastmod>2026-11-25</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/docs/sso.html</loc>
@@ -30,35 +30,35 @@
   </url>
   <url>
     <loc>https://www.supatype.com/docs/storage.html</loc>
-    <lastmod>2026-11-14</lastmod>
+    <lastmod>2026-11-25</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/docs/realtime.html</loc>
-    <lastmod>2026-11-15</lastmod>
+    <lastmod>2026-11-25</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/docs/functions.html</loc>
-    <lastmod>2026-11-22</lastmod>
+    <lastmod>2026-11-25</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/docs/seeding.html</loc>
-    <lastmod>2026-11-15</lastmod>
+    <lastmod>2026-11-20</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/docs/studio.html</loc>
-    <lastmod>2026-11-14</lastmod>
+    <lastmod>2026-11-20</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/docs/studio-roles.html</loc>
-    <lastmod>2026-11-14</lastmod>
+    <lastmod>2026-11-21</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/docs/deploying-your-frontend.html</loc>
-    <lastmod>2026-11-14</lastmod>
+    <lastmod>2026-11-24</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/deploy-vm-github-actions.html</loc>
-    <lastmod>2026-11-14</lastmod>
+    <lastmod>2026-11-18</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/from-supabase.html</loc>
@@ -74,7 +74,7 @@
   </url>
   <url>
     <loc>https://www.supatype.com/postgres/pg-keyspace.html</loc>
-    <lastmod>2026-11-14</lastmod>
+    <lastmod>2026-11-18</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/postgres/pg-topics.html</loc>
@@ -90,11 +90,11 @@
   </url>
   <url>
     <loc>https://www.supatype.com/docs/cli.html</loc>
-    <lastmod>2026-11-14</lastmod>
+    <lastmod>2026-11-25</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/docs/versions.html</loc>
-    <lastmod>2026-11-17</lastmod>
+    <lastmod>2026-11-25</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/licensing.html</loc>
@@ -110,10 +110,10 @@
   </url>
   <url>
     <loc>https://www.supatype.com/llms.txt</loc>
-    <lastmod>2026-11-14</lastmod>
+    <lastmod>2026-11-18</lastmod>
   </url>
   <url>
     <loc>https://www.supatype.com/llms-full.txt</loc>
-    <lastmod>2026-11-21</lastmod>
+    <lastmod>2026-11-25</lastmod>
   </url>
 </urlset>

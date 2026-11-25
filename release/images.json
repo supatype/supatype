@@ -1,8 +1,8 @@
 {
   "engine": {
     "image": "supatype/schema-engine",
-    "tag": "v0.12.0-e2e.ad61bf1",
-    "commit": "ad61bf131268bcd51ef727fa7be98edf0641eb6b"
+    "tag": "v0.11.1",
+    "commit": "e74f8c082225f13028746301b5d8be93a9fce1a9"
   },
   "server": {
     "image": "supatype/server",
@@ -11,7 +11,7 @@
   },
   "postgres": {
     "image": "supatype/postgres",
-    "tag": "17.2.99",
-    "commit": "5a8170ce5ca01da3f03e38f28fa6bc4aa23b3f6c"
+    "tag": "17.2.16",
+    "commit": "ff4a061e5bc49eebbf8b881812d028b4774d474b"
   }
 }
