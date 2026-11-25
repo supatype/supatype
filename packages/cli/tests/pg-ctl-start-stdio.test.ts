@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { spawnSync } from "node:child_process"
+import type { PgCtlSpawn } from "../src/postgres-ctl.js"
 import { runPgCtlStart } from "../src/postgres-ctl.js"
 
 /**
@@ -17,7 +17,7 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
 describe("pg_ctl start", () => {
   it("gives pg_ctl files for its output, never this process's own stdout", () => {
-    const fake = vi.fn<typeof spawnSync>().mockReturnValue({ pid: 0, output: [], stdout: "", stderr: "", status: 0, signal: null })
+    const fake = vi.fn<PgCtlSpawn>().mockReturnValue({ status: 0 })
     vi.spyOn(process.stdout, "write").mockReturnValue(true)
     runPgCtlStart({ pgBinDir: dir, dataDir: dir, port: 0 }, ["start"], join(dir, "pg.log"), fake)
     const stdio = fake.mock.calls[0]?.[2]?.stdio

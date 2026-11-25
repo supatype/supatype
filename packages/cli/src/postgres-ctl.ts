@@ -4,7 +4,7 @@
  */
 
 import { setTimeout as sleep } from "node:timers/promises"
-import { spawnSync } from "node:child_process"
+import { spawnSync, type SpawnSyncOptions } from "node:child_process"
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve as resolvePath } from "node:path"
@@ -500,7 +500,10 @@ export function writeClusterSettings(opts: PgSettingsOptions & { dataDir: string
  * process's own: under `supatype pg start | tee out` the pipe it would hold open ends only when
  * Postgres does, so the command never returned (S-37). What pg_ctl said is printed afterwards.
  */
-export function runPgCtlStart(opts: PgOptions, args: string[], logPath: string, spawn: typeof spawnSync = spawnSync): void {
+/** How runPgCtlStart runs pg_ctl: spawnSync, or a stand-in in tests. Only the exit status is read. */
+export type PgCtlSpawn = (command: string, args: string[], options: SpawnSyncOptions) => { status: number | null }
+
+export function runPgCtlStart(opts: PgOptions, args: string[], logPath: string, spawn: PgCtlSpawn = spawnSync): void {
   const errPath = `${logPath}.pg_ctl-stderr`
   const outPath = `${logPath}.pg_ctl-stdout`
   const errFd = openSync(errPath, "w")

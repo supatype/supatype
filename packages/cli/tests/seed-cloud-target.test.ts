@@ -123,12 +123,14 @@ function sentSeed(): RemoteSeedRequest {
   return parsed
 }
 
-type HeaderInput = Record<string, string> | Array<[string, string]> | Headers | undefined
-
-function headerRecord(headers: HeaderInput): Record<string, string> {
+/** The headers a call sent, keeping a plain object's own spelling of each name. */
+function headerRecord(headers: RequestInit["headers"]): Record<string, string> {
   if (headers === undefined) return {}
-  if (Array.isArray(headers) || headers instanceof Headers) return Object.fromEntries(new Headers(headers))
-  return Object.fromEntries(Object.entries(headers))
+  if (headers instanceof Headers) return Object.fromEntries(headers.entries())
+  const pairs: Array<[string, string]> = Array.isArray(headers)
+    ? headers.map((pair: unknown) => (Array.isArray(pair) ? [String(pair[0]), String(pair[1])] : ["", ""]))
+    : Object.entries(headers).map(([name, value]) => [name, String(value)])
+  return Object.fromEntries(pairs)
 }
 
 function parseBody(text: string): unknown {
