@@ -323,7 +323,17 @@ window.location.assign(data.url)
   smtp: { host: <span class="s">"smtp.example.com"</span>, port: <span class="t">587</span>, user: <span class="s">"apikey"</span>, pass: process.env.SMTP_PASS, admin_email: <span class="s">"no-reply@example.com"</span> },
 },</pre></div>
     <div class="callout warn"><span class="callout-label">CONSOLE SENDS NOTHING</span><p><code>console</code>, the default, logs that a message would have been sent but leaves out the body, so the link is not in the log. To try magic links or password reset, configure a real provider.</p></div>
-    <p>For Resend, set <code>SUPATYPE_RESEND_API_KEY</code> and <code>SUPATYPE_RESEND_FROM</code> in <code>.env</code>. For SES, set <code>SUPATYPE_SES_FROM</code>; credentials come from the environment's AWS configuration.</p>
+    <p>On a self-hosted stack, for Resend set <code>email.resend_api_key</code> and <code>email.resend_from</code> in the <code>email</code> block above (a value set by hand in <code>.env</code> is replaced from <code>supatype.config.ts</code>). For SES set <code>email.ses_from</code>; credentials come from the environment's AWS configuration.</p>
+    <p>On Supatype Cloud there is no <code>.env</code> and no ambient AWS configuration, so SES takes all of its settings from the <code>email</code> block, and a push that leaves one out is refused:</p>
+    <div class="cb"><div class="cb-bar"><span>supatype.config.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>email: {
+  provider: <span class="s">"ses"</span>,
+  ses_from: <span class="s">"no-reply@example.com"</span>, <span class="c">// required: the sender address, verified in SES</span>
+  ses_access_key_id: env(<span class="s">"SES_ACCESS_KEY_ID"</span>), <span class="c">// required: name an environment variable, never the key itself</span>
+  ses_secret_access_key: env(<span class="s">"SES_SECRET_ACCESS_KEY"</span>), <span class="c">// required, the same way</span>
+  ses_region: <span class="s">"eu-west-2"</span>, <span class="c">// optional</span>
+},</pre></div>
+    <p>Without <code>ses_from</code> the server cannot send, so mail would be dropped while requests still succeed. That is why Cloud refuses the push and names <code>email.ses_from</code>.</p>
     <h3 id="email-settings">Email sign-in and confirmation</h3>
     <p>Two keys under <code>auth.email</code> in <code>supatype.config.ts</code> decide what email-and-password sign-in does:</p>
     <div class="cb"><div class="cb-bar"><span>supatype.config.ts</span><button type="button" class="cb-copy">Copy</button></div>

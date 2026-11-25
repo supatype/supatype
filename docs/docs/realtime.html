@@ -504,6 +504,7 @@ $$;</pre></div>
         <tr><td><code>REALTIME_CHANNEL_RECHECK_S</code></td><td>300</td><td>Seconds between re-checks of every channel a socket holds, as a backstop to the checks made on a new token, a push and a change to a table a rule reads</td></tr>
       </tbody>
     </table></div>
+    <p>To set these from <code>supatype.config.ts</code> rather than the environment, use <code>realtime: { channels: "declared", recheckSeconds: 120 }</code>. Self-host renders them as the realtime service's defaults, which a value in <code>.env</code> overrides. A push to Supatype Cloud sets them on the project's realtime service (production only), and a setting you take out of the config stops applying on the next push that still sets another one.</p>
 
     <h2 id="limits">Limits</h2>
     <ul>

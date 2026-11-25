@@ -159,7 +159,7 @@
     </table></div>
     <p>Tables are named as in the database: <code>post</code>, <code>comment</code>, <code>post_tag</code>. Calling <code>createClient</code> with no type argument picks up the generated types. To type a client against a schema you do not generate, such as a second project or a test double, pass the database type: <code>createClient&lt;MyDatabase&gt;({ ... })</code>.</p>
     <p>Exact numbers keep every digit when you import from the generated <code>client.ts</code>. A <code>BigInt</code> column reads as a <code>bigint</code>. <code>Decimal</code> and <code>Money</code> columns read as strings.</p>
-    <p>A number too large for JavaScript, in a column the client does not know, returns an error that names the column. This usually happens in an embed: select the column directly instead.</p>
+    <p>A number too large for JavaScript, in a column the client does not know, returns an error that names the column. This usually happens in an embed: select the column directly instead. This covers a number inside an array too, at any depth, such as a json column holding <code>[9007199254740993]</code>. <code>BigInt[]</code> and <code>Decimal[]</code> columns the generated types describe keep every element exact instead.</p>
 
     <h2 id="read">Read rows</h2>
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>

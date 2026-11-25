@@ -300,7 +300,22 @@
       </tbody>
     </table></div>
     <div class="callout warn"><span class="callout-label">WARNING</span><p>With the Native provider, the storage service is the same code a deployment runs, so bucket rules, <code>maxSize</code>, <code>accept</code> and transforms apply as they will once deployed. If it cannot start, storage is off: <code>supatype dev</code> prints why, <code>/storage/v1</code> answers 503 "storage service is not running", and storage comes back once you fix the cause and restart dev. There is no fallback store, because one that skipped your rules would let any caller read a private bucket.</p></div>
+    <h3 id="switch-off">Switching storage or GraphQL off</h3>
+    <p><code>services: { storage: false }</code> in <code>supatype.config.ts</code> answers every <code>/storage/v1</code> request with 503, and <code>services: { graphql: false }</code> answers <code>/graphql/v1</code> with 501. Self-host renders <code>SUPATYPE_STORAGE_DISABLED</code> and <code>SUPATYPE_GRAPHQL_DISABLED</code> into the server; a push to Supatype Cloud sets the same switch for the project. A key left out leaves the service on, and <code>true</code> turns it back on.</p>
     <h3 id="own-bucket">Your own S3 bucket</h3>
+    <p>On Supatype Cloud, name the bucket in <code>supatype.config.ts</code> and <code>supatype push</code> (or <code>supatype deploy</code>) sends it to the project's production environment. Only the organisation's owners and admins can set it, and the keys are read from your environment or <code>.env</code> with <code>env("NAME")</code>, sent once, stored encrypted and never shown again:</p>
+    <div class="cb"><div class="cb-bar"><span>supatype.config.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">import</span> { defineConfig, env } <span class="k">from</span> <span class="s">"@supatype/cli"</span>
+<span class="k">export default</span> defineConfig({
+  <span class="c">// docs:no-check (a fragment: the rest of your config stays as it is)</span>
+  storage: {
+    provider: <span class="s">"s3"</span>,
+    production: <span class="s">"s3"</span>,
+    s3: { bucket: <span class="s">"acme-files"</span>, region: <span class="s">"eu-west-1"</span>, accessKey: env(<span class="s">"ACME_S3_KEY"</span>), secretKey: env(<span class="s">"ACME_S3_SECRET"</span>) },
+  },
+})</pre></div>
+    <p>Use <code>endpoint</code> (an https URL) in place of <code>region</code> for another S3-compatible store, and <code>forcePathStyle</code> to override path-style addressing. Both keys are required on Cloud, since a Cloud project has no instance role to fall back to. Leaving <code>storage.s3</code> out of the config sends nothing and keeps whatever the project has; to go back to Supatype's bucket, call <code>DELETE /projects/&lt;ref&gt;/storage-bucket</code>.</p>
+    <div class="callout warn"><span class="callout-label">WARNING</span><p>Switching buckets does not move your files. New files go to the new bucket; the ones stored before stay in the old one and stop being served. Copy them across first if you need them. Self-host reads its bucket from <code>S3_*</code> in <code>.env</code> and ignores <code>storage.s3</code>.</p></div>
     <p>Set <code>S3_BUCKET</code> and the storage service keeps every bucket inside that one S3 bucket, the way Supabase Storage uses <code>GLOBAL_S3_BUCKET</code>. A bucket is a row in your database and a key prefix in S3: a file <code>avatars/me.png</code> is stored under <code>avatars/me.png/&lt;version&gt;</code>. The service never creates an S3 bucket or puts a bucket policy, so:</p>
     <ul>
       <li>The S3 bucket stays private. Public files are served by the storage service at <code>/storage/v1/object/public/&lt;bucket&gt;/&lt;path&gt;</code>, never straight from S3.</li>

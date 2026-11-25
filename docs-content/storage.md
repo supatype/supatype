@@ -231,7 +231,7 @@ On Supatype Cloud, name the bucket in `supatype.config.ts` and `supatype push` (
 ```ts title="supatype.config.ts"
 import { defineConfig, env } from "@supatype/cli"
 export default defineConfig({
-  // ...
+  // docs:no-check (a fragment: the rest of your config stays as it is)
   storage: {
     provider: "s3",
     production: "s3",

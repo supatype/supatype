@@ -905,7 +905,7 @@ Tables are named as in the database: `post`, `comment`, `post_tag`. Calling `cre
 
 Exact numbers keep every digit when you import from the generated `client.ts`. A `BigInt` column reads as a `bigint`. `Decimal` and `Money` columns read as strings.
 
-A number too large for JavaScript, in a column the client does not know, returns an error that names the column. This usually happens in an embed: select the column directly instead.
+A number too large for JavaScript, in a column the client does not know, returns an error that names the column. This usually happens in an embed: select the column directly instead. This covers a number inside an array too, at any depth, such as a json column holding `[9007199254740993]`. `BigInt[]` and `Decimal[]` columns the generated types describe keep every element exact instead.
 
 ### Read rows
 
@@ -1967,7 +1967,23 @@ email: {
 
 > **CONSOLE SENDS NOTHING:** `console`, the default, logs that a message would have been sent but leaves out the body, so the link is not in the log. To try magic links or password reset, configure a real provider.
 
-For Resend, set `SUPATYPE_RESEND_API_KEY` and `SUPATYPE_RESEND_FROM` in `.env`. For SES, set `SUPATYPE_SES_FROM`; credentials come from the environment's AWS configuration.
+On a self-hosted stack, for Resend set `email.resend_api_key` and `email.resend_from` in the `email` block above (a value set by hand in `.env` is replaced from `supatype.config.ts`). For SES set `email.ses_from`; credentials come from the environment's AWS configuration.
+
+On Supatype Cloud there is no `.env` and no ambient AWS configuration, so SES takes all of its settings from the `email` block, and a push that leaves one out is refused:
+
+`supatype.config.ts`:
+
+```ts
+email: {
+  provider: "ses",
+  ses_from: "no-reply@example.com", // required: the sender address, verified in SES
+  ses_access_key_id: env("SES_ACCESS_KEY_ID"), // required: name an environment variable, never the key itself
+  ses_secret_access_key: env("SES_SECRET_ACCESS_KEY"), // required, the same way
+  ses_region: "eu-west-2", // optional
+},
+```
+
+Without `ses_from` the server cannot send, so mail would be dropped while requests still succeed. That is why Cloud refuses the push and names `email.ses_from`.
 
 #### Email sign-in and confirmation
 
@@ -2482,7 +2498,31 @@ File metadata is a row in the `storage` schema of your project's Postgres. The b
 
 > **WARNING:** With the Native provider, the storage service is the same code a deployment runs, so bucket rules, `maxSize`, `accept` and transforms apply as they will once deployed. If it cannot start, storage is off: `supatype dev` prints why, `/storage/v1` answers 503 "storage service is not running", and storage comes back once you fix the cause and restart dev. There is no fallback store, because one that skipped your rules would let any caller read a private bucket.
 
+#### Switching storage or GraphQL off
+
+`services: { storage: false }` in `supatype.config.ts` answers every `/storage/v1` request with 503, and `services: { graphql: false }` answers `/graphql/v1` with 501. Self-host renders `SUPATYPE_STORAGE_DISABLED` and `SUPATYPE_GRAPHQL_DISABLED` into the server; a push to Supatype Cloud sets the same switch for the project. A key left out leaves the service on, and `true` turns it back on.
+
 #### Your own S3 bucket
+
+On Supatype Cloud, name the bucket in `supatype.config.ts` and `supatype push` (or `supatype deploy`) sends it to the project's production environment. Only the organisation's owners and admins can set it, and the keys are read from your environment or `.env` with `env("NAME")`, sent once, stored encrypted and never shown again:
+
+`supatype.config.ts`:
+
+```ts
+import { defineConfig, env } from "@supatype/cli"
+export default defineConfig({
+  // docs:no-check (a fragment: the rest of your config stays as it is)
+  storage: {
+    provider: "s3",
+    production: "s3",
+    s3: { bucket: "acme-files", region: "eu-west-1", accessKey: env("ACME_S3_KEY"), secretKey: env("ACME_S3_SECRET") },
+  },
+})
+```
+
+Use `endpoint` (an https URL) in place of `region` for another S3-compatible store, and `forcePathStyle` to override path-style addressing. Both keys are required on Cloud, since a Cloud project has no instance role to fall back to. Leaving `storage.s3` out of the config sends nothing and keeps whatever the project has; to go back to Supatype's bucket, call `DELETE /projects/<ref>/storage-bucket`.
+
+> **WARNING:** Switching buckets does not move your files. New files go to the new bucket; the ones stored before stay in the old one and stop being served. Copy them across first if you need them. Self-host reads its bucket from `S3_*` in `.env` and ignores `storage.s3`.
 
 Set `S3_BUCKET` and the storage service keeps every bucket inside that one S3 bucket, the way Supabase Storage uses `GLOBAL_S3_BUCKET`. A bucket is a row in your database and a key prefix in S3: a file `avatars/me.png` is stored under `avatars/me.png/<version>`. The service never creates an S3 bucket or puts a bucket policy, so:
 
@@ -2974,6 +3014,8 @@ The service reads these environment variables. The self-host compose file sets t
 | `REALTIME_CHANNELS` | unset | Set to `declared` to refuse broadcast and presence on undeclared channels whatever the database says. It can only tighten `realtime.channels` |
 | `REALTIME_CHANNEL_RECHECK_S` | 300 | Seconds between re-checks of every channel a socket holds, as a backstop to the checks made on a new token, a push and a change to a table a rule reads |
 
+To set these from `supatype.config.ts` rather than the environment, use `realtime: { channels: "declared", recheckSeconds: 120 }`. Self-host renders them as the realtime service's defaults, which a value in `.env` overrides. A push to Supatype Cloud sets them on the project's realtime service (production only), and a setting you take out of the config stops applying on the next push that still sets another one.
+
 ### Limits
 
 - Changes are picked up by reading the replication slot every 100 ms, so expect that much delay on top of the network.
@@ -3140,6 +3182,16 @@ $ npx supatype functions env unset RESEND_API_KEY
 
 On a project that is not linked, these commands edit `functions/.env.local`. `list` masks the values.
 
+Add `--function <name>` to `list`, `set` or `unset` to work on one function's own values: on a linked project they go to that function, and on a project that is not linked they edit `functions/.env.<name>.local`. A function's own value overrides a shared one with the same name.
+
+```sh
+$ npx supatype functions env set RESEND_API_KEY=re_456 --function send-invite
+$ npx supatype functions env list --function send-invite
+$ npx supatype functions env unset RESEND_API_KEY --function send-invite
+```
+
+On Supatype Cloud the per-function routes need a control plane that serves `/projects/<ref>/functions/<name>/env`.
+
 `functions/send-invite/index.ts`:
 
 ```ts
@@ -3197,6 +3249,8 @@ Function logs are JSON lines on the container's output, each with the call's `re
 ```sh
 $ npx supatype self-host compose logs --service functions-worker
 ```
+
+Under `supatype dev` without Docker (native dev), functions run inside the server process, so there is no worker container to read. `supatype dev` sets `SUPATYPE_FUNCTIONS_LOG_TO_STDOUT`, and the server then prints each line a function writes to the terminal that runs `dev`, prefixed with the function name, for example `[hello] got a request`. Lines that name no function, such as Deno's own errors, are prefixed `[deno]`. The same lines stay in Studio's function logs. A server that does not have the variable set, such as Cloud or a Compose stack, prints nothing extra.
 
 > **NOTE:** The Compose file mounts `functions/` at the project root. Keep the default path on a self-hosted stack.
 
@@ -3997,6 +4051,8 @@ The first source holding a value decides it. A local address there, such as `loc
 `.supatype/link.json` holds secrets and is never committed, so a CI host has no link. There, set `SUPATYPE_URL` in the host's settings: `supatype build` fetches the anon key from `<SUPATYPE_URL>/supatype-env.json`, copies both to every framework's names, and stops the build when one is missing. Set `SUPATYPE_ANON_KEY` as well only when that server does not publish it (`server.public_env: false`, or a plain `http://` address). `supatype deploy` builds your app with the same values, and takes `--allow-local` too.
 
 ### Supatype hosts it
+
+A missing page on a plain static site serves `index.html`, on a self-hosted stack and on Supatype Cloud alike, so a single-page app's routes load on a refresh. Set `spa: false` in the `build` section of `supatype.config.ts` to answer 404 instead, and `spa: true` to turn the fallback on for a framework whose Cloud default is off. `supatype deploy` sends the setting to Cloud and `supatype self-host compose` gives it to the self-hosted server. With nothing set, both hosts take the same default from the framework: on for a plain static site, Vite and Remix SPA, off for Next.js, Astro, SvelteKit and Nuxt, whose pages are pre-rendered. A deploy with the fallback on refuses when the build has no `index.html` at its root: add one, or set `spa: false`.
 
 When a self-hosted stack serves your app (`app.mode: "static"`), its server answers `/supatype-env.js` with its own address and anon key:
 
@@ -5389,7 +5445,7 @@ PATCH /admin/v1/config/rest Authorization: Bearer <service role key> { "cache_ma
 | `functions list` **Cloud** | List all deployed functions for the linked project |  |
 | `functions delete <name>` | Remove a deployed function and its env values from the linked project, on Cloud or on a self-hosted server. On a project that is not linked it removes nothing and says so |  |
 | `functions logs <name>` **Cloud** | Tail logs for a deployed function | `--since <duration>` (default 1h) |
-| `functions env list`, `set <KEY=value>`, `unset <key>` **Cloud** | Manage function environment variables |  |
+| `functions env list`, `set <KEY=value>`, `unset <key>` **Cloud** | Manage function environment variables | `--function <name>` (one function's own values, which override a shared one) |
 | `hooks new <name>` | Scaffold a hook handler |  |
 | `hooks list` | Show the hooks the schema declares and whether each one can run |  |
 
@@ -5421,7 +5477,8 @@ Turn SAML on with `auth.sso.saml.enabled` in `supatype.config.ts` first. The `ss
 | `self-host compose status` | Show compose service status |  |
 | `self-host compose logs` | Tail compose logs | `--service <name>`, `-f, --follow` |
 | `add domain [domain]` | Add a custom domain with automatic HTTPS (self-host) | `--email <email>` for Let's Encrypt |
-| `link` | Link this project to cloud or self-host (unified .supatype/link.json) | `--url <url>`, `--token <token>`, `--env <name>`, `--fix-gitignore` |
+| `link` | Link this project to cloud or self-host (unified .supatype/link.json). Refuses a different project or host than the one already linked, unless `--force` | `--url <url>`, `--token <token>`, `--env <name>`, `--fix-gitignore`, `--force` |
+| `unlink` | Remove this folder's link (`.supatype/link.json`, and the legacy `cloud.json` and `linked.json` if present) and say what was removed |  |
 | `envs list` | List linked environments, and the default commands use: `environments` in supatype.config.ts when it names one, else this checkout&apos;s |  |
 | `envs use <name>` | Set this checkout&apos;s default environment. `environments.default` in supatype.config.ts wins over it, and `envs use` says so |  |
 | `build [command...]` | Run your app's production build with the deployment's API URL and anon key under every front-end name (VITE_, PUBLIC_, NEXT_PUBLIC_, EXPO_PUBLIC_). Runs the package.json build script unless a command follows --. Refuses to start when either value is missing | `--env <name>`, `--allow-local`, `-- <command...>` |
@@ -5438,7 +5495,9 @@ Commands that reach the local stack's database or API need that stack running: `
 
 `build` takes each value from the first of: the environment (`SUPATYPE_URL`, `SUPATYPE_ANON_KEY` or any framework's name), the `/supatype-env.json` of the server the environment's URL names (for the anon key only, so CI can set just `SUPATYPE_URL`), the linked environment, and a `.env` that records a deployment (`PUBLIC_SUPATYPE_URL` or `API_EXTERNAL_URL`, and `ANON_KEY`). An anon key counts only for the URL being built for; one a source holds for another deployment is listed as skipped. It refuses a local address unless you pass `--allow-local`, never gives the build the service role key, writes no file, and exits with the build's own code. A package.json build script that is itself `supatype build` is refused rather than run again. `deploy` builds the app the same way. See [Deploy your frontend](https://www.supatype.com/docs/deploying-your-frontend.html).
 
-For a self-hosted stack, `link --url` takes the stack's gateway URL and `--token` its `SERVICE_ROLE_KEY`. The full walkthrough is in [Self-host](https://www.supatype.com/docs/#self-host) and [Deploy to a VM with GitHub Actions](https://www.supatype.com/deploy-vm-github-actions.html).
+For a self-hosted stack, `link --url` takes the stack's gateway URL and `--token` its `SERVICE_ROLE_KEY`. The link is made to the project the server says it serves, whatever this folder is called.
+
+A folder holds one link, to Supatype Cloud or to a self-hosted server, and `envs use` chooses between environments of that one link. `link` to a different project, or to the other kind of host, refuses and names the link that is there: run `supatype unlink` to remove it, or pass `--force` to replace it with a fresh one. Linking the same project again (to refresh a token, or to add an environment with `--env`) always works. To work against both hosts at once, keep a folder for each (a second clone or a `git worktree`) and link each to its own host. The full walkthrough is in [Self-host](https://www.supatype.com/docs/#self-host) and [Deploy to a VM with GitHub Actions](https://www.supatype.com/deploy-vm-github-actions.html).
 
 ### Supatype Cloud
 

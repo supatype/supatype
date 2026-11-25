@@ -229,6 +229,12 @@
 $ npx supatype functions env list
 $ npx supatype functions env unset RESEND_API_KEY</pre></div>
 <p>On a project that is not linked, these commands edit <code>functions/.env.local</code>. <code>list</code> masks the values.</p>
+<p>Add <code>--function &lt;name&gt;</code> to <code>list</code>, <code>set</code> or <code>unset</code> to work on one function's own values: on a linked project they go to that function, and on a project that is not linked they edit <code>functions/.env.&lt;name&gt;.local</code>. A function's own value overrides a shared one with the same name.</p>
+<div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>$ npx supatype functions env set RESEND_API_KEY=re_456 --function send-invite
+$ npx supatype functions env list --function send-invite
+$ npx supatype functions env unset RESEND_API_KEY --function send-invite</pre></div>
+<p>On Supatype Cloud the per-function routes need a control plane that serves <code>/projects/&lt;ref&gt;/functions/&lt;name&gt;/env</code>.</p>
 <div class="cb"><div class="cb-bar"><span>functions/send-invite/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">const</span> apiKey = ctx.env[<span class="s">"RESEND_API_KEY"</span>]
 <span class="k">if</span> (!apiKey) <span class="k">return</span> Response.json({ message: <span class="s">"RESEND_API_KEY is not set"</span> }, { status: 500 })</pre></div>
@@ -260,6 +266,7 @@ $ npx supatype functions invoke greet --local --data '{"name":"Alex"}'</pre></di
 <p>Function logs are JSON lines on the container's output, each with the call's <code>request_id</code>, status and duration:</p>
 <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre>$ npx supatype self-host compose logs --service functions-worker</pre></div>
+<p>Under <code>supatype dev</code> without Docker (native dev), functions run inside the server process, so there is no worker container to read. <code>supatype dev</code> sets <code>SUPATYPE_FUNCTIONS_LOG_TO_STDOUT</code>, and the server then prints each line a function writes to the terminal that runs <code>dev</code>, prefixed with the function name, for example <code>[hello] got a request</code>. Lines that name no function, such as Deno's own errors, are prefixed <code>[deno]</code>. The same lines stay in Studio's function logs. A server that does not have the variable set, such as Cloud or a Compose stack, prints nothing extra.</p>
 <div class="callout"><span class="callout-label">NOTE</span><p>The Compose file mounts <code>functions/</code> at the project root. Keep the default path on a self-hosted stack.</p></div>
 
 <h2 id="hooks">Model hooks</h2>
