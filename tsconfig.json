@@ -19,6 +19,7 @@
     "packages/*/vitest.*.config.ts",
     "packages/*/vite.config.ts",
     "packages/*/tailwind.*.ts",
-    "packages/cli/deno.d.ts"
+    "packages/cli/deno.d.ts",
+    "scripts/*.d.mts"
   ]
 }
