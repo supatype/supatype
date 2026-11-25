@@ -2,7 +2,8 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { RemoteSeedRequest } from "@supatype/types"
+import { isJsonObject } from "@supatype/shared"
+import { parseRemoteSeedRequest, type RemoteSeedRequest } from "@supatype/types"
 import { projectConfig } from "./support/project-config.js"
 
 /**
@@ -115,6 +116,26 @@ function flags(over: Partial<SeedFlags> = {}): SeedFlags {
   return { force: false, atomic: false, status: false, local: false, confirmProduction: false, ...over }
 }
 
+/** The seed request the control plane received, parsed the way the control plane parses it. */
+function sentSeed(): RemoteSeedRequest {
+  const parsed = parseRemoteSeedRequest(seedPosts()[0]?.body)
+  if ("invalid" in parsed) throw new Error(`The CLI sent an invalid seed request: ${parsed.invalid}`)
+  return parsed
+}
+
+type HeaderInput = Record<string, string> | Array<[string, string]> | Headers | undefined
+
+function headerRecord(headers: HeaderInput): Record<string, string> {
+  if (headers === undefined) return {}
+  if (Array.isArray(headers) || headers instanceof Headers) return Object.fromEntries(new Headers(headers))
+  return Object.fromEntries(Object.entries(headers))
+}
+
+function parseBody(text: string): unknown {
+  const parsed: unknown = JSON.parse(text)
+  return parsed
+}
+
 function seedPosts(): Call[] {
   return calls.filter(isSeedPost)
 }
@@ -124,8 +145,8 @@ function stubControlPlane(): void {
     const call: Call = {
       method: String(init.method),
       url,
-      headers: Object.fromEntries(Object.entries((init.headers ?? {}) as Record<string, string>)),
-      body: typeof init.body === "string" ? JSON.parse(init.body) : undefined,
+      headers: headerRecord(init.headers),
+      body: typeof init.body === "string" ? parseBody(init.body) : undefined,
     }
     calls.push(call)
     const reply = answer(call)
@@ -175,7 +196,7 @@ describe("seeding a linked project", () => {
   it("sends the same document strings, byte for byte, as the local path sends the engine", async () => {
     await runSeed(undefined, flags({ env: "staging" }))
     await runSeed(undefined, flags({ local: true }))
-    const sent = seedPosts()[0]?.body as RemoteSeedRequest
+    const sent = sentSeed()
     expect(local.requests).toHaveLength(1)
     expect(sent.irDocuments).toEqual(local.requests[0]?.["ir_documents"])
     expect(sent.irDocuments.length).toBe(2)
@@ -195,8 +216,8 @@ describe("seeding a linked project", () => {
       environment: "staging",
       confirmProduction: false,
       ast: { models: [] },
-      pushedFrom: expect.any(String),
     })
+    expect(typeof sentSeed().pushedFrom).toBe("string")
   })
 })
 
@@ -206,15 +227,16 @@ describe("a schema with a versioned model", () => {
   it("sends the publishing config beside the ast, as a push does", async () => {
     schema.ast = { models: [{ name: "Article", options: { versions: { drafts: false } } }] }
     expect(await runSeed(undefined, flags({ env: "staging" }))).toBe(0)
-    const sent = seedPosts()[0]?.body as RemoteSeedRequest
-    expect(sent.ast).toMatchObject({ publishing: { draftVisibility: expect.any(Array) } })
+    const sent = sentSeed()
+    const publishing = isJsonObject(sent.ast) ? sent.ast["publishing"] : undefined
+    expect(isJsonObject(publishing) && Array.isArray(publishing["draftVisibility"])).toBe(true)
   })
 
   it("sends the same ast the local path sends the engine", async () => {
     schema.ast = { models: [{ name: "Article", options: { versions: { drafts: false } } }] }
     await runSeed(undefined, flags({ env: "staging" }))
     await runSeed(undefined, flags({ local: true }))
-    expect((seedPosts()[0]?.body as RemoteSeedRequest).ast).toEqual(local.requests[0]?.["ast"])
+    expect(sentSeed().ast).toEqual(local.requests[0]?.["ast"])
   })
 })
 

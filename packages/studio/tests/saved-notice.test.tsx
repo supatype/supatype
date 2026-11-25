@@ -22,7 +22,7 @@ beforeEach(() => {
   host = document.createElement("div")
   document.body.appendChild(host)
   root = createRoot(host)
-  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true)
 })
 
 afterEach(() => {

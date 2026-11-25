@@ -1,5 +1,4 @@
 import { createServer, type Server } from "node:http"
-import type { AddressInfo } from "node:net"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -7,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { downloadToFile } from "../src/cdn-fetch.js"
 import type { ClackApi } from "../src/ui/clack-api.js"
 import { setActiveFlowApi } from "../src/ui/runtime/flow-session.js"
+import { portOf } from "./support/ports.js"
 
 /** An archive's progress line is drawn in place on a bare terminal, and goes to the flow's log under a flow. */
 let server: Server
@@ -37,7 +37,7 @@ beforeEach(async () => {
     res.end(Buffer.alloc(2_000_000, 1))
   })
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok))
-  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  base = `http://127.0.0.1:${portOf(server)}`
   vi.spyOn(process.stdout, "write").mockImplementation((c: string | Uint8Array) => { written.push(String(c)); return true })
   vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => { written.push(a.join(" ")) })
 })

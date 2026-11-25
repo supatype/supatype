@@ -47,17 +47,12 @@ import {
   LEGACY_LINKED_FILE,
   LINK_FILE,
 } from "../src/link.js"
+import { exitThrows } from "./support/process-exit.js"
 
 let dir: string
 
 const cloudBase = { projectRef: "alpha", cloudApiUrl: "https://api.example.com", token: "tok" }
 const selfBase = { projectRef: "selfref", apiUrl: "http://kong.test", token: "srk" }
-
-function exitThrows(): void {
-  vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-    throw new Error(`exit ${code ?? 0}`)
-  }) as never)
-}
 
 async function run(args: string[]): Promise<string> {
   const program = new Command().exitOverride()

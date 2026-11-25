@@ -1,10 +1,11 @@
 import { createServer, type Server } from "node:http"
-import type { AddressInfo } from "node:net"
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
+import { isJsonObject } from "@supatype/shared"
 import { cacheSeedingNotes } from "../src/api-config-cache.js"
+import { portOf } from "./support/ports.js"
 
 /**
  * A model's cache block is a ceiling; the runtime allowlist is what is on. These run `push`'s and
@@ -24,8 +25,9 @@ async function fakeAdmin(rest: Record<string, unknown>, patchStatus = 200): Prom
     req.on("end", () => {
       res.setHeader("content-type", "application/json")
       if (req.method === "PATCH") {
-        patches.push(JSON.parse(body))
-        const merged = { ...rest, ...(JSON.parse(body) as Record<string, unknown>) }
+        const sent: unknown = JSON.parse(body)
+        patches.push(sent)
+        const merged = { ...rest, ...(isJsonObject(sent) ? sent : {}) }
         res.writeHead(patchStatus).end(JSON.stringify(patchStatus === 200 ? merged : { error: "rest_cache_not_available" }))
         return
       }
@@ -34,7 +36,7 @@ async function fakeAdmin(rest: Record<string, unknown>, patchStatus = 200): Prom
   })
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok))
   servers.push(server)
-  return { server, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, patches }
+  return { server, url: `http://127.0.0.1:${portOf(server)}`, patches }
 }
 
 function project(url: string): string {

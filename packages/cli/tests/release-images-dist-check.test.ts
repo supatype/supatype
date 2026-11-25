@@ -7,7 +7,9 @@ import { spawnSync } from "node:child_process"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+import { isRecordOf, isShape, isString } from "@supatype/shared"
 import { afterEach, describe, expect, it } from "vitest"
+import { parseJsonAs } from "./support/json.js"
 
 const REPO_ROOT = resolve(import.meta.dirname, "../../..")
 const SCRIPT = join(REPO_ROOT, "scripts", "release-images.mjs")
@@ -18,7 +20,8 @@ interface Pin {
   readonly commit: string
 }
 
-const pins = JSON.parse(readFileSync(join(REPO_ROOT, "release", "images.json"), "utf8")) as Record<string, Pin>
+const isPin = isShape({ image: isString, tag: isString, commit: isString })
+const pins: Record<string, Pin> = parseJsonAs(readFileSync(join(REPO_ROOT, "release", "images.json"), "utf8"), isRecordOf(isPin))
 const dirs: string[] = []
 
 afterEach(() => {

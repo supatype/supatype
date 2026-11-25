@@ -5,8 +5,13 @@ import { execFileSync } from "node:child_process"
 import { pathToFileURL } from "node:url"
 import ts from "typescript"
 import { afterEach, describe, expect, it } from "vitest"
+import { isShape } from "@supatype/shared"
 import { generateHooksModule } from "../src/hooks-generator.js"
 import { extractSchemaAstFromTypes } from "../src/type-extractor.js"
+import { expectShape } from "./support/json.js"
+
+type HookFactory = (h: (ctx: Record<string, unknown>) => unknown) => (req: Request, fn?: unknown) => Promise<Response>
+const isHookFactory = (value: unknown): value is HookFactory => typeof value === "function"
 
 /** What `tsc -p <dir>/tsconfig.json` printed: nothing when the project compiles. */
 function tscOutput(dir: string): string {
@@ -231,9 +236,8 @@ export default hook(moderate)
     dirs.push(dir)
     const source = generateHooksModule(astFor(HOOKED_SCHEMA)) ?? ""
     writeFileSync(join(dir, "hooks.mjs"), ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText, "utf8")
-    const { hook } = await import(pathToFileURL(join(dir, "hooks.mjs")).href) as {
-      hook: (h: (ctx: Record<string, unknown>) => unknown) => (req: Request, fn?: unknown) => Promise<Response>
-    }
+    const loaded: unknown = await import(pathToFileURL(join(dir, "hooks.mjs")).href)
+    const { hook } = expectShape(loaded, isShape({ hook: isHookFactory }))
     let seen: Record<string, unknown> = {}
     const run = hook((ctx) => { seen = ctx; return {} })
     const req = new Request("http://worker/hook", { method: "POST", body: JSON.stringify({ table: "posts", operation: "insert", rows: [] }) })

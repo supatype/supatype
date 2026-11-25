@@ -22,6 +22,9 @@ const row = (over: Partial<AccessRow> = {}): AccessRow => ({
   ...over,
 })
 
+/** `expect.stringContaining` is typed any; this hands it on as unknown. */
+const containing = (text: string): unknown => expect.stringContaining(text)
+
 const decide = (r: AccessRow | null, mode: ChannelMode, isPrivate = false) =>
   decideJoin("lot:1", r, { mode, isPrivate, now: NOW })
 
@@ -87,8 +90,8 @@ describe("a join, by the database's answer and the project's mode", () => {
     expect(decide(null, "declared")).toMatchObject({
       admitted: true,
       grant: {
-        send: { code: "send_denied", message: expect.stringContaining("matches no declared channel") },
-        track: { code: "track_denied", message: expect.stringContaining("matches no declared channel") },
+        send: { code: "send_denied", message: containing("matches no declared channel") },
+        track: { code: "track_denied", message: containing("matches no declared channel") },
       },
     })
   })

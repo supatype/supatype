@@ -94,8 +94,9 @@ describe("runningStackMode with a slow Docker", () => {
     })()
     expect(err).toBeInstanceOf(DockerNotResponding)
     expect(err).not.toBeInstanceOf(NoStackRunning)
-    expect((err as Error).message).toMatch(/Docker did not respond/)
-    expect((err as Error).message).not.toMatch(/isn't running/)
+    const message = err instanceof Error ? err.message : ""
+    expect(message).toMatch(/Docker did not respond/)
+    expect(message).not.toMatch(/isn't running/)
   })
 
   it("gives up after about a minute in all: limits of 10, 20 and 30 seconds", () => {

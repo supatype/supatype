@@ -86,7 +86,7 @@ describe("array kinds", () => {
   })
 
   it("ignores a kind it does not know without dropping the ones it does", () => {
-    registerFieldKinds({ version: 1, tables: { ledger: { ids: "bigint[]", odd: "uuid[]" } } } as never)
+    registerFieldKinds({ version: 1, tables: { ledger: { ids: "bigint[]", odd: "uuid[]" } } })
     expect(registeredFieldsFor("ledger")).toEqual({ ids: "bigint[]" })
   })
 })

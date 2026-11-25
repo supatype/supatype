@@ -4,6 +4,8 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { writeAppliedAstArtifacts } from "../src/applied-ast-artifacts.js"
 import type { DeployTarget } from "../src/resolve-target.js"
+import { isJsonObject } from "@supatype/shared"
+import { parseJsonAs } from "./support/json.js"
 import { projectConfig } from "./support/project-config.js"
 
 /**
@@ -39,7 +41,7 @@ function target(mode: "cloud" | "self-host"): DeployTarget {
 }
 
 let cwd = ""
-const manifest = (): Record<string, unknown> => JSON.parse(readFileSync(join(cwd, ".supatype", "manifest.json"), "utf8")) as Record<string, unknown>
+const manifest = (): Record<string, unknown> => parseJsonAs(readFileSync(join(cwd, ".supatype", "manifest.json"), "utf8"), isJsonObject)
 
 beforeEach(() => {
   cwd = mkdtempSync(join(tmpdir(), "supatype-push-linked-env-"))

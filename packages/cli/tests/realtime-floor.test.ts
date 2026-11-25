@@ -5,8 +5,8 @@ import { afterEach, describe, expect, it } from "vitest"
 import { runSchemaPush } from "../src/commands/dev.js"
 import { assertRealtimeSupportsSchema, REALTIME_MIN_FOR_CHANNELS } from "../src/engine-floor.js"
 import { errorMessage } from "../src/error-message.js"
-import type { SupatypeProjectConfig } from "../src/project-config.js"
-import type { ExtractedSchemaAstV2 } from "../src/schema-ast-v2.js"
+import type { ExtractedChannelAst, ExtractedSchemaAstV2 } from "../src/schema-ast-v2.js"
+import { projectConfig } from "./support/project-config.js"
 
 /**
  * FF-34 (2026-11-23 e2e run): native dev ran a realtime that predates private channels, the schema
@@ -14,15 +14,15 @@ import type { ExtractedSchemaAstV2 } from "../src/schema-ast-v2.js"
  * realtime server enforces a channel, so a pinned one that is too old is refused up front, as an
  * engine that would drop `channels` is.
  */
-const NO_CHANNELS = { models: [] } as unknown as ExtractedSchemaAstV2
-const CHANNEL = {
+const NO_CHANNELS: ExtractedSchemaAstV2 = { astVersion: 2, models: [] }
+const CHANNEL: ExtractedChannelAst = {
   name: "LotChannel",
   pattern: "lot:{id}",
-  params: [{ name: "id", type: "uuid" as const }],
+  params: [{ name: "id", type: "uuid" }],
   access: { join: { type: "authenticated" }, send: null, track: null },
 }
-const WITH_CHANNEL = { models: [], channels: [CHANNEL] } as unknown as ExtractedSchemaAstV2
-const WITH_MODE = { models: [], realtime: { channels: "declared" } } as unknown as ExtractedSchemaAstV2
+const WITH_CHANNEL: ExtractedSchemaAstV2 = { astVersion: 2, models: [], channels: [CHANNEL] }
+const WITH_MODE: ExtractedSchemaAstV2 = { astVersion: 2, models: [], realtime: { channels: "declared" } }
 
 describe("the realtime channels floor", () => {
   it("refuses a pinned realtime older than the floor, naming the channel and the pin", () => {
@@ -72,13 +72,7 @@ describe("native dev's schema push", () => {
       ].join("\n"),
       "utf8",
     )
-    const config = {
-      project: { name: "p" },
-      database: { provider: "native" },
-      server: { mode: "dev" },
-      app: { mode: "none" },
-      versions: { realtime: "0.9.2" },
-    } as unknown as SupatypeProjectConfig
+    const config = projectConfig({ project: { name: "p" }, database: { provider: "native" }, versions: { realtime: "0.9.2" } })
     await expect(
       runSchemaPush({ cwd, engineBin: "/nonexistent/engine", schemaPath, dbURL: "postgres://x", config }),
     ).rejects.toThrow(/realtime channels, which needs realtime .* or newer, and this project pins 0\.9\.2/)

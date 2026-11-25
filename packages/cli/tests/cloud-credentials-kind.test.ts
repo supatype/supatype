@@ -1,3 +1,4 @@
+import { isJsonObject } from "@supatype/shared"
 import { readFileSync, writeFileSync } from "node:fs"
 import { beforeEach, describe, expect, it } from "vitest"
 import { DEFAULT_API_URL, trimApiUrl } from "../src/api-url.js"
@@ -9,6 +10,7 @@ import {
   persistCloudSession,
 } from "../src/cloud-credentials.js"
 import { tempProject } from "./support/command-run.js"
+import { parseJsonAs } from "./support/json.js"
 
 const PAT = `spt_${"b2".repeat(20)}`
 
@@ -36,7 +38,7 @@ describe("the kind of a stored credential", () => {
   it("is read as a session for an old file, unless its token has the access token shape", () => {
     const project = tempProject("cred-kind-old")
     persistCloudSession(project.dir, { apiUrl: "http://cp.test", accessToken: "jwt", kind: "session" })
-    const stored = JSON.parse(readFileSync(credentialsPath(), "utf8")) as Record<string, unknown>
+    const stored = parseJsonAs(readFileSync(credentialsPath(), "utf8"), isJsonObject)
     delete stored["kind"]
     writeFileSync(credentialsPath(), JSON.stringify(stored))
     const old = loadCloudCredentials()

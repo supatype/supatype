@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http"
-import type { AddressInfo } from "node:net"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { portOf } from "./support/ports.js"
 
 /**
  * A CDN that hangs the first request for a path and answers the second, standing in for the
@@ -25,7 +25,7 @@ function hangOnceThen(body: string): Handler {
 async function startServer(handler: Handler): Promise<void> {
   server = createServer(handler)
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok))
-  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  base = `http://127.0.0.1:${portOf(server)}`
 }
 
 beforeEach(() => {

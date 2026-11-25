@@ -207,11 +207,22 @@ describe("arrays of every other type", () => {
   })
 })
 
+/** The one change a wal2json row parses to; the test fails here, not later, if it parses to none. */
+function onlyChange(wal: string): WalChange {
+  const [change] = parseWal2json(wal)
+  if (change === undefined) throw new Error("wal2json row parsed to no change")
+  return change
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
 describe("a filter on an array column", () => {
   it("still matches the literal the filter is written as", () => {
-    const [change] = parseWal2json(insert({ tags: ["text[]", "{a,b}"] }))
-    expect(matchesFilter(change as WalChange, { tags: "eq.{a,b}" })).toBe(true)
-    expect(matchesFilter(change as WalChange, { tags: "eq.{a,c}" })).toBe(false)
+    const change = onlyChange(insert({ tags: ["text[]", "{a,b}"] }))
+    expect(matchesFilter(change, { tags: "eq.{a,b}" })).toBe(true)
+    expect(matchesFilter(change, { tags: "eq.{a,c}" })).toBe(false)
   })
 })
 
@@ -221,8 +232,8 @@ describe("array columns of exact values", () => {
   })
 
   it("quotes an element that needs it when matching a filter", () => {
-    const [change] = parseWal2json(insert({ tags: ["text[]", '{"b c",d}'] }))
-    expect(matchesFilter(change as WalChange, { tags: 'eq.{"b c",d}' })).toBe(true)
+    const change = onlyChange(insert({ tags: ["text[]", '{"b c",d}'] }))
+    expect(matchesFilter(change, { tags: 'eq.{"b c",d}' })).toBe(true)
   })
 })
 
@@ -231,7 +242,8 @@ describe("array columns of exact values", () => {
 // Invalid Date, as they did the columns before.
 describe("the commit timestamp", () => {
   it("is ISO 8601, like the row's timestamptz columns", () => {
-    const row = JSON.parse(insert({ id: ["integer", 1] })) as Record<string, unknown>
+    const row: unknown = JSON.parse(insert({ id: ["integer", 1] }))
+    if (!isRecord(row)) throw new Error("wal2json row is not an object")
     const [change] = parseWal2json(JSON.stringify({ ...row, timestamp: "2026-11-15 20:11:03.607447+00" }))
     expect(change?.commitTimestamp).toBe("2026-11-15T20:11:03.607447+00:00")
   })

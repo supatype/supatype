@@ -2,23 +2,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 
-// @ts-expect-error a plain .mjs script with no declarations
-import * as check from "../../../scripts/check-cli-release.mjs"
-
-interface Facts {
-  version: string
-  scaffolded: string[]
-  publishing: string[]
-  isPublished: (name: string, version: string) => Promise<boolean>
-  embeddedPublicKey: string
-  clientPrepareBin: string | undefined
-  prepareCommand: string
-  cdnHas: (path: string) => Promise<boolean>
-}
-const releaseProblems = check.releaseProblems as (facts: Facts) => Promise<string[]>
-const scaffoldedPackages = check.scaffoldedPackages as (source: string) => string[]
-const publishedPackages = check.publishedPackages as (workflow: string) => string[]
-const embeddedKeyOf = check.embeddedKeyOf as (source: string) => string
+import { embeddedKeyOf, publishedPackages, releaseProblems, scaffoldedPackages, type ReleaseFacts as Facts } from "../../../scripts/check-cli-release.mjs"
 
 /** A release that is fit in every respect; each test breaks one thing. */
 function fit(over: Partial<Facts> = {}): Facts {

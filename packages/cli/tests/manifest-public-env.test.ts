@@ -4,6 +4,8 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { writeAppliedAstArtifacts } from "../src/applied-ast-artifacts.js"
 import { syncManifestPublicEnv } from "../src/build-public-env.js"
+import { isJsonObject } from "@supatype/shared"
+import { parseJsonAs } from "./support/json.js"
 import { projectConfig } from "./support/project-config.js"
 
 /**
@@ -12,7 +14,7 @@ import { projectConfig } from "./support/project-config.js"
  */
 let cwd = ""
 const manifestPath = () => join(cwd, ".supatype", "manifest.json")
-const readManifest = (): Record<string, unknown> => JSON.parse(readFileSync(manifestPath(), "utf8")) as Record<string, unknown>
+const readManifest = (): Record<string, unknown> => parseJsonAs(readFileSync(manifestPath(), "utf8"), isJsonObject)
 
 beforeEach(() => {
   cwd = mkdtempSync(join(tmpdir(), "supatype-manifest-public-env-"))

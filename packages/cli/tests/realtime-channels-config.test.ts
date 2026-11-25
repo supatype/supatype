@@ -3,9 +3,10 @@ import { mkdirSync, readFileSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { defaultScaffoldOptions, scaffold } from "../src/commands/init.js"
-import { mergeProjectConfig, validateProjectConfig, type SupatypeProjectConfig } from "../src/project-config.js"
+import { mergeProjectConfig, validateProjectConfig, type RealtimeConfig, type SupatypeProjectConfig } from "../src/project-config.js"
 import { withPublishing, withRealtime } from "../src/model-versioning.js"
 import type { ExtractedSchemaAstV2 } from "../src/schema-ast-v2.js"
+import { projectConfig } from "./support/project-config.js"
 
 /**
  * `realtime.channels` in `supatype.config.ts`: whether a topic no `Channel<>` matches may carry
@@ -20,9 +21,9 @@ const BASE = {
   app: { mode: "none" },
 }
 
-const AST = { astVersion: 2, models: [] } as unknown as ExtractedSchemaAstV2
-const config = (realtime?: unknown): SupatypeProjectConfig =>
-  ({ ...BASE, ...(realtime !== undefined && { realtime }) }) as unknown as SupatypeProjectConfig
+const AST: ExtractedSchemaAstV2 = { astVersion: 2, models: [] }
+const config = (realtime?: RealtimeConfig): SupatypeProjectConfig =>
+  projectConfig({ project: { name: "p" }, database: { provider: "docker" }, ...(realtime !== undefined && { realtime }) })
 
 describe("validating realtime.channels", () => {
   it.each(["open", "declared"])("accepts %s", (mode) => {

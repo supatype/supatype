@@ -1,9 +1,11 @@
+import { isRecordOf, isShape, isString } from "@supatype/shared"
 import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { defaultScaffoldOptions, scaffold } from "../src/commands/init.js"
 import { mergeSupatypePackageJson } from "../src/init-package-json.js"
+import { parseJsonAs } from "./support/json.js"
 
 /**
  * `index.md` and `frameworks.md` offer "React (Vite)" from `supatype init`, and init had no such
@@ -70,10 +72,7 @@ describe("scaffold with the React (Vite) starter", () => {
 
   it("adds React and the Supatype React bindings to package.json", () => {
     scaffold(dir, { ...defaultScaffoldOptions("react-app"), app: REACT_APP }, VERSIONS)
-    const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as {
-      dependencies: Record<string, string>
-      devDependencies: Record<string, string>
-    }
+    const pkg = parseJsonAs(readFileSync(join(dir, "package.json"), "utf8"), isShape({ dependencies: isRecordOf(isString), devDependencies: isRecordOf(isString) }))
     expect(pkg.dependencies).toMatchObject({ react: "^19", "react-dom": "^19", "@supatype/react": "^0.9.2" })
     expect(pkg.devDependencies).toMatchObject({ "@vitejs/plugin-react": "^6", "@types/react": "^19", "@types/react-dom": "^19" })
   })

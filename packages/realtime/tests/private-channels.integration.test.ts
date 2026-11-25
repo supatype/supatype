@@ -73,7 +73,7 @@ describe.skipIf(!databaseUrl)("private channels against Postgres", { timeout: 30
   beforeAll(async () => {
     admin = new pg.Client({ connectionString: databaseUrl })
     await admin.connect()
-    const installed = await admin.query("SELECT to_regprocedure('_supatype.realtime_channel_access(text)') AS fn")
+    const installed = await admin.query<{ fn: string | null }>("SELECT to_regprocedure('_supatype.realtime_channel_access(text)') AS fn")
     if (installed.rows[0]?.fn === null) {
       throw new Error(`push ${schemaPath} to this database first: the channel functions are not installed`)
     }

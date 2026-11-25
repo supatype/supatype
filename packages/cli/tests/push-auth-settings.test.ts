@@ -2,6 +2,8 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { isJsonObject, isRecordOf, isString } from "@supatype/shared"
+import { expectShape } from "./support/json.js"
 import { validateProjectConfig, type SupatypeProjectConfig } from "../src/project-config.js"
 import type { DeployTarget } from "../src/resolve-target.js"
 import { TargetApiError } from "../src/target-client.js"
@@ -99,6 +101,10 @@ afterEach(() => {
 })
 
 const text = (): string => said.join("\n")
+const sentBody = (): Record<string, unknown> => expectShape(calls[0]?.body, isJsonObject)
+const sentSecrets = (): Record<string, string> => expectShape(sentBody()["secrets"], isRecordOf(isString))
+const sentAuth = (): Record<string, unknown> =>
+  expectShape(expectShape(sentBody()["settings"], isJsonObject)["auth"], isJsonObject)
 const env = (extra: Record<string, string> = {}): Record<string, string> => ({
   GITHUB_SECRET,
   SMTP_PASS: "smtp-secret-value",
@@ -112,15 +118,10 @@ describe("push to Cloud sends the auth settings", () => {
     expect(calls).toHaveLength(1)
     expect(calls[0]?.method).toBe("PUT")
     expect(calls[0]?.path).toBe("/projects/demo/environments/production/auth/code")
-    const body = calls[0]?.body as {
-      settings: { auth: { siteUrl: string; disableSignup: boolean } }
-      secrets: Record<string, string>
-      resetOverrides: boolean
-    }
-    expect(body.settings.auth.siteUrl).toBe("https://app.example.com")
-    expect(body.settings.auth.disableSignup).toBe(true)
-    expect(body.secrets).toEqual({ "providers.github.secret": GITHUB_SECRET, "email.smtp.pass": "smtp-secret-value" })
-    expect(body.resetOverrides).toBe(false)
+    expect(sentAuth()["siteUrl"]).toBe("https://app.example.com")
+    expect(sentAuth()["disableSignup"]).toBe(true)
+    expect(sentSecrets()).toEqual({ "providers.github.secret": GITHUB_SECRET, "email.smtp.pass": "smtp-secret-value" })
+    expect(sentBody()["resetOverrides"]).toBe(false)
     expect(text()).toContain("applied")
     expect(text()).not.toContain("not yet applied")
   })
@@ -133,7 +134,7 @@ describe("push to Cloud sends the auth settings", () => {
 
   it("sends resetOverrides when asked", async () => {
     await pushAuthSettings(cwd, withGithub(), cloud, { environment: env(), resetOverrides: true })
-    expect((calls[0]?.body as { resetOverrides: boolean }).resetOverrides).toBe(true)
+    expect(sentBody()["resetOverrides"]).toBe(true)
   })
 
   it("resolves a reference from the shell first, then .env", async () => {
@@ -141,7 +142,7 @@ describe("push to Cloud sends the auth settings", () => {
     vi.stubEnv("GITHUB_SECRET", "from-shell")
     vi.stubEnv("SMTP_PASS", undefined)
     await pushAuthSettings(cwd, withGithub(), cloud)
-    expect((calls[0]?.body as { secrets: Record<string, string> }).secrets).toEqual({
+    expect(sentSecrets()).toEqual({
       "providers.github.secret": "from-shell",
       "email.smtp.pass": "smtp-from-dotenv",
     })
@@ -162,7 +163,7 @@ describe("a secret the pushing machine does not have (D4)", () => {
     respond = () => okAnswer({ keptSecrets: ["providers.github.secret"] })
     const failed = await pushAuthSettings(cwd, withGithub(), cloud, { environment: { SMTP_PASS: "x" } })
     expect(failed).toBe(false)
-    expect(Object.keys((calls[0]?.body as { secrets: Record<string, string> }).secrets)).toEqual(["email.smtp.pass"])
+    expect(Object.keys(sentSecrets())).toEqual(["email.smtp.pass"])
     expect(text()).toContain("github.secret: GITHUB_SECRET is not set here, keeping the one stored")
   })
 
@@ -254,18 +255,18 @@ describe("the settings groups go to Cloud", () => {
   it("sends the groups, and the hook and captcha secrets under their secret keys", async () => {
     const environment = env({ EMAIL_HOOK_SECRETS: HOOK_SECRET, CAPTCHA_SECRET: "captcha-key" })
     expect(await pushAuthSettings(cwd, withGroups(), cloud, { environment })).toBe(false)
-    const body = calls[0]?.body as { settings: { auth: Record<string, unknown> }; secrets: Record<string, string> }
-    expect(body.settings.auth["password"]).toEqual({ minLength: 12 })
-    expect(body.settings.auth["rateLimits"]).toEqual({ otp: 40 })
-    expect(body.settings.auth["hooks"]).toEqual({ sendEmail: { uri: "https://hooks.example.com/email", secrets: "env(EMAIL_HOOK_SECRETS)" } })
-    expect(body.secrets["hooks.sendEmail.secrets"]).toBe(HOOK_SECRET)
-    expect(body.secrets["captcha.secret"]).toBe("captcha-key")
+    const auth = sentAuth()
+    const secrets = sentSecrets()
+    expect(auth["password"]).toEqual({ minLength: 12 })
+    expect(auth["rateLimits"]).toEqual({ otp: 40 })
+    expect(auth["hooks"]).toEqual({ sendEmail: { uri: "https://hooks.example.com/email", secrets: "env(EMAIL_HOOK_SECRETS)" } })
+    expect(secrets["hooks.sendEmail.secrets"]).toBe(HOOK_SECRET)
+    expect(secrets["captcha.secret"]).toBe("captcha-key")
   })
 
   it("sends only the SAML settings Cloud takes", async () => {
     await pushAuthSettings(cwd, withGroups(), cloud, { environment: env({ EMAIL_HOOK_SECRETS: HOOK_SECRET, CAPTCHA_SECRET: "k" }) })
-    const body = calls[0]?.body as { settings: { auth: { sso: unknown } } }
-    expect(body.settings.auth.sso).toEqual({ saml: { enabled: true, relayStateValidity: 300 } })
+    expect(sentAuth()["sso"]).toEqual({ saml: { enabled: true, relayStateValidity: 300 } })
   })
 
   it("refuses auth.sso.saml.externalUrl for Cloud, which owns that URL", async () => {

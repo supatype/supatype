@@ -7,6 +7,10 @@ import type { SocketSwapHarness } from "./socket-swap.js"
  *
  * Not named `*.test.ts`, so vitest's default include does not collect it as a suite.
  */
+function isAnyClient(candidate: unknown): candidate is AnyClient {
+  return typeof candidate === "object" && candidate !== null && "realtime" in candidate && "from" in candidate
+}
+
 export function fakeClient<TRow>(
   harness: SocketSwapHarness,
   reads: TRow[][] = [],
@@ -27,6 +31,8 @@ export function fakeClient<TRow>(
     }
     return query
   }
-  // The stand-in has only what `watchTable` touches, so it is typed as the client at this one place.
-  return { client: { realtime: harness.realtime, from } as unknown as AnyClient, filters }
+  // The stand-in has only what `watchTable` touches, so it is checked as the client at this one place.
+  const client: unknown = { realtime: harness.realtime, from }
+  if (!isAnyClient(client)) throw new Error("the fake client lost a member watchTable needs")
+  return { client, filters }
 }

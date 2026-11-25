@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto"
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http"
-import type { AddressInfo } from "node:net"
 import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { withRetry } from "../src/binary-cache.js"
 import { cdnGet, downloadToFile } from "../src/cdn-fetch.js"
+import { portOf } from "./support/ports.js"
 
 /**
  * Downloads fail on a stall, not on total time, and a retry resumes from the bytes already on disk.
@@ -29,7 +29,7 @@ async function serve(handler: (req: IncomingMessage, res: ServerResponse, attemp
     handler(req, res, ++attempt)
   })
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok))
-  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  base = `http://127.0.0.1:${portOf(server)}`
 }
 
 beforeEach(() => {

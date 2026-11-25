@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http"
-import type { AddressInfo } from "node:net"
 import type { SiteTarget } from "../../src/site-deploy.js"
+import { portOf } from "./ports.js"
 
 /** One request a mock Cloud control plane received, its body read whole. */
 export interface SeenRequest {
@@ -32,7 +32,7 @@ export async function mockSite(handler: SiteHandler): Promise<MockSite> {
     })
   })
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok))
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  const base = `http://127.0.0.1:${portOf(server)}`
   return {
     seen,
     base,

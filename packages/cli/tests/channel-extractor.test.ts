@@ -2,8 +2,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
+import { isArrayOf, isJsonObject, isShape } from "@supatype/shared"
 import { errorMessage } from "../src/error-message.js"
 import { extractSchemaAstFromTypes } from "../src/type-extractor.js"
+import { expectShape } from "./support/json.js"
 
 /**
  * `Channel<>` declarations: what they extract to (the build contract, section 14.1 of
@@ -70,7 +72,7 @@ describe("extracting a Channel", () => {
   })
 
   it("keeps a bare string at the top level as the parameter's column", () => {
-    const join = extract(LOT)?.channels?.[0]?.access.join as { rules: Array<Record<string, unknown>> }
+    const join = expectShape(extract(LOT)?.channels?.[0]?.access.join, isShape({ rules: isArrayOf(isJsonObject) }))
     expect(join.rules[0]).toMatchObject({ type: "in", column: "id" })
   })
 

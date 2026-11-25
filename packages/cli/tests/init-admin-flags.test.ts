@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { applyAdminFlags, type InitCliOptions, type WizardResult } from "../src/commands/init.js"
+import { applyAdminFlags, defaultScaffoldOptions, type InitCliOptions, type WizardResult } from "../src/commands/init.js"
 import { exitThrows } from "./support/process-exit.js"
 
 /**
  * S-21: `init --admin-email a@b.c` without `--admin-password` wrote no admin and said nothing. An
  * admin needs both, so naming one without the other is refused before anything is written.
  */
-const answers = (): WizardResult => ({ projectName: "acme" }) as WizardResult
+const answers = (): WizardResult => ({ ...defaultScaffoldOptions("acme"), packageManager: "npm", install: true, generateKeys: true })
 
 const said: string[] = []
 vi.mock("../src/ui/messages.js", async (importOriginal) => ({

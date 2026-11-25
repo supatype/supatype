@@ -25,7 +25,7 @@ afterEach(() => {
 
 async function bodyOf(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = []
-  for await (const chunk of req) chunks.push(Buffer.from(chunk as Uint8Array))
+  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)))
   const text = Buffer.concat(chunks).toString("utf8")
   return text === "" ? undefined : JSON.parse(text)
 }

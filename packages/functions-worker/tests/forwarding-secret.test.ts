@@ -51,6 +51,12 @@ interface Run {
   visible: string | null
 }
 
+function visibleOf(body: unknown): string | null {
+  if (typeof body !== "object" || body === null || !("visible" in body)) return "bad body"
+  const { visible } = body
+  return visible === null || typeof visible === "string" ? visible : "bad body"
+}
+
 async function run(
   inbound: Record<string, string>,
   secret: string | undefined,
@@ -70,7 +76,7 @@ async function run(
     })
     const res = await fetch(`${worker.origin}/functions/v1/caller?other=${encodeURIComponent(otherServer.origin)}`, { headers: inbound })
     const body: unknown = await res.json()
-    const visible = typeof body === "object" && body !== null && "visible" in body ? (body.visible as string | null) : "bad body"
+    const visible = visibleOf(body)
     return { stack, other, visible }
   } finally {
     await worker?.stop()

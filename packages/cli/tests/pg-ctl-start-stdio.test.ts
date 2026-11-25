@@ -17,14 +17,10 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
 describe("pg_ctl start", () => {
   it("gives pg_ctl files for its output, never this process's own stdout", () => {
-    const seen: unknown[] = []
-    const fake = ((_cmd: string, _args: readonly string[], options: { stdio: unknown }) => {
-      seen.push(options.stdio)
-      return { status: 0 }
-    }) as unknown as typeof spawnSync
+    const fake = vi.fn<typeof spawnSync>().mockReturnValue({ pid: 0, output: [], stdout: "", stderr: "", status: 0, signal: null })
     vi.spyOn(process.stdout, "write").mockReturnValue(true)
-    runPgCtlStart({ pgBinDir: dir } as Parameters<typeof runPgCtlStart>[0], ["start"], join(dir, "pg.log"), fake)
-    const stdio = seen[0]
+    runPgCtlStart({ pgBinDir: dir, dataDir: dir, port: 0 }, ["start"], join(dir, "pg.log"), fake)
+    const stdio = fake.mock.calls[0]?.[2]?.stdio
     expect(Array.isArray(stdio)).toBe(true)
     if (!Array.isArray(stdio)) return
     expect(stdio[1]).toEqual(expect.any(Number))

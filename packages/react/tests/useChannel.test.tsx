@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, create, type ReactTestRenderer } from "react-test-renderer"
 import type { ChannelSubscription } from "@supatype/client"
 import { sentFrames, simulateServerMessage, subscribedChannels } from "../../client/tests/helpers/mock-websocket.js"
+import { closeEvent } from "../../client/tests/helpers/close-event.js"
 import { createSocketSwapHarness, type SocketSwapHarness } from "../../client/tests/helpers/socket-swap.js"
 
 const shared = vi.hoisted(() => ({ harness: null as SocketSwapHarness | null }))
@@ -80,7 +81,7 @@ describe("useChannel", () => {
     expect(latest?.status).toBe("SUBSCRIBED")
 
     act(() => {
-      harness.socket().onclose?.(new Event("close") as CloseEvent)
+      harness.socket().onclose?.(closeEvent())
     })
     expect(latest?.isConnected).toBe(false)
     expect(latest?.connectionState).toBe("connecting")

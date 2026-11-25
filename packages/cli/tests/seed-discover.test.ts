@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync, rmSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { tmpdir } from "node:os"
 import { discoverSeedsDir } from "../src/commands/seed.js"
+import { projectConfig } from "./support/project-config.js"
 
 let tmp: string
 beforeEach(() => {
@@ -34,14 +35,14 @@ describe("discoverSeedsDir", () => {
 describe("seedPaths", () => {
   it("runs every file named, in the order named", async () => {
     const { seedPaths } = await import("../src/commands/seed.js")
-    const config = { project: { name: "acme" } } as Parameters<typeof seedPaths>[2]
+    const config = projectConfig({ project: { name: "acme" } })
     const paths = seedPaths(["b.ts", "a.ts"], tmp, config)
     expect(paths).toEqual([resolve(tmp, "b.ts"), resolve(tmp, "a.ts")])
   })
 
   it("still takes one file, or none", async () => {
     const { seedPaths } = await import("../src/commands/seed.js")
-    const config = { project: { name: "acme" } } as Parameters<typeof seedPaths>[2]
+    const config = projectConfig({ project: { name: "acme" } })
     expect(seedPaths("one.ts", tmp, config)).toHaveLength(1)
     writeFileSync(join(tmp, "seeds", "x.ts"), "//")
     expect(seedPaths(undefined, tmp, config)).toHaveLength(1)

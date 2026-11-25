@@ -21,7 +21,14 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-const cloud = { mode: "cloud", environment: "production", link: null } as unknown as DeployTarget
+const cloud: DeployTarget = {
+  mode: "cloud",
+  environment: "production",
+  projectRef: "demo",
+  apiBaseUrl: "",
+  apiPrefix: "/platform/v1",
+  link: null,
+}
 
 describe("a Cloud push that enabled cached tables", () => {
   it("names the tables the server confirmed, in the self-host wording", () => {

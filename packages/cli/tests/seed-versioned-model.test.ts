@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { projectConfig } from "./support/project-config.js"
+import type { SeedIr } from "../src/seed.js"
+import { isJsonObject } from "@supatype/shared"
 import type { ExtractedSchemaAstV2 } from "../src/schema-ast-v2.js"
 
 /**
@@ -17,10 +19,17 @@ vi.mock("../src/stack-engine.js", () => ({
   },
 }))
 
-const versionedAst = {
-  version: 2,
-  models: [{ name: "Post", tableName: "post", options: { versions: { drafts: true } }, fields: [] }],
-} as unknown as ExtractedSchemaAstV2
+const versionedAst: ExtractedSchemaAstV2 = {
+  astVersion: 2,
+  models: [
+    {
+      name: "Post",
+      fields: {},
+      options: { versions: { drafts: true } },
+      annotations: { db: { tableName: "post", indexes: [] }, platform: { access: {} } },
+    },
+  ],
+}
 
 vi.mock("../src/config.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/config.js")>()),
@@ -38,7 +47,7 @@ describe("supatype seed with a versioned model", () => {
   it("sends the engine the schema with its publishing settings, as push does", async () => {
     
     const config = projectConfig({ provider: "docker" })
-    const document = { operations: [] } as never
+    const document: SeedIr = { irVersion: 1, schemaFingerprint: "fp-1", operations: [] }
     const ran = apply([{ file: "seed.ts", document, config: {} }], {
       cwd: process.cwd(),
       config,
@@ -47,7 +56,8 @@ describe("supatype seed with a versioned model", () => {
       engine: undefined,
     })
     expect(await ran).toBe(0)
-    const ast = sent.body?.["ast"] as Record<string, unknown> | undefined
-    expect(ast?.["publishing"]).toMatchObject({ draftVisibility: expect.anything() })
+    const ast = sent.body?.["ast"]
+    const publishing = isJsonObject(ast) ? ast["publishing"] : undefined
+    expect(isJsonObject(publishing) && publishing["draftVisibility"] !== undefined && publishing["draftVisibility"] !== null).toBe(true)
   })
 })
