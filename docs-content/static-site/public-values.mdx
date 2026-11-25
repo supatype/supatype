@@ -12,6 +12,7 @@ Pre-1.0: APIs and config may change between releases.
 On a self-hosted stack, and in `supatype dev`, the values come from `build.publicEnv` in `supatype.config.ts`. A plain string is one value for every environment. A map sets a value per environment:
 
 ```ts title="supatype.config.ts"
+// docs:no-check (a fragment: the rest of your config stays as it is)
 import { defineConfig } from "@supatype/cli"
 
 export default defineConfig({
