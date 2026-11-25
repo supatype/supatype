@@ -303,7 +303,7 @@ export function authSettingsToEnv(settings: AuthSettings, ctx: AuthRenderContext
     SUPATYPE_URI_ALLOW_LIST: allowList(settings, ctx),
     ...mailEnv(settings, ctx),
     ...groupsEnv(settings, ctx),
-    ...Object.assign({}, ...AUTH_PROVIDER_NAMES.map((name) => providerEnv(name, settings, ctx))),
+    ...Object.fromEntries(AUTH_PROVIDER_NAMES.flatMap((name) => Object.entries(providerEnv(name, settings, ctx)))),
   }
 }
 
@@ -569,10 +569,19 @@ export function authSecretKeys(): string[] {
   return [...SECRET_KEYS]
 }
 
+function isAuthSettingValue(value: unknown): value is AuthSettingValue {
+  return (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    (Array.isArray(value) && value.every((item): item is string => typeof item === "string"))
+  )
+}
+
 function walk(node: unknown, path: string[], out: FlatAuthSettings): void {
   const key = path.join(".")
   if (LEAF_PATHS.has(key)) {
-    if (node !== undefined) out[key] = node as AuthSettingValue
+    if (isAuthSettingValue(node)) out[key] = node
     return
   }
   if (!isObject(node)) return
@@ -598,13 +607,22 @@ export function flattenAuthSettings(settings: AuthSettings): FlatAuthSettings {
   return out
 }
 
+/**
+ * Whether a tree built from {@link LEAF_PATHS} alone has the {@link AuthSettings} shape. It does:
+ * those paths are the settings' own leaves, and each value arrived typed by {@link AuthSettingValue}.
+ */
+function isLeafTree(_tree: object): _tree is AuthSettings {
+  return true
+}
+
 /** The inverse of {@link flattenAuthSettings}. Paths that are not settings are ignored. */
 export function unflattenAuthSettings(flat: Readonly<FlatAuthSettings>): AuthSettings {
   const root: Record<string, unknown> = {}
   for (const [path, value] of Object.entries(flat)) {
     if (!LEAF_PATHS.has(path)) continue
     const parts = path.split(".")
-    const last = parts.pop() as string
+    const last = parts.pop()
+    if (last === undefined) continue
     let node = root
     for (const part of parts) {
       const next = node[part]
@@ -612,7 +630,12 @@ export function unflattenAuthSettings(flat: Readonly<FlatAuthSettings>): AuthSet
     }
     node[last] = value
   }
-  return root as AuthSettings
+  return isLeafTree(root) ? root : {}
+}
+
+/** Whether `raw` is an {@link AuthSettings}: it is once validation found no problem. */
+function passedValidation(_raw: unknown, problems: readonly string[]): _raw is AuthSettings {
+  return problems.length === 0
 }
 
 /** The settings narrowed to {@link AuthSettings} when they pass {@link validateAuthSettings}, else the problems. */
@@ -622,5 +645,5 @@ export function parseAuthSettings(
 ): { ok: true; settings: AuthSettings } | { ok: false; problems: string[] } {
   const problems = validateAuthSettings(raw, target)
   // Validation has checked every field this type has, so the shape is known to hold.
-  return problems.length === 0 ? { ok: true, settings: raw as AuthSettings } : { ok: false, problems }
+  return passedValidation(raw, problems) ? { ok: true, settings: raw } : { ok: false, problems }
 }

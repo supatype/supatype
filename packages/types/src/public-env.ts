@@ -143,7 +143,10 @@ export function publicEnvFor(declared: PublicEnvDeclaration | undefined, environ
   const values: Record<string, string> = {}
   for (const [name, value] of Object.entries(declared ?? {})) {
     if (typeof value === "string") values[name] = value
-    else if (Object.hasOwn(value, environment)) values[name] = value[environment] as string
+    else if (Object.hasOwn(value, environment)) {
+      const picked = value[environment]
+      if (picked !== undefined) values[name] = picked
+    }
   }
   return values
 }
