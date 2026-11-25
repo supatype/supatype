@@ -3,5 +3,5 @@
 export const PINNED_IMAGES = {
   engine: { image: "supatype/schema-engine", tag: "v0.10.1", commit: "9eb9e4b04ed2eab9268dff29b4625c429a814e5f" },
   server: { image: "supatype/server", tag: "v2.5.0", commit: "8b9ecaea62c7f3086b32c25f652c1348c152ff6d" },
-  postgres: { image: "supatype/postgres", tag: "17.2.14", commit: "f00cb569fbf8ee2d6b99743dfe2d2b9843552389" },
+  postgres: { image: "supatype/postgres", tag: "17.2.16", commit: "ff4a061e5bc49eebbf8b881812d028b4774d474b" },
 } as const
