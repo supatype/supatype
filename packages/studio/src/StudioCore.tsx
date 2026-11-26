@@ -2,14 +2,20 @@
 
 import React, { useEffect, useMemo } from "react"
 import { Routes, Route, Navigate, Outlet, useNavigate, useLocation, useParams } from "react-router-dom"
-import type { StudioCoreProps, StudioExtension } from "./types.js"
+import type { SidebarSection, StudioCoreProps, StudioExtension } from "./types.js"
 import type { AdminConfig } from "./config.js"
 import { AdminConfigContext, useAdminConfig } from "./hooks/useAdminConfig.js"
+import { ExtensionRoutesContext, routePathOf } from "./hooks/useExtensionRoutes.js"
 import { useMobileNav, type MobileNav } from "./hooks/useMobileNav.js"
 import { AdminClientContext, useAdminClient } from "./hooks/useAdminClient.js"
 import { LocaleContext, useLocaleState } from "./hooks/useLocale.js"
 import { CloudUrlContext } from "./hooks/useCloudUrl.js"
 import { PlatformCtx } from "./hooks/usePlatform.js"
+import { ConnectionCtx } from "./hooks/useConnection.js"
+import { StaticSiteCtx, useOfferedStaticSiteHost, type StaticSiteHost } from "./lib/static-site-host.js"
+import { StaticSiteOverview } from "./views/static-site/StaticSiteOverview.js"
+import { StaticSiteSettings } from "./views/static-site/StaticSiteSettings.js"
+import { SizeSourceCtx } from "./lib/size-source.js"
 import { Sidebar, getPageBreadcrumbs, hiddenNavItems } from "./components/Sidebar.js"
 import { PageError } from "./components/ui.js"
 import { useStudioCapability } from "./hooks/useStudioCapability.js"
@@ -24,6 +30,7 @@ import { LinkAccountPrompt } from "./components/LinkAccountPrompt.js"
 import { SchemaPushNotice } from "./components/SchemaPushNotice.js"
 import { RoleGate, type RoleRequirement } from "./components/RoleGate.js"
 import { forgetStoredActingModes } from "./lib/acting-mode.js"
+import { ROUTE_ALIASES } from "./lib/route-aliases.js"
 
 // Re-export for dev tool views that import useStudioClient
 export const useStudioClient = useAdminClient
@@ -58,6 +65,7 @@ import { Settings } from "./views/Settings.js"
 import { ComingSoon } from "./views/ComingSoon.js"
 import { RealtimeInspector } from "./views/RealtimeInspector.js"
 import { EdgeFunctions } from "./views/EdgeFunctions.js"
+import { Hooks } from "./views/Hooks.js"
 import { PluginsMarketplace } from "./views/PluginsMarketplace.js"
 
 // Database sub-pages
@@ -77,6 +85,8 @@ import { PoliciesView } from "./views/auth/PoliciesView.js"
 import { ProvidersView } from "./views/auth/ProvidersView.js"
 import { ConfigurationView } from "./views/auth/ConfigurationView.js"
 import { SsoView } from "./views/auth/SsoView.js"
+import { AuthHooksView } from "./views/auth/AuthHooksView.js"
+import { AttackProtectionView } from "./views/auth/AttackProtectionView.js"
 import { EmailTemplatesView } from "./views/auth/EmailTemplatesView.js"
 
 // Storage sub-pages
@@ -90,13 +100,13 @@ interface StudioLayoutProps {
 }
 
 /** Keeps the browser tab's title on the current page's breadcrumbs. */
-function useDocumentTitle(config: AdminConfig | null, pathname: string): void {
+function useDocumentTitle(config: AdminConfig | null, pathname: string, hostSections: readonly SidebarSection[] | undefined): void {
   useEffect(() => {
     if (!config) return
-    const crumbs = getPageBreadcrumbs(pathname, config)
+    const crumbs = getPageBreadcrumbs(pathname, config, hostSections)
     const appName = config.branding?.appName ?? "Supatype Studio"
     document.title = [...crumbs, appName].join(" | ")
-  }, [pathname, config])
+  }, [pathname, config, hostSections])
 }
 
 interface StudioNavProps {
@@ -116,7 +126,8 @@ const PRIMARY_MENU_ID = "studio-primary-menu"
  */
 function StudioNav({ config, extensions, mobileNav }: StudioNavProps): React.ReactElement {
   const capability = useStudioCapability()
-  const hiddenNav = useMemo(() => hiddenNavItems(capability), [capability])
+  const hasStaticSite = useOfferedStaticSiteHost() !== undefined
+  const hiddenNav = useMemo(() => hiddenNavItems(capability, hasStaticSite), [capability, hasStaticSite])
   const sidebarProps = { config, extraSections: extensions?.sidebarSections, hiddenItems: hiddenNav }
   return (
     <>
@@ -162,7 +173,7 @@ function StudioLayout({ extensions, demoMode }: StudioLayoutProps): React.ReactE
   const { pathname } = useLocation()
   const configCtx = React.useContext(AdminConfigContext)
   const mobileNav = useMobileNav()
-  useDocumentTitle(configCtx, pathname)
+  useDocumentTitle(configCtx, pathname, extensions?.sidebarSections)
 
   if (!configCtx) {
     return (
@@ -179,6 +190,7 @@ function StudioLayout({ extensions, demoMode }: StudioLayoutProps): React.ReactE
         config={configCtx}
         leftItems={extensions?.topBarLeftItems}
         extraItems={extensions?.topBarItems}
+        hostSections={extensions?.sidebarSections}
         demoMode={demoMode}
         sidebar={{ open: mobileNav.open === "primary", onToggle: () => mobileNav.toggle("primary"), controls: PRIMARY_MENU_ID }}
       />
@@ -216,10 +228,32 @@ const API_SETTINGS: RoleRequirement = { needs: "administer", activity: "change t
 const FUNCTIONS: RoleRequirement = { needs: "administer", activity: "manage functions" }
 const REALTIME: RoleRequirement = { needs: "realtimeInspect", activity: "use the Realtime Inspector" }
 const LOGS: RoleRequirement = { needs: "viewLogs", activity: "view logs" }
+const STATIC_SITE: RoleRequirement = { needs: "administer", activity: "see the static site" }
 
 /** `element`, for a role that holds what `requirement` needs. */
 function gated(requirement: RoleRequirement, element: React.ReactElement): React.ReactElement {
   return <RoleGate {...requirement}>{element}</RoleGate>
+}
+
+/** A Static site page, or the project's home when the host says it serves no site here. */
+function OfferedStaticSite({ children }: { children: React.ReactElement }): React.ReactElement {
+  return useOfferedStaticSiteHost() === undefined ? <Navigate to="/" replace /> : children
+}
+
+/**
+ * The Static site group's routes, or none when the host gave Studio no host for it. The Deployments
+ * route exists only when the host provides the page, so self-host has no such address at all.
+ */
+function staticSiteRoutes(host: StaticSiteHost | undefined): React.ReactElement[] {
+  if (host === undefined) return []
+  const Deployments = host.Deployments
+  return [
+    <Route key="static-site" path="static-site" element={<OfferedStaticSite>{gated(STATIC_SITE, <StaticSiteOverview />)}</OfferedStaticSite>} />,
+    <Route key="static-site-settings" path="static-site/settings" element={<OfferedStaticSite>{gated(STATIC_SITE, <StaticSiteSettings />)}</OfferedStaticSite>} />,
+    ...(Deployments !== undefined
+      ? [<Route key="static-site-deployments" path="static-site/deployments" element={<OfferedStaticSite>{gated(STATIC_SITE, <Deployments />)}</OfferedStaticSite>} />]
+      : []),
+  ]
 }
 
 function ModelsOverview(): React.ReactElement {
@@ -406,19 +440,31 @@ function GlobalGraphQLRoute(): React.ReactElement {
 
 // ─── StudioCore ────────────────────────────────────────────────────────────────
 
-export function StudioCore({ config, client, extensions, demoMode, cloudUrl, platformUrl, projectRef }: StudioCoreProps): React.ReactElement {
+export function StudioCore({ config, client, extensions, demoMode, cloudUrl, platformUrl, projectRef, environment, connection, staticSite, sizeSource }: StudioCoreProps): React.ReactElement {
   const localeState = useLocaleState(config)
   // A mode an earlier Studio remembered is no longer read; forgetting it once keeps no stale choice.
   useEffect(() => forgetStoredActingModes(), [])
 
+  const extensionRoutes = useMemo(() => extensions?.routes ?? [], [extensions?.routes])
+  const served = useMemo(() => new Set(extensionRoutes.map((r) => routePathOf(r.path))), [extensionRoutes])
+
   let content = (
     <CloudUrlContext.Provider value={cloudUrl}>
-    <PlatformCtx.Provider value={{ platformUrl, projectRef }}>
+    <PlatformCtx.Provider value={{ platformUrl, projectRef, environment }}>
+    <ConnectionCtx.Provider value={connection}>
+    <StaticSiteCtx.Provider value={staticSite}>
+    <SizeSourceCtx.Provider value={sizeSource}>
     <AdminConfigContext.Provider value={config}>
+    <ExtensionRoutesContext.Provider value={served}>
       <AdminClientContext.Provider value={client}>
         <LocaleContext.Provider value={localeState}>
           <Routes>
             <Route element={<StudioLayout extensions={extensions} demoMode={demoMode} />}>
+              {/* Extension routes first: React Router ranks two routes for one path by the order
+                  they are declared, so a page a host builds (Cloud's backups) wins over the core
+                  placeholder at the same path. See ExtensionRoutesContext. */}
+              {extensionRoutes.map((r) => <Route key={r.path} path={r.path} element={r.element} />)}
+
               {/* CMS */}
               <Route index element={<Dashboard />} />
               <Route path="media" element={<MediaLibrary />} />
@@ -481,9 +527,9 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="authentication/providers"       element={gated(PROJECT_USERS, <ProvidersView />)} />
               <Route path="authentication/configuration"   element={gated(PROJECT_USERS, <ConfigurationView />)} />
               <Route path="authentication/email-templates" element={gated(PROJECT_USERS, <EmailTemplatesView />)} />
-              <Route path="authentication/hooks"    element={<ComingSoon title="Auth Hooks" description="Configure pre/post hooks for auth events. Coming soon." />} />
+              <Route path="authentication/hooks"           element={gated(PROJECT_USERS, <AuthHooksView />)} />
               <Route path="authentication/sso"             element={gated(SSO_PROVIDERS, <SsoView />)} />
-              <Route path="authentication/security" element={<ComingSoon title="Attack Protection" description="CAPTCHA, IP blocking, leaked password detection, rate limits. Coming soon." />} />
+              <Route path="authentication/security"        element={gated(PROJECT_USERS, <AttackProtectionView />)} />
 
               {/* Observability (Logs + Metrics + Advisors) */}
               <Route path="observability">
@@ -518,10 +564,15 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="settings"       element={<Settings demoMode={demoMode ?? false} />} />
 
               {/* Platform features */}
-              <Route path="email"          element={<ComingSoon title="Email" description="Configure transactional email providers, templates, and delivery settings." />} />
+              <Route path="email"          element={<ComingSoon title="Email" description="Configure transactional email providers, templates, and delivery settings. Coming soon." />} />
+              {Object.entries(ROUTE_ALIASES).map(([path, to]) => (
+                <Route key={path} path={path} element={<Navigate to={to} replace />} />
+              ))}
               <Route path="edge-functions" element={gated(FUNCTIONS, <EdgeFunctions />)} />
               <Route path="edge-functions/:functionSlug" element={gated(FUNCTIONS, <EdgeFunctions />)} />
               <Route path="edge-functions/:functionSlug/:tab" element={gated(FUNCTIONS, <EdgeFunctions />)} />
+              {staticSiteRoutes(staticSite)}
+              <Route path="hooks" element={gated(FUNCTIONS, <Hooks />)} />
               {/* The Inspector where this deployment's control plane serves it, "coming soon" where it
                   does not (Phase-08 Appendix A). Settings and metrics are a later release. */}
               <Route path="realtime"          element={gated(REALTIME, <RealtimeInspector demoMode={demoMode ?? false} />)} />
@@ -585,16 +636,17 @@ export function StudioCore({ config, client, extensions, demoMode, cloudUrl, pla
               <Route path="dev/data"           element={<Navigate to="/data"                replace />} />
               <Route path="dev/migrations"     element={<Navigate to="/database/migrations" replace />} />
 
-              {/* Extension routes */}
-              {extensions?.routes?.map((r) => <Route key={r.path} path={r.path} element={r.element} />)}
-
               {/* 404 */}
               <Route path="*" element={<PageError>Page not found</PageError>} />
             </Route>
           </Routes>
         </LocaleContext.Provider>
       </AdminClientContext.Provider>
+    </ExtensionRoutesContext.Provider>
     </AdminConfigContext.Provider>
+    </SizeSourceCtx.Provider>
+    </StaticSiteCtx.Provider>
+    </ConnectionCtx.Provider>
     </PlatformCtx.Provider>
     </CloudUrlContext.Provider>
   )

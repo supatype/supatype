@@ -52,6 +52,9 @@ export function IconBook({ size = 16 }: { size?: number }): React.ReactElement {
 export function IconGlobe({ size = 16 }: { size?: number }): React.ReactElement {
   return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
 }
+export function IconWebhook({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 16.98h-5.99c-1.1 0-1.95.94-2.48 1.9A4 4 0 0 1 2 17c.01-.7.2-1.4.57-2"/><path d="m6 17 3.13-5.78c.53-.97.1-2.18-.5-3.1a4 4 0 1 1 6.89-4.06"/><path d="m12 6 3.13 5.73C15.66 12.7 16.9 13 18 13a4 4 0 0 1 0 8"/></svg>
+}
 export function IconClock({ size = 16 }: { size?: number }): React.ReactElement {
   return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
 }
@@ -107,6 +110,14 @@ export function IconMegaphone({ size = 16 }: { size?: number }): React.ReactElem
 export function IconType({ size = 16 }: { size?: number }): React.ReactElement {
   return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
 }
+/** A browser window: the Static site group, which `IconGlobe` is left free from for a domains page. */
+export function IconLayout({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+}
+/** Sliders: a project's own settings, apart from the cog on the Settings entry. */
+export function IconSliders({ size = 16 }: { size?: number }): React.ReactElement {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+}
 /** What a block or nav entry draws when its schema names an icon this module does not have. */
 export function IconSquare({ size = 16 }: { size?: number }): React.ReactElement {
   return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/></svg>
@@ -130,6 +141,9 @@ const ICON_MAP: Record<string, (props: { size?: number }) => React.ReactElement>
   book: IconBook,
   settings: IconSettings,
   globe: IconGlobe,
+  layout: IconLayout,
+  sliders: IconSliders,
+  webhook: IconWebhook,
   clock: IconClock,
   cpu: IconCpu,
   cart: IconShoppingCart,

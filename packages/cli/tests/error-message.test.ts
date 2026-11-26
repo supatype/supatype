@@ -73,6 +73,24 @@ describe("httpFailureText", () => {
   })
 })
 
+// S-13: a refusal's reason was cut at 300 characters with "...", so the seed refusal for a versioned
+// schema ended mid-sentence before saying what to do. A reason the server wrote is quoted whole; a body
+// that is not one (an HTML error page) is still cut.
+describe("httpFailureText with a long body", () => {
+  const reason = `${"This is the whole reason, said in full. ".repeat(20)}and what to do about it.`
+
+  it("quotes the whole reason a JSON body gives", () => {
+    const text = httpFailureText(502, "Bad Gateway", JSON.stringify({ message: reason }))
+    expect(text).toBe(`HTTP 502 Bad Gateway: ${reason.replace(/\s+/g, " ")}`)
+  })
+
+  it("still cuts a body that is not a reason", () => {
+    const text = httpFailureText(502, "Bad Gateway", `<html>${"x".repeat(1000)}</html>`)
+    expect(text.length).toBeLessThan(400)
+    expect(text.endsWith("...")).toBe(true)
+  })
+})
+
 describe("bodyReason", () => {
   it("is a JSON body's message, else its error, else nothing", () => {
     expect(bodyReason({ message: "m", error: "e" })).toBe("m")

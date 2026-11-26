@@ -12,7 +12,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { join, relative } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { hooksPathFromProject, schemaPathFromProject } from "../project-config.js"
-import { declaredHooks, ensureHooksModule, hookTableOf, hooksReport } from "../model-hooks.js"
+import { declaredHooks, declaredValidators, ensureHooksModule, hookTableOf, hooksReport, type DeclaredValidator } from "../model-hooks.js"
 import { isAfterHookEvent, type AfterHookEvent } from "../hook-columns.js"
 import { error, info, plain } from "../ui/messages.js"
 
@@ -37,16 +37,20 @@ export function registerHooks(program: Command): void {
       const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
       const report = hooksReport(cwd, hooksPathFromProject(config, cwd), ast)
 
-      if (report.declared.length === 0) {
-        info("No model declares a hook.")
+      if (report.declared.length === 0 && report.validators.length === 0) {
+        info("No model declares a hook or a field validator.")
         return
       }
       for (const hook of report.declared) {
         const broken = report.missing.some((m) => m.model === hook.model && m.event === hook.event)
         plain(`  ${broken ? "✗" : "•"} ${hook.model}.${hook.event} → ${hook.function}`)
       }
-      if (report.missing.length > 0) {
-        plain("\n  ✗ names a handler that does not exist, so that hook never fires.")
+      for (const validator of report.validators) {
+        const broken = report.validatorsMissing.some((m) => m.model === validator.model && m.field === validator.field)
+        plain(`  ${broken ? "✗" : "•"} ${validator.model}.${validator.field} (validator) → ${validator.function}`)
+      }
+      if (report.missing.length > 0 || report.validatorsMissing.length > 0) {
+        plain("\n  ✗ names a handler that does not exist, so that hook or validator never runs.")
       }
     })
 }
@@ -63,21 +67,26 @@ function scaffoldHook(cwd: string, name: string): void {
 
   const ast = loadSchemaAst(schemaPathFromProject(config, cwd), cwd)
   const declared = declaredHooks(ast).filter((hook) => hook.function === name)
+  const validators = declaredValidators(ast).filter((validator) => validator.function === name)
 
   mkdirSync(dir, { recursive: true })
   const table = declared[0] === undefined ? undefined : hookTableOf(ast, declared[0].model)
-  writeFileSync(join(dir, "index.ts"), handlerTemplate(name, declared, table), "utf8")
+  const source = validators[0] !== undefined && declared.length === 0 ? validatorTemplate(name, validators[0]) : handlerTemplate(name, declared, table)
+  writeFileSync(join(dir, "index.ts"), source, "utf8")
 
   info(`Created hook: ${relative(cwd, join(dir, "index.ts"))}`)
   // The handler imports the generated adapter; written now when missing, so it loads before a push.
   const adapter = ensureHooksModule(cwd, hooksDir, ast)
   if (adapter !== null) info(`Hook handler types written to ${adapter}`)
-  sayWiring(name, declared)
+  sayWiring(name, declared, validators)
 }
 
 /** Which model events the new hook is wired to, or how to wire it when none names it yet. */
-function sayWiring(name: string, declared: { model: string; event: string }[]): void {
-  if (declared.length === 0) {
+function sayWiring(name: string, declared: { model: string; event: string }[], validators: DeclaredValidator[]): void {
+  if (declared.length === 0 && validators.length > 0) {
+    plain("")
+    for (const validator of validators) plain(`  Wired to ${validator.model}.${validator.field} (validator)`)
+  } else if (declared.length === 0) {
     // Scaffolding a handler nothing calls is easy to do and impossible to notice, since a hook that
     // is never referenced simply never runs.
     plain("")
@@ -90,6 +99,27 @@ function sayWiring(name: string, declared: { model: string; event: string }[]): 
       plain(`  Wired to ${hook.model}.${hook.event}`)
     }
   }
+}
+
+/** The scaffold for a field validator: the value of one field in, `true` or the message to show out. */
+function validatorTemplate(name: string, validator: DeclaredValidator): string {
+  const table = JSON.stringify(validator.table ?? "your_table")
+  const field = JSON.stringify(validator.field)
+  return `// ${name}: field validator for ${validator.model}.${validator.field}
+//
+// Runs before the write reaches Postgres, on this one field's value. Return \`true\` to accept it, or a
+// message to refuse: the caller sees it attached to the field, so a form can show it on the input.
+
+import { fieldValidator, type FieldValidator } from "../_supatype/hooks.ts"
+
+const validate: FieldValidator<${table}, ${field}> = (ctx) => {
+  // \`ctx.value\` is the submitted value, typed from the model.
+  void ctx.value
+  return true
+}
+
+export default fieldValidator(validate)
+`
 }
 
 /** The scaffold for an `afterChange` or `afterDelete` hook, typed as the event it is wired to. */

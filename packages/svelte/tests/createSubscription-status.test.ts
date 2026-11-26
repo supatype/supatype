@@ -9,11 +9,12 @@
  * store wires the channel, not Svelte's component lifecycle.
  */
 
-import { vi } from "vitest"
+import { vi, it, expect } from "vitest"
 import { get } from "svelte/store"
-import { describeStatusAcrossSignIn, type SocketSwapHarness } from "../../client/tests/helpers/socket-swap.js"
+import { describeStatusAcrossSignIn, createSocketSwapHarness, type SocketSwapHarness } from "../../client/tests/helpers/socket-swap.js"
+import { fakeClient } from "../../client/tests/helpers/fake-client.js"
 
-const lifecycle = vi.hoisted(() => ({ destroy: [] as Array<() => void>, harness: null as SocketSwapHarness | null }))
+const lifecycle = vi.hoisted(() => ({ destroy: [] as Array<() => void>, harness: null as SocketSwapHarness | null, client: null as unknown }))
 
 vi.mock("svelte", async (importOriginal) => ({
   ...(await importOriginal<typeof import("svelte")>()),
@@ -21,7 +22,7 @@ vi.mock("svelte", async (importOriginal) => ({
 }))
 
 vi.mock("../src/context.js", () => ({
-  getSupatypeClient: () => ({ realtime: lifecycle.harness?.realtime }),
+  getSupatypeClient: () => lifecycle.client,
 }))
 
 import { createSubscription } from "../src/createSubscription.js"
@@ -30,6 +31,7 @@ describeStatusAcrossSignIn(
   "createSubscription",
   (harness) => {
     lifecycle.harness = harness
+    lifecycle.client = fakeClient(harness).client
     const { status, error } = createSubscription("task")
     return { status: () => get(status), error: () => get(error) }
   },
@@ -37,3 +39,16 @@ describeStatusAcrossSignIn(
     for (const fn of lifecycle.destroy.splice(0)) fn()
   },
 )
+
+it("createSubscription shows the rows the table already holds once the join is acknowledged", async () => {
+  const harness = createSocketSwapHarness()
+  lifecycle.harness = harness
+  lifecycle.client = fakeClient(harness, [[{ id: 1 }]]).client
+  const { data } = createSubscription("task")
+  await harness.settle()
+  harness.ackJoins()
+  await harness.settle()
+  expect(get(data)).toEqual([{ id: 1 }])
+  for (const fn of lifecycle.destroy.splice(0)) fn()
+  harness.restore()
+})

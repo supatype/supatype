@@ -9,6 +9,7 @@ import {
 import {
   isArrayOf,
   isJsonObject,
+  isOneOf,
   isRecordOf,
   isShape,
   isString,
@@ -18,6 +19,7 @@ import {
   type Guard,
 } from "@supatype/shared"
 import { objectAt } from "./ast-read.js"
+import type { ChannelParamAst, ChannelParamKind, ExtractedChannelAst } from "./schema-ast-v2.js"
 import { columnFieldsOf } from "./engine-columns.js"
 import { keepsDrafts } from "./model-versioning.js"
 import { fieldsWithCallerDefaults } from "./owner-default.js"
@@ -104,6 +106,7 @@ export function generateClientAugmentation(ast: unknown): string {
     ...models.flatMap((model) => modelLines(model, models)),
     ...junctions.flatMap(junctionLines),
     "  }",
+    ...channelLines(ast),
     "}",
     "",
     "export {}",
@@ -436,17 +439,84 @@ function toTsType(meta: Record<string, unknown>, prose = false): string {
 
 /** An array column's element, from its Postgres element type, as the engine maps it. */
 function arrayElementType(meta: Record<string, unknown>): string {
-  const declared = objectAt(meta, "annotations", "db")?.["elementType"] ?? meta["elementType"]
-  const element = typeof declared === "string" ? declared.toLowerCase() : ""
+  const element = arrayElementPgType(meta)
+  // The same types the single-value kinds get: `bigint` for BIGINT and a string for NUMERIC, since
+  // neither fits a double. A `number[]` here would document the rounding the client now prevents.
+  const exact = exactArrayKind(element)
+  if (exact === "bigint[]") return "bigint"
+  if (exact === "numeric[]") return "string"
   if (NUMERIC_ELEMENT_TYPES.has(element)) return "number"
   return element === "boolean" || element === "bool" ? "boolean" : "string"
 }
 
+/** An array column's Postgres element type, lower-cased and without any `(precision, scale)`. */
+function arrayElementPgType(meta: Record<string, unknown>): string {
+  const declared = objectAt(meta, "annotations", "db")?.["elementType"] ?? meta["elementType"]
+  return typeof declared === "string" ? declared.toLowerCase().replace(/\s*\(.*\)\s*$/, "").trim() : ""
+}
+
+const EXACT_ARRAY_KIND_BY_ELEMENT: Readonly<Record<string, "bigint[]" | "numeric[]">> = {
+  bigint: "bigint[]",
+  int8: "bigint[]",
+  bigserial: "bigint[]",
+  serial8: "bigint[]",
+  numeric: "numeric[]",
+  decimal: "numeric[]",
+  money: "numeric[]",
+}
+
+/**
+ * The exact kind of an array column's elements, or undefined when a double holds them. The one
+ * place the generated types and the registered field kinds decide it, so they cannot disagree.
+ */
+export function exactArrayKind(element: string): "bigint[]" | "numeric[]" | undefined {
+  return EXACT_ARRAY_KIND_BY_ELEMENT[element]
+}
+
+/** The exact kind of an array field's elements, read from its AST entry. */
+export function exactArrayKindOfField(meta: Record<string, unknown>): "bigint[]" | "numeric[]" | undefined {
+  return meta["kind"] === "array" ? exactArrayKind(arrayElementPgType(meta)) : undefined
+}
+
 const NUMERIC_ELEMENT_TYPES = new Set([
-  "integer", "int4", "int", "smallint", "int2", "bigint", "int8", "float",
-  "double precision", "float8", "real", "float4", "numeric",
+  "integer", "int4", "int", "smallint", "int2", "float",
+  "double precision", "float8", "real", "float4",
 ])
 
 function quoteKey(key: string): string {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? key : JSON.stringify(key)
 }
+
+const CHANNEL_PARAM_TS: Readonly<Record<ChannelParamKind, string>> = {
+  uuid: "string",
+  string: "string",
+  integer: "number",
+}
+
+/**
+ * The `SupatypeChannels` entries, one per declared channel and keyed by its pattern. The client
+ * turns each key into a template literal type (`lot:${string}`), and reads a parameter's type to
+ * tell an Integer (`${number}`) from text. Nothing is emitted when the schema declares no channel,
+ * which leaves the client's channel names plain strings.
+ */
+function channelLines(ast: unknown): string[] {
+  const declared = isJsonObject(ast) && Array.isArray(ast["channels"]) ? ast["channels"] : []
+  const channels = declared.filter(isChannelDeclaration)
+  if (channels.length === 0) return []
+  const entries = channels.map((channel) => {
+    const params = channel.params.map((param) => `${quoteKey(param.name)}: ${CHANNEL_PARAM_TS[param.type]}`)
+    const body = params.length === 0 ? "{}" : `{ ${params.join("; ")} }`
+    return `    ${JSON.stringify(channel.pattern)}: { params: ${body} }`
+  })
+  return ["  interface SupatypeChannels {", ...entries, "  }"]
+}
+
+const isChannelParam: Guard<ChannelParamAst> = isShape({
+  name: isString,
+  type: isOneOf(["uuid", "string", "integer"] as const),
+})
+
+const isChannelDeclaration: Guard<Pick<ExtractedChannelAst, "pattern" | "params">> = isShape({
+  pattern: isString,
+  params: isArrayOf(isChannelParam),
+})

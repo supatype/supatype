@@ -38,10 +38,12 @@ beforeEach(() => {
   vi.spyOn(process, "cwd").mockReturnValue(cwd)
   // Offline: any lookup of `latest` fails the way fetch does without a network.
   vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("fetch failed") }))
+  vi.stubEnv("SUPATYPE_RETRY_DELAY_MS", "1")
 })
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
   vi.restoreAllMocks()
   process.env["HOME"] = saved.HOME
   process.env["USERPROFILE"] = saved.USERPROFILE
@@ -80,7 +82,7 @@ describe("resolveBinary() offline", () => {
 
   it("says what to do when nothing is cached, rather than failing on fetch", async () => {
     await expect(resolveBinary("deno", config())).rejects.toThrow(
-      /Could not look up the latest deno release \(fetch failed\), and no deno binary is cached\. .*overrides\.deno/,
+      /Could not look up the latest deno release \(.*fetch failed.*\), and no deno binary is cached\. .*overrides\.deno/,
     )
   })
 })

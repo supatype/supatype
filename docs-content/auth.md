@@ -63,7 +63,7 @@ Auth calls put the auth server's code in `error.code`, beside `message` and `sta
 
 An anonymous sign-in creates a real user with a user id and a session. Turn it on with `SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED=true`. Because the user has an id, an anonymous user passes `LoggedIn` and can own rows. The token carries `is_anonymous: true`.
 
-`signInAnonymously({ options: { data, captchaToken } })` takes optional metadata and a captcha token, and the user comes back with `isAnonymous: true`.
+`signInAnonymously({ options: { data, captchaToken } })` takes optional metadata and a captcha token, and the user comes back with `isAnonymous: true`. The flag survives a reload: a restored session keeps it, and a session saved without it takes it from the token's `is_anonymous` claim.
 
 ### Keep anonymous users out
 
@@ -273,7 +273,21 @@ email: {
 `console`, the default, logs that a message would have been sent but leaves out the body, so the link is not in the log. To try magic links or password reset, configure a real provider.
 :::
 
-For Resend, set `SUPATYPE_RESEND_API_KEY` and `SUPATYPE_RESEND_FROM` in `.env`. For SES, set `SUPATYPE_SES_FROM`; credentials come from the environment's AWS configuration.
+On a self-hosted stack, for Resend set `email.resend_api_key` and `email.resend_from` in the `email` block above (a value set by hand in `.env` is replaced from `supatype.config.ts`). For SES set `email.ses_from`; credentials come from the environment's AWS configuration.
+
+On Supatype Cloud there is no `.env` and no ambient AWS configuration, so SES takes all of its settings from the `email` block, and a push that leaves one out is refused:
+
+```ts title="supatype.config.ts"
+email: {
+  provider: "ses",
+  ses_from: "no-reply@example.com", // required: the sender address, verified in SES
+  ses_access_key_id: env("SES_ACCESS_KEY_ID"), // required: name an environment variable, never the key itself
+  ses_secret_access_key: env("SES_SECRET_ACCESS_KEY"), // required, the same way
+  ses_region: "eu-west-2", // optional
+},
+```
+
+Without `ses_from` the server cannot send, so mail would be dropped while requests still succeed. That is why Cloud refuses the push and names `email.ses_from`.
 
 <h3 id="email-settings">Email sign-in and confirmation</h3>
 
@@ -289,6 +303,34 @@ auth: {
 - `enableConfirmations`: whether a new sign-up has to click a link in an email before it can sign in. Unset, a self-hosted stack (`supatype self-host compose`) sends the link and local dev, Docker or native, confirms the sign-up at once. `true` or `false` sets it for every stack.
 
 `supatype dev` and `supatype self-host compose` pass both to the auth server on every start, as `SUPATYPE_EXTERNAL_EMAIL_ENABLED` and `SUPATYPE_MAILER_AUTOCONFIRM`. Either variable set in the project's `.env` wins over the config for that stack; the CLI never writes them there. Studio shows each under **Authentication &gt; Configuration**, with the key that sets it.
+
+<h3 id="rate-limits">Rate limits</h3>
+
+`auth.rateLimits` caps how often one client may call the auth server:
+
+```ts title="supatype.config.ts"
+auth: {
+  rateLimits: { verify: 10, otp: 5 },
+},
+```
+
+Each limit except `smsSent` counts requests per client IP address. The address is the one the gateway forwards: Kong writes `X-Real-IP` from the connection and replaces any value the client sent, so a client cannot pick its own. The server believes a forwarded address only on a request that carries the project's forwarding secret, which Kong adds and no client holds. Any other request counts against the address of its connection, whatever `St-Forwarded-For`, `X-Real-IP` or `X-Forwarded-For` it carries, and the IP recorded in audit logs follows the same rule. A client over a limit gets 429 with error code `over_request_rate_limit` until the window lets it in again.
+
+| Key | What it counts, per client | Window | Default |
+| --- | --- | --- | --- |
+| `otp` | Sign-up and sign-in requests: `/signup` (not anonymous), `/otp`, magic links, password recovery, `/resend` and updating the signed-in user. Each of these counts on its own. It counts requests, not emails | 5 minutes | 30 |
+| `verify` | Requests to `/verify`, which checks the code or link from an email or SMS, whether the code is right or not | 5 minutes | 30 |
+| `tokenRefresh` | Requests to `/token`: password sign-in, refreshing a session and the other grants | 5 minutes | 150 |
+| `sso` | Requests that start a SAML sign-in | 5 minutes | 30 |
+| `mfa` | Multi-factor challenges, and verifies, each counted on its own | 1 minute | 15 |
+| `anonymousUsers` | Anonymous sign-ins | 1 hour | 30 |
+| `smsSent` | SMS messages the server sends, across every client together | 1 hour | 30 |
+
+A limit of N lets one client make N requests at once, and then one more each time the window divided by N passes. Every per-client limit works that way, over its own window: a limit of 3 lets one client make 3 requests at once, never more. A limit below 1 still lets one through. How many emails the server sends an hour is a separate limit: `SUPATYPE_RATE_LIMIT_EMAIL_SENT` on self-host, and the platform's on Cloud.
+
+On self-host each key renders as a `SUPATYPE_RATE_LIMIT_*` variable for the server (`mfa` as `SUPATYPE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY`), and a value in `.env` wins. Behind a proxy in front of Kong, Kong sees the proxy's address, so every client would share one count: set `SUPATYPE_RATE_LIMIT_HEADER` in `.env` to a header that proxy writes from the connection, and only if nothing else can reach Kong.
+
+The forwarding secret is `SUPATYPE_FORWARDING_SECRET` in `.env`. `supatype init` generates it, and a project that predates it gets one on its next `dev` or `self-host` command. It is given to the server (as `SUPATYPE_SECURITY_FORWARDING_SECRET`), to Kong and to the functions worker, and to nothing else: the worker removes it from the environment before it loads your functions, so function code cannot read it. When a function calls the project's own address, the worker passes on the end user's address with it, so a function that signs a user in is counted against that user and not against the worker. Under Docker the worker reaches Kong on a second port, 8100, that is never published to the host: Kong leaves the two headers alone there, where it removes them on the public port, and adds no secret of its own, so code that reaches 8100 without the secret is still counted against its own connection. Keep it out of version control like the other secrets in `.env`, and never log it. A server with no secret set believes forwarded addresses from any sender, as before, and says so once when it starts.
 
 ### Environment variables
 

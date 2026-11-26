@@ -1,0 +1,21 @@
+{
+  "name": "@supatype/example-m2m",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Many-to-many links written through the junction table over the REST API",
+  "scripts": {
+    "dev": "supatype dev",
+    "push": "supatype push --yes",
+    "keys": "supatype keys --write",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@supatype/cli": "workspace:*",
+    "@supatype/client": "workspace:*",
+    "@supatype/types": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5"
+  }
+}

@@ -75,6 +75,7 @@ describe("supatype-server's outer environment on the native path", () => {
       SUPATYPE_ADMIN_CONFIG_PATH: "/p/.supatype/admin-config.json",
       SUPATYPE_POSTGREST_URL: "http://127.0.0.1:3001",
       SUPATYPE_DB_PUBLIC_URL: "postgres://postgres@127.0.0.1:5433/acme?sslmode=disable",
+      SUPATYPE_FUNCTIONS_LOG_TO_STDOUT: "true",
     })
   })
 
@@ -185,7 +186,35 @@ describe("the keyspace login native dev hands the server", () => {
     })
   })
 
-  it("is left to .env for a Valkey SUPATYPE_VALKEY_ADDR names, which may have its own password", () => {
-    expect(nativeKeyspaceServerEnv({ sidecar: { addr: "10.0.0.5:6379", containerName: null, started: false }, login: null })).toEqual({})
+  // Owner, 2026-11-15: a Valkey SUPATYPE_VALKEY_ADDR names is the developer's own, so it gets the
+  // password SUPATYPE_VALKEY_PASSWORD gives it, not the keyspace's. init writes a keyspace password
+  // into every .env, and handing it on made a Valkey with no password refuse the server (WRONGPASS).
+  it("is SUPATYPE_VALKEY_PASSWORD for a Valkey SUPATYPE_VALKEY_ADDR names, blank when unset", () => {
+    const named = { sidecar: { addr: "10.0.0.5:6379", containerName: null, started: false }, login: null }
+    expect(nativeKeyspaceServerEnv(named, { SUPATYPE_KEYSPACE_PASSWORD: "the keyspace's" })).toEqual({
+      SUPATYPE_KEYSPACE_PASSWORD: "",
+      SUPATYPE_KEYSPACE_PASSWORD_FILE: "",
+    })
+    expect(nativeKeyspaceServerEnv(named, { SUPATYPE_VALKEY_PASSWORD: "mine", SUPATYPE_VALKEY_USERNAME: "me" })).toEqual({
+      SUPATYPE_KEYSPACE_USERNAME: "me",
+      SUPATYPE_KEYSPACE_PASSWORD: "mine",
+      SUPATYPE_KEYSPACE_PASSWORD_FILE: "",
+    })
+  })
+
+  // Y19 (2026-11-23 run): a Valkey started with `requirepass` has one user, `default`. The server
+  // logs in as `supatype` when it is given a password and no user, so the named Valkey answered
+  // WRONGPASS and the cache bypassed.
+  it("logs in to a named Valkey as its default user when only a password is given", () => {
+    const named = { sidecar: { addr: "127.0.0.1:6380", containerName: null, started: false }, login: null }
+    expect(nativeKeyspaceServerEnv(named, { SUPATYPE_VALKEY_PASSWORD: "mine" })).toEqual({
+      SUPATYPE_KEYSPACE_USERNAME: "default",
+      SUPATYPE_KEYSPACE_PASSWORD: "mine",
+      SUPATYPE_KEYSPACE_PASSWORD_FILE: "",
+    })
+  })
+
+  it("asks nothing of .env when there is no Valkey at all", () => {
+    expect(nativeKeyspaceServerEnv({ sidecar: { addr: "", containerName: null, started: false }, login: null }, { SUPATYPE_VALKEY_PASSWORD: "mine" })).toEqual({})
   })
 })

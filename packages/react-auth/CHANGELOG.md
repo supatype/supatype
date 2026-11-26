@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.1 (2026-11-09)
 
 ### Features
 
@@ -21,3 +21,5 @@
 * **forms:** the error a form shows for a client with no API address or anon key is the
   `MissingClientValuesError` itself, a `SupatypeError` like every other request's error now is,
   rather than a plain `{ message }`.
+
+

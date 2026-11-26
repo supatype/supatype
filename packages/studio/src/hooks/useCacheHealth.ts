@@ -15,6 +15,8 @@ import {
   type Guard,
 } from "../lib/json.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
+import { proxyFailure } from "../lib/role-refusal.js"
+import { useRoleRefusalText } from "../components/RoleGate.js"
 import {
   hitRateOver,
   type KeyspaceStats,
@@ -93,7 +95,7 @@ const isRowCacheStatus: Guard<RowCacheStatus> = isShape({
 })
 
 /** One statistics endpoint's body, or null when this server has none to give. */
-async function readStats<T>(client: SupatypeClient, path: string, guard: Guard<T>): Promise<T | null> {
+async function readStats<T>(client: SupatypeClient, path: string, guard: Guard<T>, refused: string): Promise<T | null> {
   const r = await fetch(`${client.url}/admin/v1/${path}`, {
     headers: studioAuthHeaders(client),
     credentials: "include",
@@ -101,7 +103,7 @@ async function readStats<T>(client: SupatypeClient, path: string, guard: Guard<T
   // 404: a server without these routes. 503: a deployment with no database behind them.
   // Both mean "no numbers", which the panels render as a state of their own.
   if (r.status === 404 || r.status === 503) return null
-  if (!r.ok) throw new Error(`${path}: ${r.status}`)
+  if (!r.ok) throw await proxyFailure(r, refused)
   return readJson(r, guard)
 }
 
@@ -119,6 +121,7 @@ async function readStats<T>(client: SupatypeClient, path: string, guard: Guard<T
  */
 export function useCacheHealth(enabled = true): CacheHealth {
   const client = useStudioClient()
+  const refused = useRoleRefusalText()
   const [keyspace, setKeyspace] = useState<KeyspaceStats | null>(null)
   const [rowCache, setRowCache] = useState<RowCacheStatus | null>(null)
   const [recent, setRecent] = useState<WindowedRate>({ pct: null, hits: 0, misses: 0, windowMs: 0 })
@@ -142,8 +145,8 @@ export function useCacheHealth(enabled = true): CacheHealth {
     const live = (): boolean => mine === epoch.current
     try {
       const [ks, rc] = await Promise.all([
-        readStats(client, "cache/keyspace", isKeyspaceStats),
-        readStats(client, "cache/rowcache", isRowCacheStatus),
+        readStats(client, "cache/keyspace", isKeyspaceStats, refused),
+        readStats(client, "cache/rowcache", isRowCacheStatus, refused),
       ])
       if (!live()) return
       const at = Date.now()
@@ -163,7 +166,7 @@ export function useCacheHealth(enabled = true): CacheHealth {
     } finally {
       if (live()) setLoading(false)
     }
-  }, [client])
+  }, [client, refused])
 
   useEffect(() => {
     if (!enabled) return

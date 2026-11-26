@@ -87,16 +87,26 @@ function writeKeys(cwd: string, opts: KeysOptions, expYears: number): void {
   const written = writeKeysToEnv(cwd, keys, replace, { env, secret: resolved.write })
   if (resolved.warning !== undefined) warn(resolved.warning)
   if (resolved.note !== undefined) plain(`\n${resolved.note}`)
-  plain(`\nKeys valid for ${expYears} years, written to ${written.path ?? ".env"}:\n`)
-  // The names come back from the writer rather than being restated here, which is the whole
-  // point of there being one list.
-  for (const key of written.written) plain(`  ${key}`)
+  for (const line of keysWriteReport(expYears, written)) plain(line)
+}
+
+/**
+ * What `supatype keys` says after writing `.env`, a line each. The names come back from the writer
+ * rather than being restated here, which is the whole point of there being one list. With every key
+ * already holding a value nothing was written, and it says that rather than head an empty list.
+ */
+export function keysWriteReport(expYears: number, written: WriteKeysResult): string[] {
+  const path = written.path ?? ".env"
+  const lines =
+    written.written.length > 0
+      ? [`\nKeys valid for ${expYears} years, written to ${path}:\n`, ...written.written.map((key) => `  ${key}`)]
+      : [`\nNo keys were written to ${path}.`]
   if (written.kept.length > 0) {
-    plain(`\nLeft alone, because they already hold a value:\n`)
-    for (const key of written.kept) plain(`  ${key}`)
-    plain("\nRe-run with --force to replace them.")
+    lines.push(`\nLeft alone, because they already hold a value:\n`, ...written.kept.map((key) => `  ${key}`))
+    lines.push("\nRe-run with --force to replace them.")
   }
-  plain("\nDo not commit .env to source control.")
+  lines.push("\nDo not commit .env to source control.")
+  return lines
 }
 
 /**

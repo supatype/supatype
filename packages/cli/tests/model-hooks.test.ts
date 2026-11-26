@@ -520,7 +520,7 @@ describe("a models array with something malformed in it", () => {
     ])
     expect(manifestHooks(malformed)["posts"]?.["beforeChange"]?.function).toBe("moderate-post")
     expect(declaredValidators(malformed)).toEqual([
-      { model: "Post", field: "title", function: "check-title" },
+      { model: "Post", field: "title", function: "check-title", table: "posts" },
     ])
     expect(manifestValidators(malformed)["posts"]?.["title"]?.function).toBe("check-title")
   })

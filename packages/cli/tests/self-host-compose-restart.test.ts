@@ -17,6 +17,8 @@ vi.mock("../src/compose-services.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/compose-services.js")>()),
   takenComposePorts: async () => [],
 }))
+vi.mock("../src/compose-render-mode.js", async (importOriginal) =>
+  (await import("./support/no-running-stack.js")).withNoRunningStack(await importOriginal<typeof import("../src/compose-render-mode.js")>()))
 vi.mock("../src/config.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/config.js")>()
   return { ...actual, loadConfig: () => projectConfig }
@@ -67,6 +69,10 @@ import { registerSelfHost } from "../src/commands/self-host.js"
 import { devSessionLockFor, writeDevSessionLock } from "../src/dev-session-lock.js"
 import { selfHostComposePaths } from "../src/self-host-compose.js"
 import { exitThrows } from "./support/process-exit.js"
+
+// A running stack: restarting one that has no containers is refused (stack-running.ts), and this
+// file is about what restart runs once it goes ahead.
+vi.mock("../src/stack-running.js", () => ({ restartRefusal: () => null, functionsNetworkNote: () => null, dbContainerNetworks: () => null }))
 
 /**
  * SA3: the way to pick up a changed `.env` for one service was to type a compose command by hand,

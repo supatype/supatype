@@ -56,7 +56,7 @@ describe("declaring a field validator", () => {
   it("extracts the field and its function", () => {
     const ast = extract('  validate: { setupItems: "check-items" }')
     expect(declaredValidators(ast)).toEqual([
-      { model: "Product", field: "setupItems", function: "check-items" },
+      { model: "Product", field: "setupItems", function: "check-items", table: "product" },
     ])
   })
 

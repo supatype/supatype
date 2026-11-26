@@ -56,6 +56,23 @@ export function ensureControlPlaneSecret(cwd: string): void {
   upsertEnvFile(cwd, { [CONTROL_PLANE_SECRET_ENV]: generateControlPlaneSecret() })
 }
 
+/**
+ * The secret that lets the auth server believe the end-user address a request passes on
+ * (`St-Forwarded-For`): held by the server, the gateway and the functions worker, and by nothing
+ * a project's own code can read. The worker withholds it from user code.
+ */
+export const FORWARDING_SECRET_ENV = "SUPATYPE_FORWARDING_SECRET"
+
+/**
+ * Generate the forwarding secret into `.env` when the project has none, once: `.env` is compose's
+ * input, so a value that changed on every run would recreate the server, Kong and the worker each
+ * time. A project that predates it gets one on its next `dev` or `self-host` command.
+ */
+export function ensureForwardingSecret(cwd: string): void {
+  if (hasEnvValue(cwd, FORWARDING_SECRET_ENV)) return
+  upsertEnvFile(cwd, { [FORWARDING_SECRET_ENV]: generateControlPlaneSecret() })
+}
+
 /** The `.env` keys holding the login the stack's object store accepts, and the storage service uses. */
 export const OBJECT_STORE_ACCESS_KEY_ENV = "SUPATYPE_OBJECT_STORE_ACCESS_KEY"
 export const OBJECT_STORE_SECRET_KEY_ENV = "SUPATYPE_OBJECT_STORE_SECRET_KEY"

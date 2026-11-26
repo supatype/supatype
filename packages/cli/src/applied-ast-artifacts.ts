@@ -8,6 +8,7 @@
  */
 import { refreshFunctionsContext } from "./functions-context-refresh.js"
 import { syncRowCacheEnv } from "./model-cache.js"
+import { PUBLIC_ENV_WRITTEN, syncManifestPublicEnv } from "./build-public-env.js"
 import { HOOK_MAPS_WRITTEN, syncManifestHooks, writeHooksModule } from "./model-hooks.js"
 import { hooksPathFromProject, type SupatypeProjectConfig } from "./project-config.js"
 
@@ -16,18 +17,22 @@ export interface AppliedAstArtifacts {
   lines: string[]
   /** The row cache `.env` now asks for, when that changed; the caller says what it takes. */
   rowCache: "on" | "off" | null
+  /** Whether the hook handler types file was created or changed, which a running worker has not loaded. */
+  hooksModuleWritten: boolean
 }
 
 /**
  * Writes what describes the applied `ast`. `rowCacheEnv`: whether `.env`'s row-cache setting is
  * this project's to write, which it is for the project's own database container and not for
- * native Postgres or a database elsewhere.
+ * native Postgres or a database elsewhere. `syncPublicEnv` is false for a push to a linked project:
+ * the manifest in this folder is the one a self-host stack here serves, and the values that push
+ * sent were the target's own, not the `local` ones this would write over them.
  */
 export function writeAppliedAstArtifacts(
   cwd: string,
   config: SupatypeProjectConfig,
   ast: unknown,
-  { rowCacheEnv }: { rowCacheEnv: boolean },
+  { rowCacheEnv, syncPublicEnv = true }: { rowCacheEnv: boolean; syncPublicEnv?: boolean },
 ): AppliedAstArtifacts {
   const lines: string[] = []
   // Independent of `output`: a project with hooks needs its handler types whether or not it asked
@@ -42,5 +47,6 @@ export function writeAppliedAstArtifacts(
   // The server watches the manifest, so a hook or validator added to the schema takes effect
   // without a restart.
   if (syncManifestHooks(cwd, ast)) lines.push(HOOK_MAPS_WRITTEN)
-  return { lines, rowCache: rowCacheEnv ? syncRowCacheEnv(cwd, ast) : null }
+  if (syncPublicEnv && syncManifestPublicEnv(cwd, config)) lines.push(PUBLIC_ENV_WRITTEN)
+  return { lines, rowCache: rowCacheEnv ? syncRowCacheEnv(cwd, ast) : null, hooksModuleWritten: hooksModule !== null }
 }

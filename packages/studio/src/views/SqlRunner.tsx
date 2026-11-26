@@ -10,6 +10,7 @@ import { cn } from "../lib/utils.js"
 import { isJsonObject, isNumber, isShape, isString, optional, safeParseJson } from "../lib/json.js"
 import { Badge, Button, Card, CodeBlock, DestructiveAnswers, Dialog, DisclosureButton, Input, Select, Table, Tabs, Th, Td, type TabItem } from "../components/ui.js"
 import { destructiveStatements } from "../lib/sql-destructive.js"
+import { sqlErrorHint } from "../lib/sql-error-hint.js"
 import { usePlatform } from "../hooks/usePlatform.js"
 import { ElevatedNotice } from "../components/ElevatedModeBanner.js"
 import { RoleDenied } from "../components/RoleGate.js"
@@ -299,6 +300,12 @@ function SqlEditor({ doc, schema, control }: { doc: SqlEditorDoc; schema: Record
   return <div ref={containerRef} className="rounded-md border border-border bg-background overflow-hidden" />
 }
 
+/** A line under an error that only looks like Studio's fault ({@link sqlErrorHint}), or nothing. */
+function ErrorHint({ error }: { error: string }): React.ReactElement | null {
+  const hint = sqlErrorHint(error)
+  return hint === null ? null : <p className="mt-2 text-xs text-muted-foreground">{hint}</p>
+}
+
 // ─── Export Utilities ─────────────────────────────────────────────────────────
 
 function exportCsv(columns: string[], rows: Record<string, unknown>[]): void {
@@ -578,6 +585,7 @@ function SqlEditorView(): React.ReactElement {
                     <div className="text-red-400 font-mono text-[0.8rem] whitespace-pre-wrap">
                       {activeTab.error}
                     </div>
+                    <ErrorHint error={activeTab.error} />
                   </div>
                 ) : null}
 

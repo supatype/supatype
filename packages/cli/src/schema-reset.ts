@@ -118,6 +118,8 @@ export async function reseed(target: ResetTarget): Promise<number> {
     force: false,
     atomic: false,
     status: false,
+    // A reset empties the database it is given: the one this machine reaches, never a linked project's.
+    local: true,
     ...(target.connection !== undefined && { connection: target.connection }),
   })
 }

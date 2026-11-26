@@ -58,6 +58,9 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
   // Bumped on every successful save, so the publish bar re-reads the history it summarises. A
   // saved draft changes what that bar should say, and nothing else tells it.
   const [savedAt, setSavedAt] = useState(0)
+  // When a save from this form last landed. Apart from savedAt, which every act on the record bumps,
+  // so publishing does not say Saved.
+  const [savedNoticeAt, setSavedNoticeAt] = useState<number | null>(null)
   // The form holds edits nobody has saved. State rather than a ref: the publish panel says
   // "Changed" and offers to publish them.
   const [dirty, setDirty] = useState(false)
@@ -172,10 +175,12 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
   }
 
   const saveNow = async () => {
+    setSavedNoticeAt(null)
     const id = await persistAndMark()
     if (id === null) return
     onChanged(id, false)
     setDraftSaved(true)
+    setSavedNoticeAt(Date.now())
   }
 
   // A draft may leave a required field empty, but it cannot be published until it is filled, so
@@ -263,7 +268,7 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
           title,
           ...(previewUrl !== "" && { previewUrl }),
         }}
-        editor={{ dirty, saving, savedAt, draftSaved, onSave: () => { void handleSave() }, persist: persistAndMark, onChanged }}
+        editor={{ dirty, saving, savedAt, savedNoticeAt, draftSaved, onSave: () => { void handleSave() }, persist: persistAndMark, onChanged }}
         seesDrafts={capability.seesDrafts}
         onNavigate={onNavigate}
       />
@@ -300,6 +305,7 @@ export function EditView({ model, recordId, draft, onNavigate }: EditViewProps):
         recordSyncKey={recordId ?? "__create__"}
         slugFollowSource={recordId === undefined}
         saving={saving}
+        savedAt={savedNoticeAt}
         {...(canWrite && { onSave: () => { void handleSave() } })}
         isCreate={isCreate}
         {...(Object.keys(fieldErrors).length > 0 && { fieldErrors })}

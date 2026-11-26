@@ -145,6 +145,20 @@ export function withPublishing(
   ast: ExtractedSchemaAstV2,
   config: SupatypeProjectConfig,
 ): ExtractedSchemaAstV2 {
+  return withRealtime(withDraftSettings(ast, config), config)
+}
+
+/**
+ * The AST with `realtime.channels` from the config, when the config states it. Left off otherwise:
+ * the engine reads a missing mode as `open`, which is also what a project that never set it had.
+ * Rides on every path that sends a schema because `withPublishing` calls it.
+ */
+export function withRealtime(ast: ExtractedSchemaAstV2, config: SupatypeProjectConfig): ExtractedSchemaAstV2 {
+  const channels = config.realtime?.channels
+  return channels === undefined ? ast : { ...ast, realtime: { channels } }
+}
+
+function withDraftSettings(ast: ExtractedSchemaAstV2, config: SupatypeProjectConfig): ExtractedSchemaAstV2 {
   if (!schemaHasVersionedModels(ast)) return ast
 
   const limits = previewLimits(config)

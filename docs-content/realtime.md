@@ -11,7 +11,7 @@ head:
       content: "https://www.supatype.com/og/realtime.png"
 ---
 
-Subscribe to inserts, updates and deletes on your tables over a WebSocket. Each change is checked against the subscriber's read access before it is sent.
+Subscribe to inserts, updates and deletes on your tables over a WebSocket. Each change is checked against the subscriber's read access before it is sent. Broadcast and presence channels can be made private, with rules in your schema.
 
 Pre-1.0: APIs and config may change between releases.
 
@@ -27,7 +27,7 @@ The realtime service reads changes from Postgres logical replication, so every c
 
 Every table Supatype manages has `REPLICA IDENTITY FULL`, so the write-ahead log carries the whole previous row. A table set up outside Supatype keeps Postgres's default identity, and its `old` can hold only the key.
 
-Values arrive with the same types as a REST read. A `BigInt` column becomes a native `bigint`, and `Decimal` and `Money` stay exact strings.
+Values arrive with the same types and formats as a REST read. A `BigInt` column becomes a native `bigint`, and `Decimal` and `Money` stay exact strings. `Json` columns arrive as the parsed value, not as JSON text. `timestamptz` arrives as ISO 8601 with a `T` and a full offset, such as `2024-01-01T12:00:00+00:00`, which every browser parses; `timestamp` is `2024-01-01T12:00:00` and `timetz` has its full offset. Fractional seconds keep their microseconds. Arrays of any type arrive as arrays, as REST sends them: `integer[]` and `double precision[]` hold numbers, `boolean[]` holds booleans, `bigint[]` and `numeric[]` hold exact strings, and `text[]`, `uuid[]` and `date[]` hold strings. Before 0.9.3 every array arrived as Postgres's text form, such as `"{1,2}"`. Before 0.9.3 `Json` was a string and `timestamptz` was `2024-01-01 12:00:00+00`, which Safari and Firefox read as `Invalid Date`; code that called `JSON.parse` on a `Json` column now gets the value itself.
 
 <h2 id="access">Read access</h2>
 
@@ -111,15 +111,15 @@ const room = supatype.realtime
 room.broadcast("move", { x: 120, y: 48 })
 ```
 
-- Only clients that have subscribed to the channel receive its messages. The sender does not get its own broadcast back.
-- A presence entry is the payload you pass to `track`, plus `user_id` from the token. The server writes `user_id` last, so a payload cannot claim to be someone else. Every client without a signed-in user shares the `user_id` `anonymous`.
+- Only clients that have subscribed to the channel receive its messages. The two differ on the sender: a broadcast is not sent back to the client that sent it, but presence is. Your own `track` arrives in your `onPresence` as a join, and your own leave as a leave, so skip your own entry if you only want the others.
+- A presence entry is the payload you pass to `track`, plus `user_id` from the token. The server writes `user_id` last, so a payload cannot claim to be someone else. Every client without a signed-in user shares the `user_id` `anonymous`, so `user_id` cannot tell two anonymous clients apart, or tell you which entry is your own. Put a value you generate yourself in the `track` payload, such as `track({ clientId: crypto.randomUUID(), name })`, and key your member map on that.
 - Calling `track` again announces the new payload as a fresh join, so keep your own map of members keyed by `user_id`.
-- A client that joins late hears about joins and leaves from then on. It is not sent the list of who is already there.
+- A client that joins late is sent the members already tracked on the channel as joins, then hears about joins and leaves from then on.
 - A client leaves on `untrack()`, on unsubscribe and when its socket closes.
 - Messages sent while the socket is not open are dropped, so send after `SUBSCRIBED`.
 
 :::caution
-Broadcast and presence have no access rules. Anyone with your anon key who knows a channel's name can join it, read its messages and send to it. Do not put private data in a broadcast, and use a hard-to-guess channel name for anything you would not show the public.
+A channel your schema does not declare has no access rules. Anyone with your anon key who knows its name can join it, read its messages and send to it. Do not put private data in it. Declare the channel to guard it: see [private channels](#private).
 :::
 
 <h2 id="hooks">Framework hooks</h2>
@@ -145,7 +145,283 @@ function Comments({ postId }: { postId: string }) {
 
 It needs `SupatypeProvider` above it, which takes your client as `client`. Give each use its own channel name: two hooks with the same name share a channel.
 
-`@supatype/vue` has `useSubscription(table, { event, filter })`, and `@supatype/svelte` and `@supatype/solid` have `createSubscription(table, { event, filter })`. These watch the `public` schema and return `data`, `error` and `status`, which is `"connecting"`, `"connected"`, `"disconnected"` or `"error"`. `data` starts empty and collects rows from the changes that arrive: inserts are added, updates replace the row with the same `id`, deletes remove it. They do not load the rows that already exist, so pair them with a query.
+`useChannel(name, setup, deps)` is for a channel that needs more than one listener, such as rows, presence and a broadcast together. `setup` receives the channel and adds its listeners; the hook subscribes, unsubscribes when the component unmounts or `name` or `deps` change, and runs `setup` again only when `deps` change, as `useEffect` does. It returns `status` and `error` as `useSubscription` does, and `isConnected` and `connectionState` for the socket itself.
+
+```tsx
+import { useChannel } from "@supatype/react"
+import { addBid, notify } from "./app"
+
+function Auction({ id }: { id: string }) {
+  const { status, isConnected } = useChannel(`auction:${id}`, (channel) => {
+    channel.on("postgres_changes", { event: "INSERT", table: "bid", filter: `auction_id=eq.${id}` }, ({ new: bid }) => addBid(bid))
+    channel.onBroadcast("outbid", (payload) => notify(payload))
+  }, [id])
+  return <p>{isConnected ? status : "reconnecting"}</p>
+}
+```
+
+`useRealtimeConnection()` returns only `isConnected` and `connectionState`. `@supatype/vue` has `useChannel(name, setup)` and `useRealtimeConnection()`, and `@supatype/svelte` and `@supatype/solid` have `createChannel(name, setup)` and `createRealtimeConnection()`. They return `status` and `error` as that binding's `createSubscription` does (`"connecting"`, `"connected"`, `"disconnected"` or `"error"`), plus `isConnected` and `connectionState`, each as a ref, signal accessor or store to match the binding. `name` can be a string, or one that changes: a ref or getter in Vue, an accessor in Solid, a store in Svelte (with runes, `toStore(() => name)` from `svelte/store` makes one). When it changes the old channel is left, its listeners go with it, and `setup` runs on the new channel, so `status` reads `"connecting"` until it joins. Otherwise `setup` runs once, when the component mounts (straight away in Svelte), and the channel is left when it unmounts. There is no `deps` argument.
+
+`@supatype/vue` has `useSubscription(table, { event, filter })`, and `@supatype/svelte` and `@supatype/solid` have `createSubscription(table, { event, filter })`. These watch the `public` schema and return `data`, `error` and `status`, which is `"connecting"`, `"connected"`, `"disconnected"` or `"error"`. `data` is the table's rows. It is read once the subscription has joined, and read again after each re-join (a dropped socket that came back, or a sign-in), so changes made while the socket was down are not lost. From then on each change is an upsert by key: an insert or update replaces the row with the same key or adds it, and a delete removes it, with no effect for a key that is not held. The key is `id`; pass `key: "slug"`, or an array for a composite key, when the primary key is another column. A `filter` narrows the read as well as the changes. If the read fails, `error` holds the reason until a later read succeeds, and `status` is unchanged. Before 0.9.3 `data` started empty and an update or delete of a row that existed before subscribing did nothing.
+
+<h2 id="private">Private channels</h2>
+
+A private channel is a broadcast and presence channel with access rules, written in your schema. You declare it with a `Channel` type, push, and the realtime service checks every join, broadcast and presence update against that rule, as the user who made it. Nobody can read or fake traffic on it just by knowing its name.
+
+This is the same idea as Supabase Realtime Authorization. The difference is who decides. In Supabase the client flags a channel private and policies on `realtime.messages` do the rest. Here the schema declaration decides, whether or not the client says `private`, so a client cannot skip the rules by leaving a flag out.
+
+### How it works
+
+- A channel has three operations. `join` covers subscribing, receiving broadcasts and receiving presence. `send` covers broadcasting. `track` covers appearing in presence.
+- An operation you leave out is denied to everyone except the service role. A declaration with no rules at all is refused when the schema is read.
+- Each rule is written in the same [access rule language](/docs/schema.html#access) as a model, and runs inside Postgres as the caller. A `Rows` rule sees only the rows that caller may read.
+- Each operation is judged on its own. A rule that reads a table the caller has no privilege on denies that operation and no other, so a channel with `join: Public` and a `track` rule over a private table still admits anon to join, and refuses it presence.
+- The server asks once at join, keeps the answer, and then judges each broadcast and presence update from that answer with no database call.
+- The service role may do anything on any channel.
+
+### Example: an auction lot
+
+Each lot has a channel. Only a signed-in user who is watching the lot may join it and appear in its presence. Any signed-in user who has joined may send a `bid` event, and only with an amount between 1 and 1,000,000. Only the seller, or an auctioneer, may announce that the reserve is met, which is a second channel on the same lot.
+
+```ts title="schema/index.ts"
+import type {
+  Model, Channel, UUID, Int, LoggedIn, Role, In, Exists, Rows,
+  Eq, All, Any, AuthUid, Param, Event, Payload,
+} from "@supatype/types"
+
+export type Lot = Model<
+  { id: UUID; seller_id: UUID; title: string },
+  { access: { read: LoggedIn } }
+>
+
+export type LotWatcher = Model<
+  { id: UUID; lot_id: UUID; user_id: UUID },
+  { access: { read: LoggedIn } }
+>
+
+export type Bid = Model<
+  { id: UUID; lot_id: UUID; bidder_id: UUID; amount: Int },
+  { access: { read: LoggedIn; create: LoggedIn } }
+>
+
+// Lots the signed-in user is watching.
+type MyLots = Rows<"lot_watcher", "lot_id", Eq<"user_id", AuthUid>>
+
+// True when the signed-in user is the seller of the lot named in the topic.
+type SellerOfThisLot = Exists<
+  Rows<"lot", "id", All<[Eq<"id", Param<"id">>, Eq<"seller_id", AuthUid>]>>
+>
+
+// Bids and watchers. A signed-in watcher may send a "bid" event with a sensible amount.
+export type LotChannel = Channel<"lot:{id}", {
+  params: { id: UUID }
+  access: {
+    join: Any<[In<"id", MyLots>, Role<"auctioneer">]>
+    send: All<[
+      LoggedIn,
+      Event<"bid">,
+      Payload<"amount", { kind: "number"; min: 1; max: 1000000 }>,
+    ]>
+    track: All<[LoggedIn, In<"id", MyLots>]>
+  }
+}>
+
+// Announcements only the seller (or an auctioneer) may make about the same lot.
+export type LotStatusChannel = Channel<"lot:{id}:status", {
+  params: { id: UUID }
+  access: {
+    join: Any<[In<"id", MyLots>, Role<"auctioneer">]>
+    send: All<[Any<[SellerOfThisLot, Role<"auctioneer">]>, Event<"reserve_met">]>
+  }
+}>
+```
+
+Things to notice:
+
+- `In<"id", MyLots>` at the top of a rule: a bare string names a channel parameter, here the `{id}` in the pattern. Inside `Rows` a bare string is a column of that table, so a parameter there is written `Param<"id">`.
+- `Event` and `Payload` are checked by the realtime server on every broadcast, with no database call. They are valid only in `send` and only directly inside `All<[...]>`. One `All` names one event, which is why the seller's event has its own channel.
+- `Payload` checks the shape of a field: `string` (with `maxLength`), `number` (with `min` and `max`), `boolean` or `required`. A missing field fails its check. It cannot say whether a bid is a good one. Put that in a database function (see [sending from the database](#send-from-db)).
+- The channel types need no `export`, but exporting them does no harm.
+
+### Declaring a channel
+
+- A pattern is segments separated by `:`. A segment is a literal, a `{name}` that matches exactly one segment, or a final `*` that matches one or more remaining segments.
+- A literal may hold only letters, digits, `_`, `.` and `-`. A pattern may not be a bare `*`, and may not start with `realtime:` or `_supatype`.
+- Every `{name}` needs an entry in `params`, and every `params` key must be in the pattern. A parameter is a `UUID`, a `string` or an `Int`. A topic whose parameter has the wrong shape, such as `lot:abc` for `{id: UUID}`, is refused as not fitting. It never reaches Postgres as a bad cast.
+- Two declarations that could match the same topic are refused, and both are named. `lot:{id}` and `lot:featured` cannot both exist.
+- `Owner` is refused on a channel, because a channel has no row to own.
+- A `send` rule made only of `Event` and `Payload` checks who is sending nothing, so anon may send. `supatype diff` and `supatype push` warn about it every time, as long as the rule stands. Add a caller test such as `LoggedIn`. Writing `Public` in the rule says anyone may send, and silences the warning.
+- `supatype diff` and `supatype push` list channels added, removed and changed, and which operation's rule changed.
+- The engine must be new enough to emit the access functions. The CLI refuses a push that declares a channel, or sets `realtime.channels`, to an engine that does not list `private_channels` in its capabilities. See [moving from 0.9.2](#upgrading).
+- After `supatype generate`, the declared patterns type the channel names in the client, so editors suggest `lot:${string}`. Any other string is still accepted.
+
+A declaration is enforced as soon as it is pushed, for every client, including ones built before channels existed.
+
+### The realtime.channels switch
+
+The switch decides what happens to a topic that no declaration matches. It lives in `supatype.config.ts` and push carries it into the database, so self-host and Cloud need nothing else.
+
+```ts title="supatype.config.ts"
+import { defineConfig } from "@supatype/cli"
+export default defineConfig({
+  project: { name: "gavel" },
+  database: { provider: "docker" },
+  server: { mode: "dev" },
+  app: { mode: "none" },
+  realtime: { channels: "declared" },
+})
+```
+
+| Value | An undeclared topic |
+| --- | --- |
+| `"open"` | Broadcast and presence work as they always did. This is the default when the key is absent. |
+| `"declared"` | The join is allowed, so `from(table).subscribe()` still works, but broadcast and presence on it are refused. A broadcast from the database to it is dropped. `supatype init` writes this for new projects. |
+
+The `REALTIME_CHANNELS` environment variable on the realtime service can only tighten this. Set to `declared`, it makes the service behave as declared even when the database says `open`. It can never loosen a database that says `declared`. Any other value stops the service from starting.
+
+### Using a private channel from the client
+
+Pass `private: true` when you open the channel. The server enforces declarations without it. What the flag adds is an assertion: a name that no declaration matches is refused at once, so a typo fails loudly, and a server too old to enforce channels is never asked.
+
+```ts
+import { isRealtimeChannelError } from "@supatype/client"
+import { supatype } from "./supatype"
+import { displayName, lotId, retryLater, showBid, showRefusal, tellUser, updateWatchers } from "./app"
+
+const lot = supatype.realtime
+  .channel(`lot:${lotId}`, { private: true })
+  .onBroadcast("bid", (bid) => showBid(bid))
+  .onPresence(({ joins, leaves }) => updateWatchers(joins, leaves))
+  .onRefused((refusal) => {
+    // The channel is still joined. This one send went nowhere.
+    if (refusal.code === "payload_refused") tellUser("That bid was not accepted.")
+  })
+  .subscribe((status, err) => {
+    if (status === "SUBSCRIBED") lot.track({ name: displayName })
+    if (status === "CHANNEL_ERROR" && isRealtimeChannelError(err)) {
+      if (err.retryable) retryLater()
+      else showRefusal(err.reason)
+    }
+  })
+
+lot.broadcast("bid", { amount: 120 })
+```
+
+In React, `useChannel` takes the options as its fourth argument, and returns `error` for a refused or withdrawn join and `refusal` for a refused send. The Vue, Solid and Svelte channel bindings take the same options and return `refusal` too.
+
+```tsx
+import { useChannel } from "@supatype/react"
+import { isRealtimeChannelError } from "@supatype/client"
+import { showBid } from "./app"
+
+function Lot({ id }: { id: string }) {
+  const { status, error, refusal } = useChannel(
+    `lot:${id}`,
+    (channel) => {
+      channel.onBroadcast("bid", (bid) => showBid(bid))
+    },
+    [id],
+    { private: true },
+  )
+
+  if (status === "CHANNEL_ERROR") {
+    return <p>{isRealtimeChannelError(error) ? error.reason : "error"}: {error?.message}</p>
+  }
+  return <p>{status}{refusal ? ` (${refusal.code})` : ""}</p>
+}
+```
+
+### Refusals and withdrawal
+
+Every refusal carries a fixed code. Your app acts on the code, and may show the message. Codes are listed in [refusal codes](#refusal-codes).
+
+- A refused join arrives as `CHANNEL_ERROR`, with a `RealtimeChannelError` as the second argument. Its `reason` is the code, `channel` names the topic, and `retryable` is true only when the server could not reach the database. `isRealtimeChannelError(value)` tells one from any other error.
+- A refused broadcast, presence track or payload does not change the channel's status. The channel is still joined. It goes to `onRefused` as `{ channel, code, message }`, with `code` one of `send_denied`, `track_denied` or `payload_refused`.
+- Withdrawal is access taken back from a channel you held. It reaches every handle on that channel as `CHANNEL_ERROR` with reason `withdrawn`, and you also leave the channel's presence. The client does not rejoin by itself. Subscribe again once the user's access is restored.
+- A message never contains the rule or the data it read. It names the declaration.
+
+<h3 id="send-from-db">Sending from the database</h3>
+
+A broadcast is not a transaction, so data that matters, such as a bid, should be written by a database function. That function can then tell the watchers itself with `_supatype.realtime_send(topic, event, payload)`. It works from any SQL: an RPC function, a trigger, a hook or a migration.
+
+```sql title="place_bid.sql"
+create or replace function place_bid(p_lot uuid, p_amount integer)
+returns void
+language plpgsql
+security invoker
+as $$
+begin
+  insert into bid (id, lot_id, bidder_id, amount)
+  values (gen_random_uuid(), p_lot, auth.uid(), p_amount);
+
+  -- Tell everyone watching the lot. The send rule of lot:{id} is checked as the caller.
+  perform _supatype.realtime_send(
+    'lot:' || p_lot,
+    'bid',
+    jsonb_build_object('amount', p_amount)
+  );
+end;
+$$;
+```
+
+The client calls it like any function, and listeners get the broadcast through `onBroadcast` as usual.
+
+```ts
+const { error } = await supatype.rpc("place_bid", { p_lot: id, p_amount: 120 })
+if (error) console.error(error.code, error.message)
+```
+
+- Receivers are every member the channel's `join` rule admitted. There is no new access path.
+- `realtime_send` checks the caller's `send` rule, including the event and payload checks, and raises error `42501` with the same sentence a refused broadcast gets. Only signed-in users sending as themselves pass. Anon is refused. The service role may send anything.
+- It writes one row to `_supatype.realtime_outbox`, which the realtime service reads from the replication slot. A trigger deletes each row as it is written, so the table never fills. Inserting into the outbox directly is judged by the same rule, and the row's `sender` must be the caller's own id (leave it out and the insert is refused).
+- Under `declared`, a database send to a topic no declaration matches is dropped, and the service logs it once per topic.
+
+:::caution[Security definer]
+Keep the function `SECURITY INVOKER`, as above, so the send rule judges the user. A `SECURITY DEFINER` function owned by a superuser counts as the service role, and its sends skip every check. Do the checks inside such a function yourself.
+:::
+
+### Token changes, re-checks and outages
+
+- **New token.** When a socket gets a new token, for example after sign-in, sign-out or a role change, every channel it holds is judged again as the new identity. A channel whose `join` rule no longer admits the user is withdrawn, with a presence leave. Changed `send` and `track` answers replace the old ones.
+- **Revocation.** If a user is removed from a table a rule reads, such as `lot_watcher`, the held channels of that declaration are judged again, in one batch a second. They are also judged again after a schema push, and every 300 seconds as a backstop. Set `REALTIME_CHANNEL_RECHECK_S` to change that interval.
+- **Expiry.** A token that expires closes the socket with 4401, as before.
+- **Database down at join.** The service fails closed. It refuses every join, open channels included, with code `unavailable` and `retryable` set, because without the database it cannot tell whether a topic is declared. Retry with a delay.
+- **Database down at a re-check.** Nobody loses a channel because a check could not run. Held channels keep their access and the check is tried again at the next interval. A new token that cannot be checked still withdraws the channels, since the old answer no longer applies.
+- **Shared instance.** A shared realtime service, which serves many projects from one database, does not enforce channel rules. It refuses a join that says `private`, with code `shared_instance`. Supatype Cloud (closed beta) runs one realtime service per project.
+
+<h2 id="refusal-codes">Refusal codes</h2>
+
+The set is closed. A client that meets a code it does not know should treat it as `refused`.
+
+| Code | Arrives as | Meaning | What the app should do |
+| --- | --- | --- | --- |
+| `join_denied` | `CHANNEL_ERROR` | The channel's `join` rule said no, or the channel declares none. | Tell the user they may not open this. Do not retry. Ask them to sign in if they are not. |
+| `not_declared` | `CHANNEL_ERROR` | You opened it with `private: true` and no declaration matches the name. | A bug: fix the name, or push the declaration. |
+| `does_not_fit` | `CHANNEL_ERROR` | A declaration matches the start of the name, but a parameter has the wrong shape, such as a non-UUID. | A bug: build the topic from a valid value. |
+| `unavailable` | `CHANNEL_ERROR`, `retryable` | The server could not reach the database to check. | Retry after a delay. This is the only retryable code. |
+| `shared_instance` | `CHANNEL_ERROR` | The realtime service is shared, and private channels are not available there. | Use a project with its own realtime service. |
+| `withdrawn` | `CHANNEL_ERROR` | A re-check took back access to a channel you held. | Stop showing the channel's data. Join again only when the user's access changes. |
+| `send_denied` | `onRefused` | A broadcast was refused: the `send` rule said no, there is none, or the topic is undeclared under `declared`. | Show that the send failed. The channel is still joined. |
+| `track_denied` | `onRefused` | A presence track was refused. | Show that the user is not shown as present. The channel is still joined. |
+| `payload_refused` | `onRefused` | The event name or payload failed the send rule's checks. | Fix the message, or tell the user their input was not accepted. |
+| `refused` | `CHANNEL_ERROR` | Any other refusal, such as a bad filter, a missing table or no token. | Read the message. Do not retry blindly. |
+| `unsupported_server` | `CHANNEL_ERROR` | The client's own: the server did not announce private channel support, so a `private: true` join was never sent. The message says to upgrade the server. | Upgrade the realtime service. Do not fall back to an open channel. |
+
+<h2 id="upgrading">Moving from 0.9.2</h2>
+
+Nothing changes until you declare a channel or set `realtime.channels`. A project with no `realtime` key stays `"open"`, so broadcast and presence behave as they did. `supatype init` writes `"declared"` for new projects only.
+
+Before 0.9.3, anyone with your anon key could join any channel, read its broadcasts, send on it and appear in its presence. To close that:
+
+- Step 1: Upgrade the realtime service and the engine. The engine must list `private_channels` in its capabilities. The CLI checks this and refuses the push if it does not, because an older engine would drop the channels and report success while enforcing nothing. On self-host, raise the engine pin in `versions.engine`. On Cloud, a push that declares channels is refused until the platform's engine lists the capability.
+- Step 2: Declare a `Channel` for each topic your app uses, with the rules you want. Declaring one enforces its pattern at once, for every client, in either mode.
+- Step 3: Set `realtime: { channels: "declared" }` and run `supatype dev`. Fix the refusals you see. `supatype diff` warns when the mode goes from `open` to `declared`, and when you remove a declaration under `declared`.
+- Step 4: Push.
+- Step 5: Add `private: true` to the channels the client opens, so a mistyped name is refused instead of left open.
+
+A channel named after a table, which `from(table).subscribe()` opens, keeps working under `declared` with no declaration, because it only carries row changes. Row changes are still guarded by the table's access rules.
+
+A client that sends `private: true` to a 0.9.2 realtime service fails with `unsupported_server` and the message "this realtime server does not enforce private channels; upgrade it".
 
 <h2 id="connection">Connection and auth</h2>
 
@@ -155,7 +431,9 @@ The client opens the socket at `/realtime/v1` on your project URL when the first
 
 When someone signs in, signs out or a different user signs in, the client reconnects with the new token and joins every channel again. Access is checked as the new identity from then on. A token refresh for the same user does not reconnect, so no changes are missed.
 
-If the socket drops, the client retries after 1, 2, 4 seconds and so on, doubling each time, for up to 10 attempts. Channels report `SUBSCRIBING` while it retries and `TIMED_OUT` once it gives up. Changes made while the socket was down are not replayed, so refetch after a reconnect if you need the gaps filled.
+A channel's status cannot tell a drop from a first connect, since both read `SUBSCRIBING`. For the socket itself, `supatype.realtime.isConnected` is true while it is open, and `supatype.realtime.onConnectionChange((state) => ...)` calls you each time `supatype.realtime.connectionState` changes between `"connected"`, `"connecting"` (first connect, reconnecting after a drop or a sign-in, or waiting to retry) and `"disconnected"` (nothing subscribed, `disconnect()` was called, or every retry failed). It returns a function that stops the listener, and does not call you with the state it already has. Refetch when the state returns to `"connected"` after a drop. In React, `useChannel` and `useRealtimeConnection` expose the same two values.
+
+If the socket drops, the client retries after 1, 2, 4, 8 and 16 seconds, then every 30 seconds, for up to 10 attempts. Channels report `SUBSCRIBING` while it retries and `TIMED_OUT` once it gives up. Changes made while the socket was down are not replayed, so refetch after a reconnect if you need the gaps filled.
 
 <h2 id="config">Config and requirements</h2>
 
@@ -173,6 +451,10 @@ The service reads these environment variables. The self-host compose file sets t
 | `PORT` | 4000 | The port the service listens on |
 | `REPLICATION_POLL_INTERVAL` | 100 | How often, in milliseconds, the slot is read |
 | `SECURE_CHANNELS` | `true` | When `true`, a client must present a valid token before it can join a channel |
+| `REALTIME_CHANNELS` | unset | Set to `declared` to refuse broadcast and presence on undeclared channels whatever the database says. It can only tighten `realtime.channels` |
+| `REALTIME_CHANNEL_RECHECK_S` | 300 | Seconds between re-checks of every channel a socket holds, as a backstop to the checks made on a new token, a push and a change to a table a rule reads |
+
+To set these from `supatype.config.ts` rather than the environment, use `realtime: { channels: "declared", recheckSeconds: 120 }`. Self-host renders them as the realtime service's defaults, which a value in `.env` overrides. A push to Supatype Cloud sets them on the project's realtime service (production only), and a setting you take out of the config stops applying on the next push that still sets another one.
 
 <h2 id="limits">Limits</h2>
 
@@ -180,4 +462,5 @@ The service reads these environment variables. The self-host compose file sets t
 - While `supatype push` is changing the schema, the slot is not read. Changes made during the push are held in the slot and sent once it finishes.
 - Each change costs one database query per subscriber, to check that subscriber's access. Many subscribers to a busy table means many queries.
 - The replication slot keeps WAL until the service reads it. If the service is stopped for a long time while the database keeps writing, WAL builds up on disk.
+- Each private channel a socket holds costs one query at join, one more every re-check interval, and a batch a second while a table its rules read is changing.
 - Subscriptions live in the service's memory. A restart drops every socket, and clients reconnect and join again.

@@ -52,3 +52,41 @@ describe("generatedFilesEngine", () => {
     expect(second.fellBack).toBeUndefined()
   })
 })
+
+/**
+ * A Docker project that names its engine image in SUPATYPE_ENGINE_IMAGE pushes with that image, so
+ * the generated files come from it too (owner, 2026-11-15). With the cached host engine older than
+ * the image, push said "Schema pushed." while types, seed builder and admin config each failed with
+ * "this Supatype engine does not support realtime channels". Unnamed, the host engine stays (round 3).
+ */
+describe("an engine image named in SUPATYPE_ENGINE_IMAGE", () => {
+  it("writes the generated files with that image, never asking the host engine", async () => {
+    const hostEngine = vi.fn(async () => {})
+    const config = projectConfig({ provider: "docker" })
+    const choice = await generatedFilesEngine("/p", config, { hostEngine, composeEngine: async () => IMAGE, namedImage: async () => "supatype/schema-engine:local" })
+    expect(choice.engine).toBe(IMAGE)
+    expect(hostEngine).not.toHaveBeenCalled()
+  })
+
+  it("keeps the host engine when no image is named, or for a native project", async () => {
+    const composeEngine = vi.fn(async () => IMAGE)
+    const docker = await generatedFilesEngine("/p", projectConfig({ provider: "docker" }), { hostEngine: async () => {}, composeEngine, namedImage: async () => undefined })
+    const native = await generatedFilesEngine("/p", projectConfig({ provider: "native" }), { hostEngine: async () => {}, composeEngine, namedImage: async () => "supatype/schema-engine:local" })
+    expect(docker.engine).toBeUndefined()
+    expect(native.engine).toBeUndefined()
+    expect(composeEngine).not.toHaveBeenCalled()
+  })
+})
+
+describe("the engine image line the CLI writes from versions.engine", () => {
+  it("is not a named image: the host engine at that pin already matches it", async () => {
+    vi.stubEnv("SUPATYPE_ENGINE_IMAGE", "supatype/schema-engine:v0.9.9")
+    const hostEngine = vi.fn(async () => {})
+    const composeEngine = vi.fn(async () => IMAGE)
+    const config = projectConfig({ provider: "docker", versions: { engine: "0.9.9" } })
+    const choice = await generatedFilesEngine("/p", config, { hostEngine, composeEngine })
+    vi.unstubAllEnvs()
+    expect(choice.engine).toBeUndefined()
+    expect(composeEngine).not.toHaveBeenCalled()
+  })
+})

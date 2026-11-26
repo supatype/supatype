@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.1 (2026-11-09)
 
 ### Bug Fixes
 
@@ -8,3 +8,5 @@
   `{ data, error }` (a client with no API address or anon key throws from its first request) is
   handed to `onError` and logged once with `console.error`. It was an unhandled rejection, and
   `onError` never heard of it. A `getInitialURL` that rejects is reported the same way.
+
+

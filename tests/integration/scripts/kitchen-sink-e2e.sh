@@ -116,8 +116,8 @@ echo "==> Building the SPA, as the README does"
 echo ""
 # Ask for a published database port, and seed over it.
 #
-# `seed.ts` connects to Postgres over TCP. In dev the port is published only when something on the
-# host needs it, which is normally a host engine build, so on a machine without one there was
+# `supatype seed --local` connects to Postgres over TCP. In dev the port is published only when
+# something on the host needs it, which is normally a host engine build, so on a machine without one there was
 # nothing listening and the seed failed with ECONNREFUSED. Naming the port is the request; the
 # compose generator publishes it because it was named.
 SUPATYPE_DEV_DB_PORT="${SUPATYPE_DEV_DB_PORT:-54329}"
@@ -154,7 +154,8 @@ expect_env_script "$BASE_URL" || fail "the SPA has no way to get its anon key"
 
 echo ""
 echo "==> Seeding"
-(cd "$EXAMPLE_DIR" && DATABASE_URL="postgresql://supatype_admin:${PG_PASSWORD}@127.0.0.1:${SUPATYPE_DEV_DB_PORT}/${PG_DB}?sslmode=disable" npx tsx seed.ts)
+(cd "$EXAMPLE_DIR" && node "$CLI_BIN" seed --local \
+  --connection "postgresql://supatype_admin:${PG_PASSWORD}@127.0.0.1:${SUPATYPE_DEV_DB_PORT}/${PG_DB}?sslmode=disable")
 
 echo ""
 echo "==> What a browser cannot assert"

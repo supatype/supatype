@@ -17,10 +17,10 @@ Supatype has bindings for React, Vue, Svelte and Solid, a React Native helper, a
 
 | Package | Exports |
 | --- | --- |
-| `@supatype/react` | `SupatypeProvider`, `useSupatype`, `useQuery`, `useMutation`, `useFunction`, `useAuth`, `useSubscription`, `useLivePreview`, `RichText` |
-| `@supatype/vue` | `supatypePlugin`, `useSupatype`, `useQuery`, `useMutation`, `useFunction`, `useAuth`, `useSubscription` |
-| `@supatype/svelte` | `setSupatypeClient`, `getSupatypeClient`, `createQuery`, `createMutation`, `createFunction`, `createAuth`, `createSubscription` |
-| `@supatype/solid` | `SupatypeContext`, `useSupatype`, `createQuery`, `createMutation`, `createFunction`, `createAuth`, `createSubscription` |
+| `@supatype/react` | `SupatypeProvider`, `useSupatype`, `useQuery`, `useMutation`, `useFunction`, `useAuth`, `useSubscription`, `useChannel`, `useRealtimeConnection`, `useLivePreview`, `RichText` |
+| `@supatype/vue` | `supatypePlugin`, `useSupatype`, `useQuery`, `useMutation`, `useFunction`, `useAuth`, `useSubscription`, `useChannel`, `useRealtimeConnection` |
+| `@supatype/svelte` | `setSupatypeClient`, `getSupatypeClient`, `createQuery`, `createMutation`, `createFunction`, `createAuth`, `createSubscription`, `createChannel`, `createRealtimeConnection` |
+| `@supatype/solid` | `SupatypeContext`, `useSupatype`, `createQuery`, `createMutation`, `createFunction`, `createAuth`, `createSubscription`, `createChannel`, `createRealtimeConnection` |
 | `@supatype/react-native` | `createNativeClient`, `secureStoreAdapter`, `asyncStorageAdapter`, `openOAuth`, `createAuthUrlListener` |
 | `@supatype/ssr` | `createServerClient`, and `GET` from `@supatype/ssr/next` |
 

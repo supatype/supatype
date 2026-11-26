@@ -20,6 +20,8 @@ export const limitRows = [
 
 Supatype Cloud is the managed hosting platform for Supatype projects. It handles infrastructure and monitoring so you can focus on building your application.
 
+Supatype Cloud is in closed beta. [Request access](https://www.supatype.com/#cloud).
+
 ## What you get
 
 | Feature | Description |
@@ -78,15 +80,26 @@ and those are subtracted before your usage is measured: your cache is never coun
 
 Sign up at [accounts.supatype.com](https://accounts.supatype.com/signup).
 
+Supatype Cloud is in a closed beta. A new account cannot create a project until it is approved, and
+until then the dashboard says "You can create a project as soon as your account is approved". You can
+sign in and look around while you wait.
+
 ### 2. Create a project
 
-Create the project in the Cloud dashboard. Then sign in from the CLI and link your local project to
-it by its slug or its ref:
+Once your account is approved, create the project in the Cloud dashboard. Then sign in from the CLI
+and link your local project to it by its slug or its ref:
 
 ```bash
 npx @supatype/cli login
 npx @supatype/cli link --project <project-slug>
 ```
+
+`supatype login` opens your browser, you approve the sign-in there, and you type the code the page
+shows into the terminal. The CLI never asks for your password. In CI, use a personal access token
+instead: `supatype login --token <spt_...>`, or set `SUPATYPE_ACCESS_TOKEN`.
+
+To point the CLI at a Cloud other than supatype.com, pass `--api-url <url>` to `supatype login`, or
+set `SUPATYPE_API_URL`.
 
 ### 3. Deploy
 

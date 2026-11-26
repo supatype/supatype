@@ -103,6 +103,7 @@
     </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html" aria-current="page">CLI</a></li>
+      <li><a href="/docs/versions.html">Versions</a></li>
     </ul></div>
     <div><span class="label">MORE</span><ul>
       <li><a href="/licensing.html">Licensing</a></li>
@@ -124,7 +125,7 @@
 <span class="pr">$</span> supatype --help
 <span class="pr">$</span> supatype push --help</pre></div>
     <p>The npm package needs Node.js 18 or later. It is the install to use on Windows.</p>
-    <p>The npm package runs the same program as the standalone install, so the React version your app uses, or any other package it installs, has no effect on the CLI. The first run of each version downloads that program from <code>releases.supatype.com</code> into <code>~/.supatype/cache/cli/&lt;version&gt;/</code> and checks it against the release's signed checksums. In a scaffolded project that happens during <code>npm install</code>, when the <code>prepare</code> script runs <code>supatype generate</code>. A production install with <code>--omit=dev</code> leaves the CLI out, and <code>prepare</code> then generates nothing and succeeds, since the build that needed the generated files ran with everything installed. Where that site is unreachable, set <code>SUPATYPE_CDN_BASE</code> to a mirror of it. The program is built for Linux and macOS on x64 and arm64, and for Windows on x64.</p>
+    <p>The npm package runs the same program as the standalone install, so the React version your app uses, or any other package it installs, has no effect on the CLI. The first run of each version downloads that program from <code>releases.supatype.com</code> into <code>~/.supatype/cache/cli/&lt;version&gt;/</code> and checks it against the release's signed checksums. In a scaffolded project that happens during <code>npm install</code>, when the <code>prepare</code> script runs <code>supatype generate</code>. A production install with <code>--omit=dev</code> leaves the CLI out, and <code>prepare</code> then generates nothing and succeeds, since the build that needed the generated files ran with everything installed. Where that site is unreachable, set <code>SUPATYPE_CDN_BASE</code> to a mirror of it. A CLI built from source has no release public key embedded and refuses the download; set <code>SUPATYPE_RELEASE_PUBLIC_KEY</code> to the release minisign public key to verify the checksums against it. When set, it takes the place of the embedded key. The program is built for Linux and macOS on x64 and arm64, and for Windows on x64.</p>
     <p>On a Linux or macOS machine without Node, such as a CI image or a server, install the standalone binary instead, with the script or with Homebrew:</p>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> curl -fsSL https://supatype.com/install.sh | bash
@@ -136,7 +137,7 @@
     <p>Commands that use Docker first check that it answers. A Docker that says it cannot be reached fails the command at once. A Docker that is running but slow to answer, as on a machine carrying many containers, is waited for, with a line saying so, for up to 60 seconds in all; set <code>SUPATYPE_DOCKER_TIMEOUT</code> to a whole number of seconds to wait longer or shorter.</p>
     <div class="callout">
       <span class="callout-label">CLOUD</span>
-      <p>Commands marked <strong>Cloud</strong> need Supatype Cloud, which is coming soon. Everything else works locally and on a self-hosted stack.</p>
+      <p>Commands marked <strong>Cloud</strong> need Supatype Cloud, which is in closed beta (<a href="/#cloud">request access</a>). Everything else works locally and on a self-hosted stack.</p>
     </div>
 
     <h2 id="project">Project and local development</h2>
@@ -168,7 +169,7 @@
       <thead><tr><th scope="col">Command</th><th scope="col">Description</th><th scope="col">Useful flags</th></tr></thead>
       <tbody>
         <tr><td><code>push</code></td><td>Push schema to the database: diff, prompt for destructive changes, apply migration, generate types</td><td><code>--yes</code>, <code>--connection &lt;url&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--direct</code> (alias <code>--local</code>), <code>--overwrite-drift</code>, <code>--run-hooks</code></td></tr>
-        <tr><td><code>diff</code></td><td>Show planned schema changes without applying them (dry run)</td><td><code>--connection &lt;url&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--direct</code></td></tr>
+        <tr><td><code>diff</code></td><td>Show planned schema changes (the operations, not the SQL) without applying them. There is no <code>push --dry-run</code>: <code>diff</code> is the preview and <code>migrate</code> prints the SQL</td><td><code>--connection &lt;url&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--direct</code></td></tr>
         <tr><td><code>generate</code></td><td>Regenerate TypeScript types without running a migration</td><td></td></tr>
         <tr><td><code>migrate</code></td><td>Write the SQL a push would apply, without applying it. Plain, it takes no lock your application waits on and the file records nothing: applied by hand, the next push finds the tables unmanaged. With <code>--record</code> the file also records the migration as a push does</td><td><code>-o, --output &lt;file&gt;</code>, <code>--record</code>, <code>--force</code></td></tr>
         <tr><td><code>migrations list</code></td><td>List applied migrations with schema snapshot metadata</td><td><code>--connection &lt;url&gt;</code>, <code>--env &lt;name&gt;</code></td></tr>
@@ -195,14 +196,22 @@
     <div class="tbl"><table>
       <thead><tr><th scope="col">Command</th><th scope="col">Description</th><th scope="col">Useful flags</th></tr></thead>
       <tbody>
-        <tr><td><code>seed [file]</code></td><td>Run database seeds: optional single file; else all seeds/*.ts (alphabetical); else seed.ts</td><td><code>--status</code>, <code>--atomic</code>, <code>--connection &lt;dsn&gt;</code>, <code>--environment &lt;name&gt;</code></td></tr>
+        <tr><td><code>seed [file]</code></td><td>Run database seeds: optional single file; else all seeds/*.ts (alphabetical); else seed.ts</td><td><code>--status</code>, <code>--atomic</code>, <code>--connection &lt;dsn&gt;</code>, <code>--environment &lt;name&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--local</code>, <code>--confirm-production</code></td></tr>
         <tr><td><code>cache rest list</code></td><td>List cached REST GET entries</td><td><code>--table &lt;name&gt;</code>, <code>--json</code></td></tr>
         <tr><td><code>cache rest get &lt;key&gt;</code></td><td>Show one cache entry (full key)</td><td><code>--json</code></td></tr>
         <tr><td><code>cache rest delete &lt;key&gt;</code></td><td>Delete one cache entry</td><td></td></tr>
         <tr><td><code>cache rest flush</code></td><td>Flush REST cache entries</td><td><code>--table &lt;name&gt;</code>, <code>--yes</code></td></tr>
       </tbody>
     </table></div>
-    <p><code>seed</code> refuses to run against a project linked to Supatype Cloud unless you pass <code>--force</code>. See <a href="/docs/seeding.html">Seeding</a>.</p>
+    <p><code>seed</code> on a linked project (Supatype Cloud, or a server linked with <code>supatype link</code>) sends the seeds to that server instead of connecting to the database. <code>--local</code> seeds the local stack instead, and <code>--force</code> is refused. See <a href="/docs/seeding.html">Seeding</a>.</p>
+    <h3 id="server-cache">Switching the server cache on</h3>
+    <p>A model's <code>cache</code> block says which tables may be cached. It does not switch anything on: the running stack keeps its own allowlist, <code>cache_tables</code>, and a table is served from the cache only when both agree. <code>push</code> and <code>dev</code> add each newly declared table to that allowlist through the running stack and never change an entry that already exists. If the stack is not answering they create <code>.supatype/api-config.json</code> from the server's default shape and write the entry there.</p>
+    <p>Both print a note while <code>cache_max_ttl</code> is 0, which it is until you set it: with a TTL of 0 nothing is cached. Set it under API, REST, Settings in Studio, or with the admin API, which is what the CLI calls:</p>
+<pre>PATCH /admin/v1/config/rest
+Authorization: Bearer &lt;service role key&gt;
+
+{ "cache_max_ttl": 60, "cache_tables": { "posts": { "enabled": true, "allow_public": false } } }</pre>
+    <p>All three fields are optional, and <code>schema</code> and <code>max_rows</code> are left alone when absent. <code>cache_max_ttl</code> is 0 to 86400 seconds. <code>cache_tables</code> <strong>replaces the whole map</strong>, so read it with <code>GET /admin/v1/config/rest</code> and send back the entries you want to keep. The schema's declaration is a ceiling: a table it does not declare, or declares with <code>enabled: false</code>, is switched off and listed in the answer's <code>adjusted</code> array, and a <code>cache_max_ttl</code> above a declared <code>maxTtl</code> is lowered to it. Every Cloud plan runs the cache, Free included. Free&#39;s is smaller: 10,000 entries of up to 1,024 bytes each, and no row cache. On Cloud, <code>push</code> stores the declaration but does not switch tables on, so enable them in Studio or with this call; against a local or self-hosted stack, <code>push</code> and <code>dev</code> do it for you.</p>
     <p><code>reset</code> drops only the tables your schema manages. Sign-ins, Studio users and stored files are kept. It then clears the record of past seed runs, so a <code>runOnce</code> seed runs again, and runs the seeds unless you pass <code>--no-seed</code>. To start the whole database again, use <code>supatype dev --reset-db</code>.</p>
 
     <h2 id="functions">Functions and hooks</h2>
@@ -214,9 +223,9 @@
         <tr><td><code>functions invoke &lt;name&gt;</code></td><td>Invoke a local or deployed function; exits 1 when it answers 400 or above</td><td><code>--data &lt;json&gt;</code>, <code>--auth</code>, <code>--local</code> (a running <code>functions serve</code> if one answers, else the dev API), <code>--port &lt;port&gt;</code> (of that serve, default 18472)</td></tr>
         <tr><td><code>functions deploy</code></td><td>Deploy all functions (or <code>--only &lt;name&gt;</code> for one) to the linked project</td><td><code>--only &lt;name&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--dry-run</code></td></tr>
         <tr><td><code>functions list</code> <strong>Cloud</strong></td><td>List all deployed functions for the linked project</td><td></td></tr>
-        <tr><td><code>functions delete &lt;name&gt;</code> <strong>Cloud</strong></td><td>Remove a deployed function</td><td></td></tr>
+        <tr><td><code>functions delete &lt;name&gt;</code></td><td>Remove a deployed function and its env values from the linked project, on Cloud or on a self-hosted server. On a project that is not linked it removes nothing and says so</td><td></td></tr>
         <tr><td><code>functions logs &lt;name&gt;</code> <strong>Cloud</strong></td><td>Tail logs for a deployed function</td><td><code>--since &lt;duration&gt;</code> (default 1h)</td></tr>
-        <tr><td><code>functions env list</code>, <code>set &lt;KEY=value&gt;</code>, <code>unset &lt;key&gt;</code> <strong>Cloud</strong></td><td>Manage function environment variables</td><td></td></tr>
+        <tr><td><code>functions env list</code>, <code>set &lt;KEY=value&gt;</code>, <code>unset &lt;key&gt;</code> <strong>Cloud</strong></td><td>Manage function environment variables</td><td><code>--function &lt;name&gt;</code> (one function's own values, which override a shared one)</td></tr>
         <tr><td><code>hooks new &lt;name&gt;</code></td><td>Scaffold a hook handler</td><td></td></tr>
         <tr><td><code>hooks list</code></td><td>Show the hooks the schema declares and whether each one can run</td><td></td></tr>
       </tbody>
@@ -250,7 +259,8 @@
         <tr><td><code>self-host compose status</code></td><td>Show compose service status</td><td></td></tr>
         <tr><td><code>self-host compose logs</code></td><td>Tail compose logs</td><td><code>--service &lt;name&gt;</code>, <code>-f, --follow</code></td></tr>
         <tr><td><code>add domain [domain]</code></td><td>Add a custom domain with automatic HTTPS (self-host)</td><td><code>--email &lt;email&gt;</code> for Let's Encrypt</td></tr>
-        <tr><td><code>link</code></td><td>Link this project to cloud or self-host (unified .supatype/link.json)</td><td><code>--url &lt;url&gt;</code>, <code>--token &lt;token&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--fix-gitignore</code></td></tr>
+        <tr><td><code>link</code></td><td>Link this project to cloud or self-host (unified .supatype/link.json). Refuses a different project or host than the one already linked, unless <code>--force</code></td><td><code>--url &lt;url&gt;</code>, <code>--token &lt;token&gt;</code>, <code>--env &lt;name&gt;</code>, <code>--fix-gitignore</code>, <code>--force</code></td></tr>
+        <tr><td><code>unlink</code></td><td>Remove this folder's link (<code>.supatype/link.json</code>, and the legacy <code>cloud.json</code> and <code>linked.json</code> if present) and say what was removed</td><td></td></tr>
         <tr><td><code>envs list</code></td><td>List linked environments, and the default commands use: <code>environments</code> in supatype.config.ts when it names one, else this checkout&apos;s</td><td></td></tr>
         <tr><td><code>envs use &lt;name&gt;</code></td><td>Set this checkout&apos;s default environment. <code>environments.default</code> in supatype.config.ts wins over it, and <code>envs use</code> says so</td><td></td></tr>
         <tr><td><code>build [command...]</code></td><td>Run your app's production build with the deployment's API URL and anon key under every front-end name (VITE_, PUBLIC_, NEXT_PUBLIC_, EXPO_PUBLIC_). Runs the package.json build script unless a command follows --. Refuses to start when either value is missing</td><td><code>--env &lt;name&gt;</code>, <code>--allow-local</code>, <code>-- &lt;command...&gt;</code></td></tr>
@@ -264,21 +274,22 @@
     <p>A render keeps the stack in the mode it runs in. While <code>supatype dev</code> runs for the project, commands such as <code>push</code>, <code>update</code> and <code>self-host compose</code> render dev mode. Otherwise they use the mode of the running <code>server</code> container, so a push to a production stack leaves it standalone.</p>
     <p>Commands that reach the local stack's database or API need that stack running: <code>push</code>, <code>diff</code>, <code>adopt</code>, <code>doctor</code>, <code>seed</code>, <code>migrate</code>, <code>migrations list</code>, <code>rollback</code>, <code>reset</code>, <code>introspect</code>, <code>pull</code>, <code>admin</code>, <code>cache rest</code>, and <code>functions invoke</code> when no <code>functions serve</code> answers. With it stopped they start nothing and refuse with <code>The local stack isn't running. Start it with `supatype dev`, or `supatype self-host compose up -d` on a server, then run `supatype push` again.</code>, naming the command run. <code>seed</code> exits 2, the others 1. A linked project, <code>--connection</code>, <code>connection</code> in the config and an external database are reached as they are, and so is an API address named by <code>SUPATYPE_URL</code> or <code>SUPATYPE_API_URL</code> in <code>.env</code>.</p>
     <p><code>build</code> takes each value from the first of: the environment (<code>SUPATYPE_URL</code>, <code>SUPATYPE_ANON_KEY</code> or any framework's name), the <code>/supatype-env.json</code> of the server the environment's URL names (for the anon key only, so CI can set just <code>SUPATYPE_URL</code>), the linked environment, and a <code>.env</code> that records a deployment (<code>PUBLIC_SUPATYPE_URL</code> or <code>API_EXTERNAL_URL</code>, and <code>ANON_KEY</code>). An anon key counts only for the URL being built for; one a source holds for another deployment is listed as skipped. It refuses a local address unless you pass <code>--allow-local</code>, never gives the build the service role key, writes no file, and exits with the build's own code. A package.json build script that is itself <code>supatype build</code> is refused rather than run again. <code>deploy</code> builds the app the same way. See <a href="/docs/deploying-your-frontend.html">Deploy your frontend</a>.</p>
-    <p>For a self-hosted stack, <code>link --url</code> takes the stack's gateway URL and <code>--token</code> its <code>SERVICE_ROLE_KEY</code>. The full walkthrough is in <a href="/docs/#self-host">Self-host</a> and <a href="/deploy-vm-github-actions.html">Deploy to a VM with GitHub Actions</a>.</p>
+    <p>For a self-hosted stack, <code>link --url</code> takes the stack's gateway URL and <code>--token</code> its <code>SERVICE_ROLE_KEY</code>. The link is made to the project the server says it serves, whatever this folder is called.</p>
+    <p>A folder holds one link, to Supatype Cloud or to a self-hosted server, and <code>envs use</code> chooses between environments of that one link. <code>link</code> to a different project, or to the other kind of host, refuses and names the link that is there: run <code>supatype unlink</code> to remove it, or pass <code>--force</code> to replace it with a fresh one. Linking the same project again (to refresh a token, or to add an environment with <code>--env</code>) always works. To work against both hosts at once, keep a folder for each (a second clone or a <code>git worktree</code>) and link each to its own host. The full walkthrough is in <a href="/docs/#self-host">Self-host</a> and <a href="/deploy-vm-github-actions.html">Deploy to a VM with GitHub Actions</a>.</p>
 
     <h2 id="cloud">Supatype Cloud</h2>
-    <p>All of these need Supatype Cloud, which is coming soon.</p>
+    <p>All of these need Supatype Cloud, which is in closed beta (<a href="/#cloud">request access</a>).</p>
     <div class="tbl"><table>
       <thead><tr><th scope="col">Command</th><th scope="col">Description</th><th scope="col">Useful flags</th></tr></thead>
       <tbody>
-        <tr><td><code>login</code></td><td>Sign in to Supatype Cloud (stores refreshable session for push/deploy)</td><td><code>--email &lt;email&gt;</code>, <code>--password &lt;password&gt;</code> (prefer <code>SUPATYPE_PASSWORD</code>)</td></tr>
+        <tr><td><code>login</code></td><td>Sign in to Supatype Cloud in your browser. It opens the accounts site, you approve, and type the code shown there into the terminal; the CLI stores a personal access token (<code>spt_...</code>) for push and deploy. The URL is always printed. The CLI asks the control plane where the accounts site is (<code>GET /api/v1/cli/login/config</code>), or you set <code>SUPATYPE_ACCOUNTS_URL</code>; if neither gives an address, login stops and says so. A Cloud behind a bot check refuses the CLI with <code>captcha_failed</code>; login then says that sign-in works only through the browser and points to <code>--token</code> for CI. Any other refusal prints the control plane's own message and exits 1. A new Cloud account cannot create a project until it is approved (closed beta)</td><td><code>--api-url &lt;url&gt;</code> (a Cloud other than supatype.com; <code>SUPATYPE_API_URL</code> sets it too),<code>--name &lt;name&gt;</code> (the token's name, default <code>cli_&lt;hostname&gt;_&lt;time&gt;</code>), <code>--no-browser</code>, <code>--token &lt;spt_...&gt;</code> (store a token made in your account instead of signing in, for CI; <code>SUPATYPE_ACCESS_TOKEN</code> takes one too)</td></tr>
         <tr><td><code>logout</code></td><td>Clear stored Supatype Cloud credentials</td><td></td></tr>
-        <tr><td><code>whoami</code></td><td>Show the current Supatype Cloud session</td><td></td></tr>
-        <tr><td><code>link --project &lt;slug&gt;</code></td><td>Link this project to cloud or self-host (unified .supatype/link.json)</td><td><code>--token &lt;token&gt;</code>, <code>--env &lt;name&gt;</code></td></tr>
-        <tr><td><code>projects list</code></td><td>List all projects in your organisation</td><td></td></tr>
-        <tr><td><code>projects create &lt;name&gt;</code></td><td>Create a new project</td><td><code>--tier &lt;tier&gt;</code>, <code>--region &lt;region&gt;</code></td></tr>
-        <tr><td><code>projects pause &lt;slug&gt;</code></td><td>Pause a project</td><td></td></tr>
-        <tr><td><code>projects resume &lt;slug&gt;</code></td><td>Resume a paused project</td><td></td></tr>
+        <tr><td><code>whoami</code></td><td>Show the current Supatype Cloud session, checked against the control plane. Exit 0 when valid, 1 when rejected, 2 when the control plane cannot be reached</td><td></td></tr>
+        <tr><td><code>link --project &lt;slug&gt;</code></td><td>Link this project to cloud or self-host (unified .supatype/link.json). A cloud link asks the Cloud you signed in to with <code>login</code>, unless <code>--api-url</code> or <code>SUPATYPE_API_URL</code> names another</td><td><code>--api-url &lt;url&gt;</code>, <code>--token &lt;token&gt;</code>, <code>--env &lt;name&gt;</code></td></tr>
+        <tr><td><code>projects list</code></td><td>List your projects. In a linked project it lists that project's organisation; before a link it lists every organisation you belong to (just the one, if you have one)</td><td><code>--org &lt;slug&gt;</code> (one organisation only)</td></tr>
+        <tr><td><code>projects create &lt;name&gt;</code></td><td>Create a new project, in your only organisation, or the one <code>--org</code> names (required when you belong to several and nothing is linked)</td><td><code>--tier &lt;tier&gt;</code>, <code>--region &lt;region&gt;</code>, <code>--org &lt;slug&gt;</code></td></tr>
+        <tr><td><code>projects pause &lt;slug&gt;</code></td><td>Pause a project</td><td><code>--org &lt;slug&gt;</code></td></tr>
+        <tr><td><code>projects resume &lt;slug&gt;</code></td><td>Resume a paused project</td><td><code>--org &lt;slug&gt;</code></td></tr>
         <tr><td><code>domains list</code>, <code>add &lt;domain&gt;</code>, <code>remove &lt;domainId&gt;</code>, <code>verify &lt;domainId&gt;</code></td><td>Manage custom domains for a project</td><td></td></tr>
         <tr><td><code>envs create &lt;name&gt;</code></td><td>Create a cloud environment (staging/preview)</td><td></td></tr>
         <tr><td><code>db connection-string</code></td><td>Show the database connection string for the linked project</td><td><code>--transaction</code>, <code>--env &lt;name&gt;</code></td></tr>
@@ -303,7 +314,7 @@
 
     <nav class="pn" aria-label="More pages">
       <a href="/postgres/supatype-mask.html"><small>PREVIOUS</small><span>supatype_mask</span></a>
-      <a href="/licensing.html" class="next"><small>NEXT</small><span>Licensing</span></a>
+      <a href="/docs/versions.html" class="next"><small>NEXT</small><span>Versions</span></a>
     </nav>
   </main>
 

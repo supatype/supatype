@@ -68,7 +68,7 @@ vi.mock("../src/self-host-compose.js", async (importOriginal) => ({
 /** One compose command, recorded. The stack's `up -d` fails while `upFails` is set, as a port clash does. */
 function compose(args: string[]): number {
   docker.compose.push(args)
-  return docker.upFails && args.join(" ") === "up -d" ? 1 : 0
+  return docker.upFails && args[0] === "up" && args[1] === "-d" && args.length <= 3 && args.every((a) => a !== "db") ? 1 : 0
 }
 
 vi.mock("../src/compose-engine-run.js", async (importOriginal) => ({

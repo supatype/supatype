@@ -1,5 +1,5 @@
 import { ref, shallowRef, onMounted, onUnmounted, type Ref } from "vue"
-import type { AugmentedDatabase, AnyDatabase, SupatypeError, RealtimeEvent } from "@supatype/client"
+import type { AugmentedDatabase, AnyClient, AnyDatabase, SupatypeError, RealtimeEvent } from "@supatype/client"
 import { watchTable, type SubscriptionState, type TableWatchOptions } from "@supatype/client/bindings"
 import { useSupatype } from "./context.js"
 
@@ -49,7 +49,7 @@ export function useSubscription<
   let unsubscribe: (() => void) | null = null
 
   onMounted(() => {
-    unsubscribe = watchTable<TRow>(client.realtime, table, options, {
+    unsubscribe = watchTable<TRow>(client as AnyClient, table, options, {
       rows: (rows) => {
         data.value = rows
       },

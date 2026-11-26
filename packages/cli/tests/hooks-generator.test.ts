@@ -2,9 +2,16 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { execFileSync } from "node:child_process"
+import { pathToFileURL } from "node:url"
+import ts from "typescript"
 import { afterEach, describe, expect, it } from "vitest"
+import { isShape } from "@supatype/shared"
 import { generateHooksModule } from "../src/hooks-generator.js"
 import { extractSchemaAstFromTypes } from "../src/type-extractor.js"
+import { expectShape } from "./support/json.js"
+
+type HookFactory = (h: (ctx: Record<string, unknown>) => unknown) => (req: Request, fn?: unknown) => Promise<Response>
+const isHookFactory = (value: unknown): value is HookFactory => typeof value === "function"
 
 /** What `tsc -p <dir>/tsconfig.json` printed: nothing when the project compiles. */
 function tscOutput(dir: string): string {
@@ -188,6 +195,62 @@ export default nope
       { exactOptionalPropertyTypes: false },
     )
     expect(output).toContain("comments")
+  })
+})
+
+describe("the function context reaches a hook", () => {
+  const WORKER_CONTEXT = {
+    executionId: "e1",
+    functionName: "moderate-post",
+    url: "http://kong:8000",
+    publicUrl: "http://localhost:8000",
+    anonKey: "anon",
+    serviceRoleKey: "svc",
+    dbUrl: "postgres://app@db/app",
+    region: "local",
+    env: { GREETING: "hi" },
+  }
+
+  it("types the worker's context on every hook, so a hook can write back", () => {
+    const output = compileWithHandler(
+      generateHooksModule(astFor(HOOKED_SCHEMA)),
+      `import { hook, type BeforeChange } from "./hooks.ts"
+
+const moderate: BeforeChange<"posts"> = async (ctx) => {
+  const key: string | undefined = ctx.serviceRoleKey
+  const url: string = ctx.url
+  const anon: string = ctx.anonKey
+  const db: string | undefined = ctx.dbUrl
+  const env: string | undefined = ctx.env["GREETING"]
+  void [key, url, anon, db, env]
+  return {}
+}
+export default hook(moderate)
+`,
+    )
+    expect(output).toBe("")
+  })
+
+  it("hands the worker's second argument to the handler", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-hookrun-"))
+    dirs.push(dir)
+    const source = generateHooksModule(astFor(HOOKED_SCHEMA)) ?? ""
+    writeFileSync(join(dir, "hooks.mjs"), ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText, "utf8")
+    const loaded: unknown = await import(pathToFileURL(join(dir, "hooks.mjs")).href)
+    const { hook } = expectShape(loaded, isShape({ hook: isHookFactory }))
+    let seen: Record<string, unknown> = {}
+    const run = hook((ctx) => { seen = ctx; return {} })
+    const req = new Request("http://worker/hook", { method: "POST", body: JSON.stringify({ table: "posts", operation: "insert", rows: [] }) })
+
+    expect((await run(req, WORKER_CONTEXT)).status).toBe(200)
+
+    expect(seen["serviceRoleKey"]).toBe("svc")
+    expect(seen["url"]).toBe("http://kong:8000")
+    expect(seen["dbUrl"]).toBe("postgres://app@db/app")
+    expect(seen["env"]).toEqual({ GREETING: "hi" })
+    // The hook's own fields are untouched, and a payload cannot be overwritten by the context.
+    expect(seen["table"]).toBe("posts")
+    expect(seen["operation"]).toBe("insert")
   })
 })
 

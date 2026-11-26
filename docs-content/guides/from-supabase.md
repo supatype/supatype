@@ -160,7 +160,7 @@ $ supatype push
 <h2 id="not-carried">What does not carry over</h2>
 
 - **Your SQL migrations.** Supatype does not replay `supabase/migrations`. It plans changes from the schema and records the migrations it applies.
-- **Your RLS policies.** They are rewritten as access rules. Rules are types, and there is no raw SQL escape hatch, so a policy the rule types cannot express needs another approach, such as a hook or a function.
+- **Your RLS policies.** They are rewritten as access rules. Rules are types: there is no raw SQL escape hatch for access rules, so a policy the rule types cannot express needs another approach, such as a hook or a Postgres function you write yourself ([Server logic in a Postgres function](/docs/schema.html#server-logic)). Your database is still Postgres, and you can run your own SQL in it.
 - **Generated types.** Delete `database.types.ts`. The client types come from the generated `supatype/generated` files.
 - **Function entry points.** The handler shape differs, so each function's entry needs a small rewrite. The code inside, being Deno, mostly stays.
 - **Function names and bodies in the client are not typed**, unlike tables.

@@ -73,8 +73,13 @@ export function projectStudioUrl(
   config: SupatypeProjectConfig,
   databaseUrl: string | undefined,
 ): string | undefined {
-  const stackUrl = projectStackUrl(cwd, config, databaseUrl)
-  return stackUrl === undefined ? undefined : studioUrlAt(stackUrl)
+  return stackStudioUrl(config, projectStackUrl(cwd, config, databaseUrl))
+}
+
+/** Studio on the stack at `stackUrl`, or nothing: native dev runs no Studio (docs/studio.md). */
+export function stackStudioUrl(config: SupatypeProjectConfig, stackUrl: string | undefined): string | undefined {
+  if (stackUrl === undefined || resolveRuntimeProvider(config) !== "docker") return undefined
+  return studioUrlAt(stackUrl)
 }
 
 function sameDatabase(a: string, b: string): boolean {

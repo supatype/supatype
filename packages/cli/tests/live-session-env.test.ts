@@ -17,6 +17,12 @@ import { projectConfig as configWith } from "./support/project-config.js"
 
 const projectConfig = configWith({ project: { name: "acme" }, database: { provider: "docker" } })
 
+// `docker ps` for a running server answers "none": a CI runner has no Docker to ask, and the dev
+// session these tests read is the lock file, not a container.
+vi.mock("../src/docker-exec.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/docker-exec.js")>()),
+  askDockerState: () => ({ status: 0, stdout: "", stderr: "", timedOut: false, missing: false }),
+}))
 vi.mock("../src/config.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/config.js")>()
   return { ...actual, loadConfig: () => projectConfig }
@@ -58,6 +64,16 @@ vi.mock("../src/self-host-compose.js", async (importOriginal) => {
     },
   }
 })
+
+// These restarts are about which environment compose runs with, not whether the stack is up. The real
+// checks ask Docker for the stack's containers, so on a machine with Docker running but no `acme`
+// stack they refuse and exit before compose runs; here the stack is taken to be running.
+vi.mock("../src/stack-running.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/stack-running.js")>()),
+  restartRefusal: () => null,
+  functionsNetworkNote: () => null,
+  dbContainerNetworks: () => null,
+}))
 
 vi.mock("../src/stack-exit-watch.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/stack-exit-watch.js")>()),

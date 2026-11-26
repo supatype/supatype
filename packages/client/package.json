@@ -22,7 +22,7 @@
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "dev": "tsc --project tsconfig.json --watch",
-    "typecheck": "tsc --project tests/tsconfig.json --noEmit",
+    "typecheck": "tsc --project tests/tsconfig.json --noEmit && tsc --project type-tests/tsconfig.json --noEmit",
     "test": "vitest run --maxWorkers=50%",
     "clean": "rm -rf dist *.tsbuildinfo"
   },

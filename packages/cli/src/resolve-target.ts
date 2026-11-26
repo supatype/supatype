@@ -1,4 +1,6 @@
+import { trimApiUrl } from "./api-url.js"
 import { execSync } from "node:child_process"
+import type { RemoteSeedRequest } from "@supatype/types"
 import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 import { loadConfig } from "./config.js"
@@ -49,14 +51,14 @@ import {
   resolveCloudAccessToken,
   resolveCloudRefreshToken,
 } from "./cloud-credentials.js"
-import { TargetApiError, targetFetch, type TargetFetchOptions } from "./target-client.js"
+import { TargetApiError, targetFetch, targetFetchWithSiblings, type TargetFetchOptions } from "./target-client.js"
 import { requireLocalStack } from "./local-stack-guard.js"
 import { CAPABILITIES_TTL_MS, capabilitiesCache, rememberCapabilities, type CapabilitiesCache } from "@supatype/shared"
 import {
   adoptNeeds,
   assertSupported,
   engineCapabilities,
-  identityColumnsNeed,
+  schemaFeatureNeeds,
   serverAnswerCapabilities,
   OVERWRITE_DRIFT_NEED,
   REBASELINE_KEYS_NEED,
@@ -147,7 +149,7 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
       mode: "self-host",
       environment: `branch:${branchCtx.branchId}`,
       projectRef,
-      apiBaseUrl: branchCtx.apiUrl.replace(/\/$/, ""),
+      apiBaseUrl: trimApiUrl(branchCtx.apiUrl),
       apiPrefix: "/platform/v1",
       token: branchCtx.token,
       link: loadProjectLink(cwd),
@@ -159,7 +161,7 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
       mode: "direct",
       environment: "local",
       projectRef,
-      apiBaseUrl: (serverBaseUrl(config) ?? "").replace(/\/$/, ""),
+      apiBaseUrl: trimApiUrl(serverBaseUrl(config) ?? ""),
       apiPrefix: "/platform/v1",
       link: null,
       databaseUrl: hostDatabaseUrl(cwd, config, flags.connection),
@@ -175,7 +177,7 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
         mode: "local",
         environment: "local",
         projectRef: localEnv.projectRef,
-        apiBaseUrl: localEnv.apiUrl.replace(/\/$/, ""),
+        apiBaseUrl: trimApiUrl(localEnv.apiUrl),
         apiPrefix: "/platform/v1",
         token: shellServiceRoleKey(cwd),
         link: null,
@@ -186,7 +188,7 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
       mode: "direct",
       environment: "local",
       projectRef,
-      apiBaseUrl: (serverBaseUrl(config) ?? "").replace(/\/$/, ""),
+      apiBaseUrl: trimApiUrl(serverBaseUrl(config) ?? ""),
       apiPrefix: "/platform/v1",
       link: null,
       databaseUrl: hostDatabaseUrl(cwd, config, flags.connection),
@@ -222,7 +224,7 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
       mode: "cloud",
       environment: envName,
       projectRef: link.projectRef,
-      apiBaseUrl: (link.cloudApiUrl ?? envTarget.apiUrl).replace(/\/$/, ""),
+      apiBaseUrl: trimApiUrl(link.cloudApiUrl ?? envTarget.apiUrl),
       apiPrefix: "/api/v1",
       token,
       link,
@@ -236,7 +238,7 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
     mode: link.kind === "local" ? "local" : "self-host",
     environment: envName,
     projectRef: link.projectRef,
-    apiBaseUrl: envTarget.apiUrl.replace(/\/$/, ""),
+    apiBaseUrl: trimApiUrl(envTarget.apiUrl),
     apiPrefix: "/platform/v1",
     token,
     link,
@@ -244,9 +246,9 @@ export function resolveTarget(cwd: string, flags: ResolveTargetFlags = {}): Depl
   }
 }
 
-function cloudAuthRefresh(target: DeployTarget): TargetFetchOptions["authRefresh"] | undefined {
+export function cloudAuthRefresh(target: DeployTarget): TargetFetchOptions["authRefresh"] | undefined {
   if (target.mode !== "cloud" || !target.refreshToken || !target.cwd) return undefined
-  const cloudApiUrl = (target.link?.cloudApiUrl ?? target.apiBaseUrl).replace(/\/$/, "")
+  const cloudApiUrl = trimApiUrl(target.link?.cloudApiUrl ?? target.apiBaseUrl)
   const cwd = target.cwd
   return {
     cloudApiUrl,
@@ -255,6 +257,7 @@ function cloudAuthRefresh(target: DeployTarget): TargetFetchOptions["authRefresh
       persistCloudSession(cwd, {
         apiUrl: cloudApiUrl,
         accessToken,
+        kind: "session",
         ...(refreshToken !== undefined ? { refreshToken } : {}),
       })
       target.token = accessToken
@@ -343,21 +346,45 @@ export interface TargetStreamPath {
 }
 
 /**
+ * The URL a Cloud project is served on: the environment's own URL as the link recorded it from the
+ * control plane. A link that holds only the control plane's URL for the environment (the default
+ * before the control plane was asked) has no project URL, and none is guessed: the command is
+ * refused and the user is told to link again.
+ */
+function cloudProjectUrl(target: DeployTarget): string {
+  const recorded = target.link?.environments[target.environment]?.apiUrl.replace(/\/$/, "")
+  const controlPlane = (target.link?.cloudApiUrl ?? target.apiBaseUrl).replace(/\/$/, "")
+  if (recorded !== undefined && recorded !== "" && recorded !== controlPlane) return recorded
+  throw new Error(
+    `This link holds no API address for the "${target.environment}" environment of ${target.projectRef}: it predates links recording one. Run: supatype link`,
+  )
+}
+
+/**
  * The target's functions: Supatype Cloud serves them on the project's own host and keeps past log
  * lines; a self-hosted or local server serves them under its API and relays a live tail from its
- * admin API. An authenticated invoke carries the Cloud session, or a local link's key; a
- * self-hosted link's service-role key is never handed to it.
+ * admin API. An authenticated invoke carries a local link's key; neither the Cloud session nor a
+ * self-hosted link's service-role key is ever handed to a function.
  */
 export function targetFunctions(target: DeployTarget): TargetFunctions {
+  const logs = targetLogs(target)
   if (target.mode === "cloud") {
-    const invokeBase = `https://${target.projectRef}.supatype.dev/functions/v1`
-    return { invokeBase, invokeToken: target.token, logs: { kind: "window" } }
+    return { invokeBase: `${cloudProjectUrl(target)}/functions/v1`, invokeToken: undefined, logs }
   }
   // A local link is this machine's own server, and its key goes with an authenticated invoke there.
   // A self-hosted link's service-role key is not handed to a function.
   const invokeToken = target.mode === "local" ? target.token : undefined
+  return { invokeBase: `${target.apiBaseUrl}/functions/v1`, invokeToken, logs }
+}
+
+/**
+ * How the target's function logs are read. It needs no project URL, so a link too old to hold one
+ * can still read its logs.
+ */
+export function targetLogs(target: DeployTarget): TargetFunctions["logs"] {
+  if (target.mode === "cloud") return { kind: "window" }
   const tail: TargetStreamPath = { baseUrl: target.apiBaseUrl, apiPrefix: "/admin/v1", path: "/functions/logs/tail" }
-  return { invokeBase: `${target.apiBaseUrl}/functions/v1`, invokeToken, logs: { kind: "tail", tail } }
+  return { kind: "tail", tail }
 }
 
 /**
@@ -449,7 +476,7 @@ export async function targetSchemaDiff(
   ast: unknown,
   opts?: { schema?: string },
 ): Promise<DiffResult> {
-  await requireTargetFeatures(target, identityColumnsNeed(ast))
+  await requireTargetFeatures(target, schemaFeatureNeeds(ast))
   if (target.mode === "direct" || (target.mode === "local" && !target.token)) {
     return engineHere(
       target,
@@ -490,7 +517,7 @@ export async function targetSchemaPush(
   await requireTargetFeatures(target, [
     ...(overwriteDrift ? [OVERWRITE_DRIFT_NEED] : []),
     ...(runHooks ? [RUN_HOOKS_NEED] : []),
-    ...identityColumnsNeed(ast),
+    ...schemaFeatureNeeds(ast),
   ])
   // The engine's own names, which a control plane forwards as they are.
   const flags = { ...(overwriteDrift && { overwrite_drift: true }), ...(runHooks && { run_hooks: true }) }
@@ -525,12 +552,69 @@ export async function targetSchemaPush(
     }
   }
 
-  return targetFetch(
+  // Cloud answers `{ data, cache }`: the cache report sits beside `data`, which `targetFetch` drops.
+  return targetFetchWithSiblings(
     target.apiBaseUrl,
     target.apiPrefix,
     apiFetchOpts(target, "POST", projectPath(target, "/schema/push"), pushBody),
     isEnginePushResult,
+    ["cache"],
   )
+}
+
+/** The capability a server lists when it serves the remote seed routes. */
+const SEED_NEED: FeatureNeed = { feature: "seed", flag: "seed" }
+
+/**
+ * What `target` says it can do, refused unless it serves the seed routes: an older control plane
+ * would answer a seed with a bare 404. The answer carries the engine version the seed will run on.
+ */
+export async function targetSeedCapabilities(target: DeployTarget): Promise<Capabilities> {
+  const caps = await targetCapabilities(target)
+  assertSupported(caps, [SEED_NEED])
+  return caps
+}
+
+/**
+ * Ask the control plane to apply `request`'s seed documents. The answer is the engine's seed result,
+ * whether or not it applied; a refusal (400, 403, 404, 409, 413, 502) throws {@link TargetApiError}.
+ */
+export async function targetSeed<T>(target: DeployTarget, request: RemoteSeedRequest, guard: Guard<T>): Promise<T> {
+  return targetFetch(target.apiBaseUrl, target.apiPrefix, projectRequest(target, "POST", "/seed", request), guard)
+}
+
+/**
+ * `seed --status` on the control plane: the engine's status document for the target environment.
+ *
+ * Capabilities are not asked first. They need the push permission and status needs only the view
+ * one, so a caller who may read the seed history would be refused for a route they never call. An
+ * older server is told apart by its answer instead: a missing route is a 404 that names no project.
+ */
+export async function targetSeedStatus<T>(target: DeployTarget, guard: Guard<T>): Promise<T> {
+  try {
+    return await targetFetch(target.apiBaseUrl, target.apiPrefix, projectRequest(target, "GET", "/seed/status"), guard)
+  } catch (err: unknown) {
+    if (!(err instanceof TargetApiError) || err.status !== 404) throw err
+    if (isUnknownProject(err)) throw new Error(unknownProjectMessage(target, err))
+    assertSupported({ features: new Set(), source: "server" }, [SEED_NEED])
+    throw err
+  }
+}
+
+const isProjectRef = isShape({ ref: isString })
+
+/**
+ * The ref Cloud keeps for the linked project, which a Cloud link does not hold: its link names the
+ * project by slug. A self-hosted link already holds the server's ref. Undefined when Cloud cannot be
+ * asked, so a caller falls back to what the link says.
+ */
+export async function targetProjectRef(target: DeployTarget): Promise<string | undefined> {
+  if (target.mode !== "cloud") return target.projectRef
+  try {
+    return (await targetFetch(target.apiBaseUrl, target.apiPrefix, projectRequest(target, "GET", ""), isProjectRef)).ref
+  } catch {
+    return undefined
+  }
 }
 
 export interface SchemaRollbackResult {
@@ -674,7 +758,7 @@ export async function targetSchemaDoctor(
     ...(rebaseline ? [{ feature: "rebaseline", flag: "--rebaseline" } as const] : []),
     ...(acceptAccessDrift ? [{ feature: "accept_access_drift", flag: "--accept-access-drift" } as const] : []),
     ...(keys !== undefined ? [REBASELINE_KEYS_NEED] : []),
-    ...identityColumnsNeed(ast),
+    ...schemaFeatureNeeds(ast),
   ])
   if (runsEngineHere(target)) {
     return engineHere(target, "/doctor", { ...body, database_url: target.databaseUrl! }, isDoctorReport)
@@ -737,7 +821,7 @@ export async function targetSchemaAdopt(
   }
   // A server that dropped `keys` would adopt every conflict, and one that dropped `release` would
   // adopt instead of release: refused before sending, never degraded.
-  await requireTargetFeatures(target, [...adoptNeeds({ keys: opts?.keys, release, reclaim }), ...identityColumnsNeed(ast)])
+  await requireTargetFeatures(target, [...adoptNeeds({ keys: opts?.keys, release, reclaim }), ...schemaFeatureNeeds(ast)])
   if (runsEngineHere(target)) {
     return engineHere(target, "/adopt", { ...body, database_url: target.databaseUrl! }, isAdoptOutcome)
   }

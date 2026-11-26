@@ -25,7 +25,7 @@ interface ScheduleControlProps {
  * job rather than a fact about a column.
  *
  * Which means it can be late. If the database has no scheduler the whole feature works except the
- * clock, and this control would set a time nothing acts on — so it says so rather than implying a
+ * clock, and this control would set a time nothing acts on, so it says so rather than implying a
  * promise the deployment cannot keep.
  */
 export function ScheduleControl({

@@ -5,14 +5,17 @@ import { randomBytes } from "node:crypto"
 import { p, runClackFlow } from "../ui/clack.js"
 import { withProgressView } from "../ui/progress.js"
 import {
+  describeInstallFailure,
   installCommand,
   installDependencies,
   plainStepView,
   runTimedStep,
   spinnerStepView,
+  type InstallFailure,
   type StepView,
   type TimedStep,
 } from "../init-setup-steps.js"
+import { devBuildInitNote } from "../release-images.js"
 import { ensureNotCancelled } from "../ui/prompts.js"
 import { adminEmailProblem, answerProblem, askText, smtpHostProblem, smtpPortProblem, type SmtpServer } from "../init-answers.js"
 import { assertEnvValues } from "../env-value.js"
@@ -21,6 +24,7 @@ import { generateAndWriteKeys } from "./keys.js"
 import {
   BUNDLED_DB_USER,
   CONTROL_PLANE_SECRET_ENV,
+  FORWARDING_SECRET_ENV,
   generateControlPlaneSecret,
   generateObjectStoreCredentials,
   givenJwtSecret,
@@ -105,6 +109,8 @@ export interface ScaffoldAppOptions {
   upstream?: string
   start?: string
   viteDevUrl?: string
+  /** A React (Vite) starter: the page mounts `src/main.tsx`, and the packages and config come with it. */
+  react?: boolean
 }
 
 /** File-affecting answers that drive what `scaffold()` writes. */
@@ -188,7 +194,7 @@ export function defaultScaffoldOptions(
 
 // ─── Registration ──────────────────────────────────────────────────────────--
 
-interface InitCliOptions {
+export interface InitCliOptions {
   mode: string
   defaults?: boolean
   install: boolean
@@ -293,7 +299,10 @@ async function createProject(args: CreateProjectArgs): Promise<void> {
   // CLI flags override wizard / default action choices.
   const wants: SetupWants = { install: opts.install !== false && result.install, keys: opts.keys !== false && result.generateKeys }
   if (name) mkdirSync(dir, { recursive: true })
-  scaffold(dir, result, await args.deps)
+  const deps = await args.deps
+  const devNote = devBuildInitNote(deps)
+  if (devNote !== undefined) warn(devNote)
+  scaffold(dir, result, deps)
   recordScaffoldedKongPort(dir, result)
 
   const outcome = await withStepView((view) => runSetupSteps(dir, result.packageManager, wants, view))
@@ -309,10 +318,14 @@ async function createProject(args: CreateProjectArgs): Promise<void> {
 }
 
 /** `--no-admin`, or `--admin-email` with `--admin-password`, over the answers. */
-function applyAdminFlags(result: WizardResult, opts: InitCliOptions): void {
+export function applyAdminFlags(result: WizardResult, opts: InitCliOptions): void {
   if (opts.admin === false) {
     delete result.adminEmail
     delete result.adminPassword
+  } else if (Boolean(opts.adminEmail) !== Boolean(opts.adminPassword)) {
+    // An admin needs both. One alone used to write nothing and say nothing.
+    error(`${opts.adminEmail ? "--admin-email" : "--admin-password"} needs ${opts.adminEmail ? "--admin-password" : "--admin-email"} too. Give both, or neither and create the admin later.`)
+    process.exit(1)
   } else if (opts.adminEmail && opts.adminPassword) {
     refuseAdminFlags(opts.adminEmail, opts.adminPassword)
     result.adminEmail = opts.adminEmail.trim()
@@ -397,7 +410,7 @@ export async function collectWizardAnswers(context: WizardContext): Promise<Wiza
         message: "Where will this run in production?",
         initialValue: defaultTarget,
         options: [
-          { value: "cloud", label: "Supatype Cloud", hint: "managed; deploy via supatype link" },
+          { value: "cloud", label: "Supatype Cloud", hint: "managed, closed beta: request access at supatype.com" },
           { value: "self-host", label: "Self-host", hint: "your own server with TLS" },
           { value: "later", label: "Decide later", hint: "local development only for now" },
         ],
@@ -450,8 +463,9 @@ export async function collectWizardAnswers(context: WizardContext): Promise<Wiza
       }),
     )
 
-    // No production to store for yet: production storage is chosen with the production target.
-    const storageProduction = productionTarget === "later" ? storageLocal : await promptProductionStorage()
+    // Not asked when there is no production to store for yet, nor on Supatype Cloud, which brings its
+    // own storage: an own bucket is set in the config later.
+    const storageProduction = productionTarget === "self-host" ? await promptProductionStorage() : storageLocal
 
     const helloFunction = ensureNotCancelled(
       await p.confirm({
@@ -568,17 +582,20 @@ async function promptApp(
         ? "proxy"
         : "none"
 
-  const mode = ensureNotCancelled(
-    await p.select<ScaffoldAppOptions["mode"]>({
+  const choice = ensureNotCancelled(
+    await p.select<ScaffoldAppOptions["mode"] | "react">({
       message: "Host a frontend app at /?",
       initialValue: initialMode,
       options: [
         { value: "none", label: "No app", hint: "API only" },
         { value: "static", label: "Static site", hint: "serve a built directory" },
         { value: "proxy", label: "Local dev server", hint: "forward requests to a dev server you run" },
+        { value: "react", label: "React (Vite)", hint: "a React starter on Vite, with @supatype/react" },
       ],
     }),
   )
+  if (choice === "react") return promptReactStarter(detected)
+  const mode = choice
 
   if (mode === "static") {
     const viteDevUrl = await promptViteDevUrl(detected, productionTarget)
@@ -588,6 +605,16 @@ async function promptApp(
   if (mode === "proxy") return promptDevServer(detected, productionTarget)
 
   return { mode: "none" }
+}
+
+/**
+ * The React (Vite) starter: a Vite app served through the dev proxy, like "Local dev server" with Vite
+ * chosen, plus the React page, packages and Vite plugin. Vite is the point, so it is not asked.
+ */
+async function promptReactStarter(detected: DetectedProjectSetup): Promise<ScaffoldAppOptions> {
+  if (!detected.declaresVite) refuseAddingViteOnOldNode()
+  const viteDevUrl = await askWithDefault("Vite dev server URL", detected.viteDevUrl)
+  return { mode: "proxy", upstream: viteDevUrl, start: "vite", viteDevUrl, react: true }
 }
 
 /**
@@ -684,6 +711,8 @@ interface SetupWants {
 /** What init's setup steps did: each true only when it ran and succeeded. */
 interface SetupOutcome {
   installOk: boolean
+  /** Why the install failed, when it did and its output said. */
+  installFailure?: InstallFailure
   keysGenerated: boolean
   binariesReady: boolean
 }
@@ -698,7 +727,15 @@ async function withStepView<T>(run: (view: StepView) => Promise<T>): Promise<T> 
 
 /** Install, then keys, then the component binaries an install makes possible, each timed on `view`. */
 async function runSetupSteps(dir: string, pm: PackageManager, wants: SetupWants, view: StepView): Promise<SetupOutcome> {
-  const installOk = wants.install && (await runTimedStep(view, installStep(dir, pm, view.live)))
+  let installFailure: InstallFailure | undefined
+  const installOk =
+    wants.install &&
+    (await runTimedStep(
+      view,
+      installStep(dir, pm, view.live, (failure) => {
+        installFailure = failure
+      }),
+    ))
   const keysGenerated =
     wants.keys &&
     (await runTimedStep(view, {
@@ -713,22 +750,39 @@ async function runSetupSteps(dir: string, pm: PackageManager, wants: SetupWants,
       run: () => ensureInitBinaries(dir),
       done: (ok) => (ok ? "Component binaries ready" : "Some binaries are missing"),
     }))
-  return { installOk, keysGenerated, binariesReady }
+  return { installOk, ...(installFailure !== undefined && { installFailure }), keysGenerated, binariesReady }
 }
 
 /** The install step: in a terminal its output is read for the spinner, otherwise it passes through. */
-function installStep(dir: string, pm: PackageManager, live: boolean): TimedStep<boolean> {
+function installStep(
+  dir: string,
+  pm: PackageManager,
+  live: boolean,
+  onFailure: (failure: InstallFailure) => void,
+): TimedStep<boolean> {
+  let script: string | undefined
   return {
     label: `Installing dependencies with ${pm}`,
-    run: (detail) => installDependencies(dir, installCommand(pm), live ? detail : undefined),
-    done: (ok) => (ok ? "Dependencies installed" : "Dependency install failed"),
+    run: async (detail) => {
+      const result = await installDependencies(dir, installCommand(pm), live ? detail : undefined)
+      if (!result.ok) {
+        script = result.failure.script
+        onFailure(result.failure)
+      }
+      return result.ok
+    },
+    done: (ok) => (ok ? "Dependencies installed" : `Dependency install failed${script === undefined ? "" : ` in the "${script}" script`}`),
   }
 }
 
 /** Stop init, naming what to run, when a setup step it was asked for failed. */
 function exitOnFailedSetup(outcome: SetupOutcome, wants: SetupWants, pm: PackageManager): void {
   if (wants.install && !outcome.installOk) {
-    error(`Dependency install failed. Run "${pm} install" in the project directory, then "supatype update".`)
+    error(
+      outcome.installFailure === undefined
+        ? `Dependency install failed. Run "${pm} install" in the project directory, then "supatype update".`
+        : describeInstallFailure(pm, outcome.installFailure),
+    )
     process.exit(1)
   }
   if (wants.keys && !outcome.keysGenerated) {
@@ -813,6 +867,9 @@ export function scaffold(
   }
   write(opts.schemaPath, schemaTemplate())
   write(".env", env)
+  if (opts.email === "smtp" && opts.adminEmail) {
+    info(`SUPATYPE_SMTP_ADMIN_EMAIL in .env defaults to your admin email (${opts.adminEmail}): change it to the address mail should come from.`)
+  }
   scaffoldDevFrontendEnv(dir, opts)
   write("seed.ts", seedTemplate(opts.projectName))
   write("seeds/.gitkeep", "")
@@ -967,13 +1024,89 @@ function scaffoldVite(
   holding: string,
 ): void {
   if (!opts.app.viteDevUrl) return
-  write("index.html", holding)
+  write("index.html", opts.app.react ? reactIndexHtml(opts.projectName, servedStatically(opts)) : holding)
+  if (opts.app.react) scaffoldReactSources(opts.projectName, write)
   const viteConfigRel = VITE_CONFIG_NAMES.find((name) => existsSync(join(dir, name)))
   if (viteConfigRel) {
     file("skipped", `${viteConfigRel} (already exists)`)
     return
   }
-  write(newViteConfigName(dir), viteConfigTemplate(opts.app.viteDevUrl, viteBuildOutDir(opts)))
+  write(newViteConfigName(dir), viteConfigTemplate(opts.app.viteDevUrl, viteBuildOutDir(opts), opts.app.react === true))
+}
+
+/** The React starter's page: a root to mount into and the entry module, with the runtime env tag a served build needs. */
+function reactIndexHtml(projectName: string, runtimeEnv: boolean): string {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${escapeHtml(projectName)}: Supatype</title>${runtimeEnv ? RUNTIME_ENV_SCRIPT : ""}
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+`
+}
+
+/** src/supatype.ts, main.tsx and App.tsx of the React starter. */
+function scaffoldReactSources(projectName: string, write: (rel: string, content: string) => void): void {
+  write("src/supatype.ts", REACT_CLIENT_SOURCE)
+  write("src/main.tsx", REACT_MAIN_SOURCE)
+  write("src/App.tsx", reactAppSource(projectName))
+}
+
+const REACT_CLIENT_SOURCE = [
+  'import { createClient } from "@supatype/client"',
+  "",
+  "// The address and anon key: init, supatype dev and supatype keys write them to .env.development.local,",
+  "// and a build Supatype serves reads them from /supatype-env.js.",
+  "export const supatype = createClient({",
+  "  url: import.meta.env.VITE_SUPATYPE_URL,",
+  "  anonKey: import.meta.env.VITE_SUPATYPE_ANON_KEY,",
+  "})",
+  "",
+].join("\n")
+
+const REACT_MAIN_SOURCE = [
+  'import { StrictMode } from "react"',
+  'import { createRoot } from "react-dom/client"',
+  'import { SupatypeProvider } from "@supatype/react"',
+  'import { App } from "./App"',
+  'import { supatype } from "./supatype"',
+  "",
+  'const root = document.getElementById("root")',
+  'if (root === null) throw new Error("index.html has no #root to mount the app into")',
+  "",
+  "createRoot(root).render(",
+  "  <StrictMode>",
+  "    <SupatypeProvider client={supatype}>",
+  "      <App />",
+  "    </SupatypeProvider>",
+  "  </StrictMode>,",
+  ")",
+  "",
+].join("\n")
+
+/** The starter's page component. The project name is shown as a JSON string, so no name can break the markup. */
+function reactAppSource(projectName: string): string {
+  return [
+    'import { useAuth } from "@supatype/react"',
+    "",
+    "export function App() {",
+    "  const { user, loading } = useAuth()",
+    "  return (",
+    "    <main>",
+    `      <h1>{${JSON.stringify(projectName)}}</h1>`,
+    '      <p>{loading ? "Checking your session" : user ? "Signed in as " + user.email : "Not signed in"}</p>',
+    "      <p>Add a model to schema/index.ts, push it, then read it with useQuery from @supatype/react.</p>",
+    "    </main>",
+    "  )",
+    "}",
+    "",
+  ].join("\n")
 }
 
 /**
@@ -1081,10 +1214,12 @@ function tsConfigTemplate(opts: ScaffoldOptions): string {
   lines.push(
     `  // Optional: pin component versions (native cache + Docker images synced to .env on dev/push)`,
   )
-  lines.push(`  // versions: { engine: "0.1.2", server: "1.0.5", postgres: "17.2", deno: "2.2.0" },`)
+  lines.push(`  // versions: { engine: "0.1.2", server: "1.0.5", postgres: "17.2", deno: "2.9.8" },`)
   lines.push(`  email: { provider: "${opts.email}" },`)
-  lines.push(...storageConfigLines(opts.storageLocal, opts.storageProduction))
+  lines.push(...storageConfigLines(opts.storageLocal, opts.productionTarget === "cloud" ? undefined : opts.storageProduction))
   lines.push(`  schema: { path: "${opts.schemaPath}", pg_schema: "public" },`)
+  lines.push(`  // Broadcast and presence on a channel no Channel<> declares are refused. "open" allows them.`)
+  lines.push(`  realtime: { channels: "declared" },`)
   lines.push(`  // Regenerated by dev, push and generate on every schema change.`)
   lines.push(`  output: { types: "${DEFAULT_TYPES_PATH}", client: "${DEFAULT_CLIENT_PATH}" },`)
   lines.push(
@@ -1363,13 +1498,15 @@ function vitePortFromDevUrl(viteDevUrl: string): number {
   }
 }
 
-function viteConfigTemplate(viteDevUrl: string, outDir?: string): string {
+function viteConfigTemplate(viteDevUrl: string, outDir?: string, react = false): string {
   const port = vitePortFromDevUrl(viteDevUrl)
   const build = outDir === undefined ? "" : `  // Built into the directory supatype.config.ts serves.\n  build: { outDir: "${outDir}" },\n`
-  return `import { defineConfig } from "vite"
+  const reactImport = react ? '\nimport react from "@vitejs/plugin-react"' : ""
+  const reactPlugin = react ? "  plugins: [react()],\n" : ""
+  return `import { defineConfig } from "vite"${reactImport}
 
 export default defineConfig({
-${build}  server: {
+${reactPlugin}${build}  server: {
     // supatype dev sets ${DEV_APP_HOST_ENV}: 0.0.0.0 on Linux, where the gateway arrives over
     // the Docker bridge rather than the loopback.
     host: process.env.${DEV_APP_HOST_ENV} ?? "127.0.0.1",
@@ -1384,11 +1521,15 @@ ${build}  server: {
 
 function storageConfigLines(
   storageLocal: StorageProvider,
-  storageProduction: StorageProvider,
+  storageProduction: StorageProvider | undefined,
 ): string[] {
   // provider is dev's, production the self-host stack's; S3_* in .env name the bucket for either.
+  // No production entry (undefined) on Supatype Cloud, which brings its own storage.
   const dev = storageLocal === "s3" ? `provider: "s3"` : `provider: "local", local_path: ".supatype/storage"`
-  const production = storageLocal === "local" && storageProduction === "local" ? "" : `, production: "${storageProduction}"`
+  const production =
+    storageProduction === undefined || (storageLocal === "local" && storageProduction === "local")
+      ? ""
+      : `, production: "${storageProduction}"`
   return [`  storage: { ${dev}${production} },`]
 }
 
@@ -1487,6 +1628,10 @@ SERVICE_ROLE_KEY=`)
 # request without it, so code running in the functions worker cannot call it directly.
 ${CONTROL_PLANE_SECRET_ENV}=${generateControlPlaneSecret()}`)
 
+  sections.push(`# Held by the API server, the gateway and the functions worker. The server believes a client address
+# passed on in a header only on a request that carries it; code in a function never sees it.
+${FORWARDING_SECRET_ENV}=${generateControlPlaneSecret()}`)
+
   // Dev wrote it on first start, appended with no comment (0.9.2 release test round 2, R2-S14).
   sections.push(`# The cache's password when the cache runs in Postgres (pg_keyspace): the keyspace user
 # \`${KEYSPACE_USERNAME}\`'s, which the API server logs in with, and the gateway when HTTPS is on.
@@ -1510,7 +1655,7 @@ API_EXTERNAL_URL=${initLocalApiUrl(opts)}`,
   // Where the CLI would leave it after taking out a SUPATYPE_MAILER_AUTOCONFIRM an earlier CLI wrote.
   // Written here, a new project never has that done to a line of the developer's own (FF7).
   sections.push(MAILER_AUTOCONFIRM_NOTE)
-  sections.push(storageEnvSections(opts.storageLocal, opts.storageProduction))
+  sections.push(storageEnvSections(opts.storageLocal, opts.storageProduction, opts.productionTarget === "cloud"))
 
   if (opts.adminEmail && opts.adminPassword) {
     sections.push(
@@ -1520,7 +1665,9 @@ SUPATYPE_ADMIN_PASSWORD=${opts.adminPassword}`,
     )
   }
 
-  sections.push(selfHostPortsEnvSection(opts.storageProduction))
+  // Those ports belong to the self-host compose stack, which a Cloud project never runs; its local
+  // gateway port is written above.
+  if (opts.productionTarget !== "cloud") sections.push(selfHostPortsEnvSection(opts.storageProduction))
 
   return sections.join("\n\n") + "\n"
 }
@@ -1546,7 +1693,7 @@ function selfHostPortsEnvSection(storageProduction: StorageProvider): string {
  * written unprefixed (RESEND_API_KEY, SES_FROM, SMTP_HOST), which nothing reads, so a developer who
  * filled them in still got no email.
  */
-function emailEnvSection({ email, projectName, smtp }: ScaffoldOptions): string {
+function emailEnvSection({ email, projectName, smtp, adminEmail }: ScaffoldOptions): string {
   switch (email) {
     case "resend":
       return `# Email (Resend)
@@ -1564,6 +1711,9 @@ SUPATYPE_SMTP_HOST=${smtp?.host ?? ""}
 SUPATYPE_SMTP_PORT=${smtp?.port ?? 587}
 SUPATYPE_SMTP_USER=
 SUPATYPE_SMTP_PASS=
+# The address mail is sent from. Without it the server builds an empty From and fails every send.
+# Defaulted to the admin email given at init: change it to a sender your SMTP server accepts.
+SUPATYPE_SMTP_ADMIN_EMAIL=${adminEmail ?? ""}
 SUPATYPE_SMTP_SENDER_NAME=${projectName}`
     case "console":
     default:
@@ -1579,7 +1729,17 @@ SUPATYPE_SMTP_SENDER_NAME=${projectName}`
 function storageEnvSections(
   storageLocal: StorageProvider,
   storageProduction: StorageProvider,
+  cloud: boolean,
 ): string {
+  // Supatype Cloud brings its own storage and no production entry is written, so a bucket of your own
+  // here serves local development only.
+  if (cloud) {
+    return storageLocal === "s3"
+      ? s3EnvSection("local development only", "Supatype Cloud provides production storage.")
+      : `${localStorageEnvSection(storageLocal)}
+
+# Production storage: Supatype Cloud provides it, no configuration needed.`
+  }
   if (storageLocal === storageProduction) {
     if (storageLocal === "s3") {
       return s3EnvSection("local development and production", "Use a separate bucket for dev and production.")

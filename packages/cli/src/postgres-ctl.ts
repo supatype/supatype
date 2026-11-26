@@ -4,7 +4,7 @@
  */
 
 import { setTimeout as sleep } from "node:timers/promises"
-import { spawnSync } from "node:child_process"
+import { spawnSync, type SpawnSyncOptions } from "node:child_process"
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve as resolvePath } from "node:path"
@@ -495,20 +495,30 @@ export function writeClusterSettings(opts: PgSettingsOptions & { dataDir: string
 /**
  * pg_ctl start, with its errors in a file beside the log, put in the error thrown when it fails.
  * Ctrl+C during the start made it print `could not send stop signal` to dev's terminal, which an
- * interrupted start has no reason to show. A file, not a pipe: Postgres inherits the handle, and
- * a pipe would hold this call until Postgres exits.
+ * interrupted start has no reason to show. Files, not pipes: Postgres inherits the handles, and
+ * a pipe would hold this call until Postgres exits. Its stdout is a file too, and not this
+ * process's own: under `supatype pg start | tee out` the pipe it would hold open ends only when
+ * Postgres does, so the command never returned (S-37). What pg_ctl said is printed afterwards.
  */
-function runPgCtlStart(opts: PgOptions, args: string[], logPath: string): void {
+/** How runPgCtlStart runs pg_ctl: spawnSync, or a stand-in in tests. Only the exit status is read. */
+export type PgCtlSpawn = (command: string, args: string[], options: SpawnSyncOptions) => { status: number | null }
+
+export function runPgCtlStart(opts: PgOptions, args: string[], logPath: string, spawn: PgCtlSpawn = spawnSync): void {
   const errPath = `${logPath}.pg_ctl-stderr`
-  const fd = openSync(errPath, "w")
+  const outPath = `${logPath}.pg_ctl-stdout`
+  const errFd = openSync(errPath, "w")
+  const outFd = openSync(outPath, "w")
   try {
-    const result = spawnSync(pgBin(opts.pgBinDir, "pg_ctl"), args, { stdio: ["ignore", "inherit", fd], env: pgSpawnEnv(opts.pgBinDir) })
+    const result = spawn(pgBin(opts.pgBinDir, "pg_ctl"), args, { stdio: ["ignore", outFd, errFd], env: pgSpawnEnv(opts.pgBinDir) })
     if (result.status !== 0) {
       const detail = readFileSync(errPath, "utf8").trim()
       throw new Error(`pg_ctl start failed (exit ${result.status})${detail ? `: ${detail}` : ""}`)
     }
+    const said = readFileSync(outPath, "utf8")
+    if (said !== "") process.stdout.write(said)
   } finally {
-    closeSync(fd)
+    closeSync(errFd)
+    closeSync(outFd)
   }
 }
 

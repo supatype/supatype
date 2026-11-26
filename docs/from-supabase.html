@@ -103,6 +103,7 @@
     </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html">CLI</a></li>
+      <li><a href="/docs/versions.html">Versions</a></li>
     </ul></div>
     <div><span class="label">MORE</span><ul>
       <li><a href="/licensing.html">Licensing</a></li>
@@ -241,7 +242,7 @@
 <h2 id="not-carried">What does not carry over</h2>
 <ul>
   <li><strong>Your SQL migrations.</strong> Supatype does not replay <code>supabase/migrations</code>. It plans changes from the schema and records the migrations it applies.</li>
-  <li><strong>Your RLS policies.</strong> They are rewritten as access rules. Rules are types, and there is no raw SQL escape hatch, so a policy the rule types cannot express needs another approach, such as a hook or a function.</li>
+  <li><strong>Your RLS policies.</strong> They are rewritten as access rules. Rules are types: there is no raw SQL escape hatch for access rules, so a policy the rule types cannot express needs another approach, such as a hook or a Postgres function you write yourself (<a href="/docs/schema.html#server-logic">Server logic in a Postgres function</a>). Your database is still Postgres, and you can run your own SQL in it.</li>
   <li><strong>Generated types.</strong> Delete <code>database.types.ts</code>. The client types come from the generated <code>supatype/generated</code> files.</li>
   <li><strong>Function entry points.</strong> The handler shape differs, so each function's entry needs a small rewrite. The code inside, being Deno, mostly stays.</li>
   <li><strong>Function names and bodies in the client are not typed</strong>, unlike tables.</li>

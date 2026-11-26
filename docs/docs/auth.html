@@ -103,6 +103,7 @@
     </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html">CLI</a></li>
+      <li><a href="/docs/versions.html">Versions</a></li>
     </ul></div>
     <div><span class="label">MORE</span><ul>
       <li><a href="/licensing.html">Licensing</a></li>
@@ -152,7 +153,7 @@
     <p><code>enroll({ factorType: "totp" })</code> returns the factor's <code>id</code> and a QR code (<code>totp.qrCode</code>) and URI (<code>totp.uri</code>) to show the user. <code>challengeAndVerify({ factorId, code })</code> is <code>challenge</code> then <code>verify</code> in one call. Call the two separately when the code arrives later, as an SMS does. A verify raises the session to AAL2 and emits <code>MFA_CHALLENGE_VERIFIED</code>. <code>listFactors()</code> returns every factor in <code>all</code> and the verified ones in <code>totp</code> and <code>phone</code>. <code>getAuthenticatorAssuranceLevel()</code> reports the current and next level.</p>
     <h3>Anonymous users</h3>
     <p>An anonymous sign-in creates a real user with a user id and a session. Turn it on with <code>SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED=true</code>. Because the user has an id, an anonymous user passes <code>LoggedIn</code> and can own rows. The token carries <code>is_anonymous: true</code>.</p>
-    <p><code>signInAnonymously({ options: { data, captchaToken } })</code> takes optional metadata and a captcha token, and the user comes back with <code>isAnonymous: true</code>.</p>
+    <p><code>signInAnonymously({ options: { data, captchaToken } })</code> takes optional metadata and a captcha token, and the user comes back with <code>isAnonymous: true</code>. The flag survives a reload: a restored session keeps it, and a session saved without it takes it from the token's <code>is_anonymous</code> claim.</p>
     <h3>Keep anonymous users out</h3>
     <p>To let only registered users do something, test the claim as well as the sign-in:</p>
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
@@ -322,7 +323,17 @@ window.location.assign(data.url)
   smtp: { host: <span class="s">"smtp.example.com"</span>, port: <span class="t">587</span>, user: <span class="s">"apikey"</span>, pass: process.env.SMTP_PASS, admin_email: <span class="s">"no-reply@example.com"</span> },
 },</pre></div>
     <div class="callout warn"><span class="callout-label">CONSOLE SENDS NOTHING</span><p><code>console</code>, the default, logs that a message would have been sent but leaves out the body, so the link is not in the log. To try magic links or password reset, configure a real provider.</p></div>
-    <p>For Resend, set <code>SUPATYPE_RESEND_API_KEY</code> and <code>SUPATYPE_RESEND_FROM</code> in <code>.env</code>. For SES, set <code>SUPATYPE_SES_FROM</code>; credentials come from the environment's AWS configuration.</p>
+    <p>On a self-hosted stack, for Resend set <code>email.resend_api_key</code> and <code>email.resend_from</code> in the <code>email</code> block above (a value set by hand in <code>.env</code> is replaced from <code>supatype.config.ts</code>). For SES set <code>email.ses_from</code>; credentials come from the environment's AWS configuration.</p>
+    <p>On Supatype Cloud there is no <code>.env</code> and no ambient AWS configuration, so SES takes all of its settings from the <code>email</code> block, and a push that leaves one out is refused:</p>
+    <div class="cb"><div class="cb-bar"><span>supatype.config.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>email: {
+  provider: <span class="s">"ses"</span>,
+  ses_from: <span class="s">"no-reply@example.com"</span>, <span class="c">// required: the sender address, verified in SES</span>
+  ses_access_key_id: env(<span class="s">"SES_ACCESS_KEY_ID"</span>), <span class="c">// required: name an environment variable, never the key itself</span>
+  ses_secret_access_key: env(<span class="s">"SES_SECRET_ACCESS_KEY"</span>), <span class="c">// required, the same way</span>
+  ses_region: <span class="s">"eu-west-2"</span>, <span class="c">// optional</span>
+},</pre></div>
+    <p>Without <code>ses_from</code> the server cannot send, so mail would be dropped while requests still succeed. That is why Cloud refuses the push and names <code>email.ses_from</code>.</p>
     <h3 id="email-settings">Email sign-in and confirmation</h3>
     <p>Two keys under <code>auth.email</code> in <code>supatype.config.ts</code> decide what email-and-password sign-in does:</p>
     <div class="cb"><div class="cb-bar"><span>supatype.config.ts</span><button type="button" class="cb-copy">Copy</button></div>
@@ -334,6 +345,28 @@ window.location.assign(data.url)
       <li><code>enableConfirmations</code>: whether a new sign-up has to click a link in an email before it can sign in. Unset, a self-hosted stack (<code>supatype self-host compose</code>) sends the link and local dev, Docker or native, confirms the sign-up at once. <code>true</code> or <code>false</code> sets it for every stack.</li>
     </ul>
     <p><code>supatype dev</code> and <code>supatype self-host compose</code> pass both to the auth server on every start, as <code>SUPATYPE_EXTERNAL_EMAIL_ENABLED</code> and <code>SUPATYPE_MAILER_AUTOCONFIRM</code>. Either variable set in the project's <code>.env</code> wins over the config for that stack; the CLI never writes them there. Studio shows each under <strong>Authentication &gt; Configuration</strong>, with the key that sets it.</p>
+    <h3 id="rate-limits">Rate limits</h3>
+    <p><code>auth.rateLimits</code> caps how often one client may call the auth server:</p>
+    <div class="cb"><div class="cb-bar"><span>supatype.config.ts</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>auth: {
+  rateLimits: { verify: <span class="t">10</span>, otp: <span class="t">5</span> },
+},</pre></div>
+    <p>Each limit except <code>smsSent</code> counts requests per client IP address. The address is the one the gateway forwards: Kong writes <code>X-Real-IP</code> from the connection and replaces any value the client sent, so a client cannot pick its own. The server believes a forwarded address only on a request that carries the project's forwarding secret, which Kong adds and no client holds. Any other request counts against the address of its connection, whatever <code>St-Forwarded-For</code>, <code>X-Real-IP</code> or <code>X-Forwarded-For</code> it carries, and the IP recorded in audit logs follows the same rule. A client over a limit gets 429 with error code <code>over_request_rate_limit</code> until the window lets it in again.</p>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col">Key</th><th scope="col">What it counts, per client</th><th scope="col">Window</th><th scope="col">Default</th></tr></thead>
+      <tbody>
+        <tr><td><code>otp</code></td><td>Sign-up and sign-in requests: <code>/signup</code> (not anonymous), <code>/otp</code>, magic links, password recovery, <code>/resend</code> and updating the signed-in user. Each of these counts on its own. It counts requests, not emails</td><td>5 minutes</td><td>30</td></tr>
+        <tr><td><code>verify</code></td><td>Requests to <code>/verify</code>, which checks the code or link from an email or SMS, whether the code is right or not</td><td>5 minutes</td><td>30</td></tr>
+        <tr><td><code>tokenRefresh</code></td><td>Requests to <code>/token</code>: password sign-in, refreshing a session and the other grants</td><td>5 minutes</td><td>150</td></tr>
+        <tr><td><code>sso</code></td><td>Requests that start a SAML sign-in</td><td>5 minutes</td><td>30</td></tr>
+        <tr><td><code>mfa</code></td><td>Multi-factor challenges, and verifies, each counted on its own</td><td>1 minute</td><td>15</td></tr>
+        <tr><td><code>anonymousUsers</code></td><td>Anonymous sign-ins</td><td>1 hour</td><td>30</td></tr>
+        <tr><td><code>smsSent</code></td><td>SMS messages the server sends, across every client together</td><td>1 hour</td><td>30</td></tr>
+      </tbody>
+    </table></div>
+    <p>A limit of N lets one client make N requests at once, and then one more each time the window divided by N passes. Every per-client limit works that way, over its own window: a limit of 3 lets one client make 3 requests at once, never more. A limit below 1 still lets one through. How many emails the server sends an hour is a separate limit: <code>SUPATYPE_RATE_LIMIT_EMAIL_SENT</code> on self-host, and the platform's on Cloud.</p>
+    <p>On self-host each key renders as a <code>SUPATYPE_RATE_LIMIT_*</code> variable for the server (<code>mfa</code> as <code>SUPATYPE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY</code>), and a value in <code>.env</code> wins. Behind a proxy in front of Kong, Kong sees the proxy's address, so every client would share one count: set <code>SUPATYPE_RATE_LIMIT_HEADER</code> in <code>.env</code> to a header that proxy writes from the connection, and only if nothing else can reach Kong.</p>
+    <p>The forwarding secret is <code>SUPATYPE_FORWARDING_SECRET</code> in <code>.env</code>. <code>supatype init</code> generates it, and a project that predates it gets one on its next <code>dev</code> or <code>self-host</code> command. It is given to the server (as <code>SUPATYPE_SECURITY_FORWARDING_SECRET</code>), to Kong and to the functions worker, and to nothing else: the worker removes it from the environment before it loads your functions, so function code cannot read it. When a function calls the project's own address, the worker passes on the end user's address with it, so a function that signs a user in is counted against that user and not against the worker. Under Docker the worker reaches Kong on a second port, 8100, that is never published to the host: Kong leaves the two headers alone there, where it removes them on the public port, and adds no secret of its own, so code that reaches 8100 without the secret is still counted against its own connection. Keep it out of version control like the other secrets in <code>.env</code>, and never log it. A server with no secret set believes forwarded addresses from any sender, as before, and says so once when it starts.</p>
     <h3>Environment variables</h3>
     <p>The server reads the project's <code>.env</code> when it starts, so <code>SUPATYPE_*</code> auth variables placed there take effect after a restart. In the Docker stacks, a few values are set by the generated Compose file and are read from the plain names shown.</p>
     <div class="tbl"><table>

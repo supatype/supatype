@@ -103,6 +103,7 @@
     </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html">CLI</a></li>
+      <li><a href="/docs/versions.html">Versions</a></li>
     </ul></div>
     <div><span class="label">MORE</span><ul>
       <li><a href="/licensing.html">Licensing</a></li>
@@ -132,7 +133,10 @@
     <p>Signing in is not enough on its own. Every person also needs a <a href="/docs/studio-roles.html">Studio role</a>.</p>
 
     <h2 id="layout">Finding your way</h2>
-    <p>The sidebar holds the dashboard, Models, Database, Media &amp; Storage, Authentication, Edge Functions, Realtime and Observability, plus Settings. Entries marked as coming soon open a placeholder page and do nothing yet.</p>
+    <p>The sidebar lists, top to bottom: Dashboard and Models; Database and Media &amp; Storage; Authentication; Edge Functions, Static site and Realtime; and Plugins. Settings is pinned at the bottom.</p>
+    <p>Some entries depend on who you are or where Studio runs. Authentication is hidden from editors and viewers. Realtime is hidden when the server does not offer the Realtime inspector. Static site appears only when the host (Supatype Cloud or a self-host deployment that provides it) describes a site, and its Deployments page needs a host that can list deployments.</p>
+    <p>Features that are not built yet have no sidebar entry. Some pages inside a group still say a feature is coming soon: Database Wrappers, Read Replicas and Analytical Warehouse under Database, Backups there too except on Supatype Cloud, and Auth Hooks and Attack Protection under Authentication.</p>
+    <p>The Static site group shows the site address, whether it is served from files or proxied to an app, and what is served, with a Settings page for the serving mode, SPA fallback and response headers. A setting that <code>supatype.config.ts</code> sets is marked as such. Where a deployment can list site deployments, the group has a Deployments page. A deployment that cannot describe its site has no Static site group.</p>
     <p><strong>Jump to</strong> in the top bar searches pages, users and records.</p>
     <p>If the newest schema push was refused or failed, a notice shows above every screen. It says that nothing was applied and links to that push in the migration history. It goes away once a push applies.</p>
 
@@ -159,6 +163,7 @@
       </tbody>
     </table></div>
     <p>Editors do not see Schema or Rules. Cache is for admins and developers.</p>
+    <p>When the cache service refuses a request, the Cache tab shows the reason the server gave, with the HTTP status after it. If the project has no keyspace behind the cache yet, it says that nothing is cached and reads go straight to the database.</p>
 
     <h2 id="rich-text">Rich text and blocks</h2>
     <p>A <code>RichText</code> field opens a rich text editor with a toolbar for bold, italic, underline, strikethrough, headings 1 to 3, paragraphs, bullet lists and numbered lists. The field stores a Lexical document.</p>
@@ -238,6 +243,7 @@
       <li>Statements that drop, empty or overwrite data (<code>DROP</code>, <code>TRUNCATE</code>, <code>DELETE</code>, <code>UPDATE</code>, and an <code>ALTER</code> that drops something or turns off row level security) ask first and name what they change.</li>
       <li><code>EXPLAIN (FORMAT JSON)</code> draws the plan as a tree.</li>
       <li>Query History lists earlier runs in this session.</li>
+      <li>A <code>DELETE</code> or <code>UPDATE</code> with no <code>WHERE</code> fails with <code>DELETE requires a WHERE clause</code>. That is <code>pg_safeupdate</code>, which the image loads for every session, this runner included. Write <code>WHERE true</code> to mean every row. On a connection of your own, <code>SET safeupdate.enabled = 0</code> turns the check off for that session.</li>
     </ul>
     <div class="callout warn">
       <span class="callout-label">FULL ACCESS</span>

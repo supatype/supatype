@@ -103,6 +103,7 @@
     </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html">CLI</a></li>
+      <li><a href="/docs/versions.html">Versions</a></li>
     </ul></div>
     <div><span class="label">MORE</span><ul>
       <li><a href="/licensing.html">Licensing</a></li>
@@ -392,6 +393,68 @@
     </table></div>
     <p><code>--yes</code> does not override hand-edited access rules. Only <code>--overwrite-drift</code> does. Objects that Supatype did not create are never dropped or taken over.</p>
 
+    <h2 id="server-logic">Server logic in a Postgres function</h2>
+    <p>The schema declares tables and <a href="#access">access rules</a>. It has no place for your own SQL, so logic that must run as one step in the database, such as checking a price and raising it in one transaction, is a Postgres function that you create yourself and call with <code>supatype.rpc()</code>. "No raw SQL" means the access rules are typed, not that the database is closed to you.</p>
+    <div class="cb"><div class="cb-bar"><span>place_bid.sql</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">CREATE FUNCTION</span> public.place_bid(lot_id <span class="t">uuid</span>, amount <span class="t">numeric</span>)
+<span class="k">RETURNS</span> public.lot
+<span class="k">LANGUAGE</span> plpgsql
+<span class="k">SECURITY INVOKER</span>
+<span class="k">SET</span> search_path = <span class="s">''</span>
+<span class="k">AS</span> $$
+<span class="k">DECLARE</span>
+  current_lot public.lot;
+<span class="k">BEGIN</span>
+  <span class="c">-- Lock the row, so two bids at once are checked one after the other.</span>
+  <span class="k">SELECT</span> * <span class="k">INTO</span> current_lot <span class="k">FROM</span> public.lot <span class="k">WHERE</span> id = lot_id <span class="k">FOR UPDATE</span>;
+  <span class="k">IF NOT FOUND THEN</span>
+    <span class="k">RAISE EXCEPTION</span> <span class="s">'no such lot'</span>;
+  <span class="k">END IF</span>;
+  <span class="k">IF</span> amount &lt;= current_lot.price <span class="k">THEN</span>
+    <span class="k">RAISE EXCEPTION</span> <span class="s">'bid must be above %'</span>, current_lot.price;
+  <span class="k">END IF</span>;
+  <span class="k">UPDATE</span> public.lot <span class="k">SET</span> price = amount <span class="k">WHERE</span> id = lot_id <span class="k">RETURNING</span> * <span class="k">INTO</span> current_lot;
+  <span class="k">RETURN</span> current_lot;
+<span class="k">END</span>;
+$$;
+
+<span class="k">GRANT EXECUTE ON FUNCTION</span> public.place_bid(<span class="t">uuid</span>, <span class="t">numeric</span>) <span class="k">TO</span> authenticated;
+<span class="k">NOTIFY</span> pgrst, <span class="s">'reload schema'</span>;</pre></div>
+    <ul>
+      <li><strong>Lock what you check.</strong> <code>SELECT ... FOR UPDATE</code> makes a second caller wait until the first transaction ends, so the check and the update cannot interleave.</li>
+      <li><strong><code>SECURITY INVOKER</code> or <code>DEFINER</code>.</strong> An invoker function runs as the caller, so the <a href="#access">row rules</a> and <a href="#field-rules">field masking</a> on every table it touches apply as they would for a request. That is the default, and the one to use. A definer function runs as the role that created it, which skips both, so it must do its own checks (for example against <code>auth.uid()</code>) and should be written with great care.</li>
+      <li><strong><code>SET search_path = ''</code>.</strong> It stops a caller shadowing a table or function with one of their own. Name every object with its schema, as above. It matters most for a definer function.</li>
+      <li><strong>Grant it.</strong> The API roles can call only what you grant: <code>GRANT EXECUTE ... TO authenticated</code>, or <code>anon</code> for a signed-out caller.</li>
+      <li><strong>Create it.</strong> Run the SQL with <code>psql</code> against your database, or in Studio's <a href="/docs/studio.html#sql">SQL runner</a>. <code>NOTIFY pgrst, 'reload schema'</code> makes the API pick the function up straight away.</li>
+      <li><strong>Call it.</strong> <code>rpc</code> sends the named arguments, and a <code>RAISE EXCEPTION</code> comes back as <code>error</code>.</li>
+    </ul>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> { data: lot, error } = <span class="k">await</span> supatype.rpc(<span class="s">"place_bid"</span>, { lot_id: lotId, amount: <span class="k">120</span> })</pre></div>
+    <div class="callout warn">
+      <span class="callout-label">NOT MANAGED</span>
+      <p>Supatype does not manage this function. A push neither applies it nor changes or drops it: it leaves a function it did not make alone. But nothing else carries it either. <code>supatype dev --reset-db</code> removes the database volume and the function with it. A new environment does not get it, so run the SQL again there, or keep it in a file your own deploy step applies. On Supatype Cloud, run it in each environment's SQL runner. It is not in the schema, so it is not in the generated types: <code>rpc</code> takes the name and arguments you give it. Managed functions are planned for after the beta.</p>
+    </div>
+
+    <h3 id="schedule">Run a function on a schedule</h3>
+    <p>The image ships <code>pg_cron</code>, so a Postgres function can run on a timer. Write the function as above (here, one that closes every lot whose end time has passed), then schedule it by hand.</p>
+    <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="pr">$</span> psql <span class="s">"$DATABASE_URL"</span>
+
+<span class="k">SELECT</span> cron.schedule(<span class="s">'close-lots'</span>, <span class="s">'* * * * *'</span>, $$<span class="k">SELECT</span> public.close_ended_lots()$$);
+<span class="k">SELECT</span> jobid, jobname, schedule, command, username, database <span class="k">FROM</span> cron.job;
+<span class="k">SELECT</span> status, return_message, start_time <span class="k">FROM</span> cron.job_run_details <span class="k">ORDER BY</span> runid <span class="k">DESC LIMIT</span> 5;
+<span class="k">SELECT</span> cron.unschedule(<span class="s">'close-lots'</span>);</pre></div>
+    <ul>
+      <li><strong>Where it runs.</strong> In your project's database, the one named by <code>POSTGRES_DB</code>, as the role that called <code>cron.schedule</code>. With the admin URL that role is <code>supatype_admin</code>, a superuser, so the job is not held to row rules and field masking, and the function should do its own checks.</li>
+      <li><strong>Who can schedule.</strong> The admin role can. Studio's SQL runner connects as <code>supatype_sql_editor</code>, which has no access to the <code>cron</code> schema: <code>cron.schedule</code> there fails with <code>permission denied for schema cron</code>. Use <code>psql</code> with the admin URL.</li>
+      <li><strong>List and remove.</strong> <code>cron.job</code> lists the jobs, <code>cron.job_run_details</code> says whether each run succeeded, and <code>cron.unschedule('name')</code> removes one.</li>
+    </ul>
+    <div class="callout warn">
+      <span class="callout-label">NOT MANAGED</span>
+      <p>The job is not in the schema. A push does not apply it, <code>supatype dev --reset-db</code> removes it with the database volume, and a new environment does not get it: schedule it in each environment by hand. Declared jobs are planned for after the beta. This was run against the <code>supatype/postgres</code> image a release pins; Supatype Cloud databases have not been checked.</p>
+    </div>
+    <p>The same pattern serves a query the REST filters cannot express. The <a href="/docs/schema/fields.html">geography example</a> adds a <code>places_within</code> function the same way.</p>
+
     <nav class="pn" aria-label="More pages">
       <a href="/docs/"><small>PREVIOUS</small><span>Get started</span></a>
       <a href="/docs/client.html" class="next"><small>NEXT</small><span>Client</span></a>
@@ -412,6 +475,8 @@
     <a href="#buckets">Storage buckets</a>
     <a href="#renames">Renames</a>
     <a href="#push">What a push refuses</a>
+    <a href="#server-logic">Server logic in a function</a>
+    <a href="#schedule">Run a function on a schedule</a>
   </nav>
 </div>
 

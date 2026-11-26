@@ -7,6 +7,8 @@ import type { SupatypeProjectConfig } from "../src/project-config.js"
 
 let projectConfig: SupatypeProjectConfig
 
+vi.mock("../src/compose-render-mode.js", async (importOriginal) =>
+  (await import("./support/no-running-stack.js")).withNoRunningStack(await importOriginal<typeof import("../src/compose-render-mode.js")>()))
 vi.mock("../src/config.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/config.js")>()
   return { ...actual, loadConfig: () => projectConfig }

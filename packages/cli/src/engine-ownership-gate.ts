@@ -48,6 +48,12 @@ export const OWNERSHIP_FEATURES = [
   // Not an ownership flag either: a push whose data migrations fire after-hooks (`push --run-hooks`).
   // An engine without it would reject the flag as an unknown argument.
   "run_hooks",
+  // A schema's `Channel<>` declarations and `realtime.channels`. An engine without it drops both and
+  // pushes the rest, so declared channels would have no access function and nothing would enforce them.
+  "private_channels",
+  // Not an ownership flag: a control plane that serves the remote seed routes. This is
+  // REMOTE_SEED_FEATURE from @supatype/types, a dev dependency of this package, so named by value.
+  "seed",
 ] as const
 
 export type OwnershipFeature = (typeof OWNERSHIP_FEATURES)[number]
@@ -117,6 +123,25 @@ export function identityColumnsNeed(ast: unknown): FeatureNeed[] {
   }
   if (fields.length === 0) return []
   return [{ feature: "identity_columns", flag: `identity and generated columns (${fields.join(", ")})` }]
+}
+
+/**
+ * What sending `ast` needs for its realtime channels: none when it declares no channel and states no
+ * mode. Asked of the engine's capabilities rather than its version, so it holds whatever the version
+ * floor says (`ENGINE_MIN_FOR_CHANNELS`).
+ */
+export function privateChannelsNeed(ast: unknown): FeatureNeed[] {
+  const named = isJsonObject(ast) && Array.isArray(ast["channels"])
+    ? ast["channels"].map((channel) => (isJsonObject(channel) ? String(channel["name"]) : "?"))
+    : []
+  const declared = [...named, ...(isJsonObject(ast) && ast["realtime"] !== undefined ? ["realtime.channels"] : [])]
+  if (declared.length === 0) return []
+  return [{ feature: "private_channels", flag: `realtime channels (${declared.join(", ")})` }]
+}
+
+/** Everything in a schema that an engine without the matching capability would drop in silence. */
+export function schemaFeatureNeeds(ast: unknown): FeatureNeed[] {
+  return [...identityColumnsNeed(ast), ...privateChannelsNeed(ast)]
 }
 
 /** First engine release with the ownership ledger's flags (schema-engine v0.7.0). */

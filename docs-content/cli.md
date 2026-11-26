@@ -25,7 +25,7 @@ $ supatype push --help
 
 The npm package needs Node.js 18 or later. It is the install to use on Windows.
 
-The npm package runs the same program as the standalone install, so the React version your app uses, or any other package it installs, has no effect on the CLI. The first run of each version downloads that program from `releases.supatype.com` into `~/.supatype/cache/cli/<version>/` and checks it against the release's signed checksums. In a scaffolded project that happens during `npm install`, when the `prepare` script runs `supatype generate`. A production install with `--omit=dev` leaves the CLI out, and `prepare` then generates nothing and succeeds, since the build that needed the generated files ran with everything installed. Where that site is unreachable, set `SUPATYPE_CDN_BASE` to a mirror of it. The program is built for Linux and macOS on x64 and arm64, and for Windows on x64.
+The npm package runs the same program as the standalone install, so the React version your app uses, or any other package it installs, has no effect on the CLI. The first run of each version downloads that program from `releases.supatype.com` into `~/.supatype/cache/cli/<version>/` and checks it against the release's signed checksums. In a scaffolded project that happens during `npm install`, when the `prepare` script runs `supatype generate`. A production install with `--omit=dev` leaves the CLI out, and `prepare` then generates nothing and succeeds, since the build that needed the generated files ran with everything installed. Where that site is unreachable, set `SUPATYPE_CDN_BASE` to a mirror of it. A CLI built from source has no release public key embedded and refuses the download; set `SUPATYPE_RELEASE_PUBLIC_KEY` to the release minisign public key to verify the checksums against it. When set, it takes the place of the embedded key. The program is built for Linux and macOS on x64 and arm64, and for Windows on x64.
 
 On a Linux or macOS machine without Node, such as a CI image or a server, install the standalone binary instead, with the script or with Homebrew:
 
@@ -45,7 +45,7 @@ Many commands that reach a database take `--connection <url>` to override the co
 Commands that use Docker first check that it answers. A Docker that says it cannot be reached fails the command at once. A Docker that is running but slow to answer, as on a machine carrying many containers, is waited for, with a line saying so, for up to 60 seconds in all; set `SUPATYPE_DOCKER_TIMEOUT` to a whole number of seconds to wait longer or shorter.
 
 :::note[Cloud]
-Commands marked **Cloud** need Supatype Cloud, which is coming soon. Everything else works locally and on a self-hosted stack.
+Commands marked **Cloud** need Supatype Cloud, which is in closed beta ([request access](/#cloud)). Everything else works locally and on a self-hosted stack.
 :::
 
 <h2 id="project">Project and local development</h2>
@@ -78,7 +78,7 @@ Commands marked **Cloud** need Supatype Cloud, which is coming soon. Everything 
 | Command | Description | Useful flags |
 | --- | --- | --- |
 | `push` | Push schema to the database: diff, prompt for destructive changes, apply migration, generate types | `--yes`, `--connection <url>`, `--env <name>`, `--direct` (alias `--local`), `--overwrite-drift`, `--run-hooks` |
-| `diff` | Show planned schema changes without applying them (dry run) | `--connection <url>`, `--env <name>`, `--direct` |
+| `diff` | Show planned schema changes (the operations, not the SQL) without applying them. There is no `push --dry-run`: `diff` is the preview and `migrate` prints the SQL | `--connection <url>`, `--env <name>`, `--direct` |
 | `generate` | Regenerate TypeScript types without running a migration |  |
 | `migrate` | Write the SQL a push would apply, without applying it. Plain, it takes no lock your application waits on and the file records nothing: applied by hand, the next push finds the tables unmanaged. With `--record` the file also records the migration as a push does | `-o, --output <file>`, `--record`, `--force` |
 | `migrations list` | List applied migrations with schema snapshot metadata | `--connection <url>`, `--env <name>` |
@@ -106,13 +106,21 @@ An object passed to `adopt` is named as `doctor` names it: `kind:table.name`, or
 
 | Command | Description | Useful flags |
 | --- | --- | --- |
-| `seed [file]` | Run database seeds: optional single file; else all seeds/*.ts (alphabetical); else seed.ts | `--status`, `--atomic`, `--connection <dsn>`, `--environment <name>` |
+| `seed [file]` | Run database seeds: optional single file; else all seeds/*.ts (alphabetical); else seed.ts | `--status`, `--atomic`, `--connection <dsn>`, `--environment <name>`, `--env <name>`, `--local`, `--confirm-production` |
 | `cache rest list` | List cached REST GET entries | `--table <name>`, `--json` |
 | `cache rest get <key>` | Show one cache entry (full key) | `--json` |
 | `cache rest delete <key>` | Delete one cache entry |  |
 | `cache rest flush` | Flush REST cache entries | `--table <name>`, `--yes` |
 
-`seed` refuses to run against a project linked to Supatype Cloud unless you pass `--force`. See [Seeding](/docs/seeding.html).
+`seed` on a linked project (Supatype Cloud, or a server linked with `supatype link`) sends the seeds to that server instead of connecting to the database. `--local` seeds the local stack instead, and `--force` is refused. See [Seeding](/docs/seeding.html).
+
+<h3 id="server-cache">Switching the server cache on</h3>
+
+A model's `cache` block says which tables may be cached. It does not switch anything on: the running stack keeps its own allowlist, `cache_tables`, and a table is served from the cache only when both agree. `push` and `dev` add each newly declared table to that allowlist through the running stack and never change an entry that already exists. If the stack is not answering they create `.supatype/api-config.json` from the server's default shape and write the entry there.
+
+Both print a note while `cache_max_ttl` is 0, which it is until you set it: with a TTL of 0 nothing is cached. Set it under API, REST, Settings in Studio, or with the admin API, which is what the CLI calls:
+
+PATCH /admin/v1/config/rest Authorization: Bearer &lt;service role key&gt; { "cache_max_ttl": 60, "cache_tables": { "posts": { "enabled": true, "allow_public": false } } } All three fields are optional, and `schema` and `max_rows` are left alone when absent. `cache_max_ttl` is 0 to 86400 seconds. `cache_tables` **replaces the whole map**, so read it with `GET /admin/v1/config/rest` and send back the entries you want to keep. The schema's declaration is a ceiling: a table it does not declare, or declares with `enabled: false`, is switched off and listed in the answer's `adjusted` array, and a `cache_max_ttl` above a declared `maxTtl` is lowered to it. Every Cloud plan runs the cache, Free included. Free's is smaller: 10,000 entries of up to 1,024 bytes each, and no row cache. On Cloud, `push` stores the declaration but does not switch tables on, so enable them in Studio or with this call; against a local or self-hosted stack, `push` and `dev` do it for you.
 
 `reset` drops only the tables your schema manages. Sign-ins, Studio users and stored files are kept. It then clears the record of past seed runs, so a `runOnce` seed runs again, and runs the seeds unless you pass `--no-seed`. To start the whole database again, use `supatype dev --reset-db`.
 
@@ -125,9 +133,9 @@ An object passed to `adopt` is named as `doctor` names it: `kind:table.name`, or
 | `functions invoke <name>` | Invoke a local or deployed function; exits 1 when it answers 400 or above | `--data <json>`, `--auth`, `--local` (a running `functions serve` if one answers, else the dev API), `--port <port>` (of that serve, default 18472) |
 | `functions deploy` | Deploy all functions (or `--only <name>` for one) to the linked project | `--only <name>`, `--env <name>`, `--dry-run` |
 | `functions list` **Cloud** | List all deployed functions for the linked project |  |
-| `functions delete <name>` **Cloud** | Remove a deployed function |  |
+| `functions delete <name>` | Remove a deployed function and its env values from the linked project, on Cloud or on a self-hosted server. On a project that is not linked it removes nothing and says so |  |
 | `functions logs <name>` **Cloud** | Tail logs for a deployed function | `--since <duration>` (default 1h) |
-| `functions env list`, `set <KEY=value>`, `unset <key>` **Cloud** | Manage function environment variables |  |
+| `functions env list`, `set <KEY=value>`, `unset <key>` **Cloud** | Manage function environment variables | `--function <name>` (one function's own values, which override a shared one) |
 | `hooks new <name>` | Scaffold a hook handler |  |
 | `hooks list` | Show the hooks the schema declares and whether each one can run |  |
 
@@ -159,7 +167,8 @@ Turn SAML on with `auth.sso.saml.enabled` in `supatype.config.ts` first. The `ss
 | `self-host compose status` | Show compose service status |  |
 | `self-host compose logs` | Tail compose logs | `--service <name>`, `-f, --follow` |
 | `add domain [domain]` | Add a custom domain with automatic HTTPS (self-host) | `--email <email>` for Let's Encrypt |
-| `link` | Link this project to cloud or self-host (unified .supatype/link.json) | `--url <url>`, `--token <token>`, `--env <name>`, `--fix-gitignore` |
+| `link` | Link this project to cloud or self-host (unified .supatype/link.json). Refuses a different project or host than the one already linked, unless `--force` | `--url <url>`, `--token <token>`, `--env <name>`, `--fix-gitignore`, `--force` |
+| `unlink` | Remove this folder's link (`.supatype/link.json`, and the legacy `cloud.json` and `linked.json` if present) and say what was removed |  |
 | `envs list` | List linked environments, and the default commands use: `environments` in supatype.config.ts when it names one, else this checkout&apos;s |  |
 | `envs use <name>` | Set this checkout&apos;s default environment. `environments.default` in supatype.config.ts wins over it, and `envs use` says so |  |
 | `build [command...]` | Run your app's production build with the deployment's API URL and anon key under every front-end name (VITE_, PUBLIC_, NEXT_PUBLIC_, EXPO_PUBLIC_). Runs the package.json build script unless a command follows --. Refuses to start when either value is missing | `--env <name>`, `--allow-local`, `-- <command...>` |
@@ -176,22 +185,24 @@ Commands that reach the local stack's database or API need that stack running: `
 
 `build` takes each value from the first of: the environment (`SUPATYPE_URL`, `SUPATYPE_ANON_KEY` or any framework's name), the `/supatype-env.json` of the server the environment's URL names (for the anon key only, so CI can set just `SUPATYPE_URL`), the linked environment, and a `.env` that records a deployment (`PUBLIC_SUPATYPE_URL` or `API_EXTERNAL_URL`, and `ANON_KEY`). An anon key counts only for the URL being built for; one a source holds for another deployment is listed as skipped. It refuses a local address unless you pass `--allow-local`, never gives the build the service role key, writes no file, and exits with the build's own code. A package.json build script that is itself `supatype build` is refused rather than run again. `deploy` builds the app the same way. See [Deploy your frontend](/docs/deploying-your-frontend.html).
 
-For a self-hosted stack, `link --url` takes the stack's gateway URL and `--token` its `SERVICE_ROLE_KEY`. The full walkthrough is in [Self-host](/docs/#self-host) and [Deploy to a VM with GitHub Actions](/docs/guides/deploy-vm-github-actions.html).
+For a self-hosted stack, `link --url` takes the stack's gateway URL and `--token` its `SERVICE_ROLE_KEY`. The link is made to the project the server says it serves, whatever this folder is called.
+
+A folder holds one link, to Supatype Cloud or to a self-hosted server, and `envs use` chooses between environments of that one link. `link` to a different project, or to the other kind of host, refuses and names the link that is there: run `supatype unlink` to remove it, or pass `--force` to replace it with a fresh one. Linking the same project again (to refresh a token, or to add an environment with `--env`) always works. To work against both hosts at once, keep a folder for each (a second clone or a `git worktree`) and link each to its own host. The full walkthrough is in [Self-host](/docs/#self-host) and [Deploy to a VM with GitHub Actions](/docs/guides/deploy-vm-github-actions.html).
 
 <h2 id="cloud">Supatype Cloud</h2>
 
-All of these need Supatype Cloud, which is coming soon.
+All of these need Supatype Cloud, which is in closed beta ([request access](/#cloud)).
 
 | Command | Description | Useful flags |
 | --- | --- | --- |
-| `login` | Sign in to Supatype Cloud (stores refreshable session for push/deploy) | `--email <email>`, `--password <password>` (prefer `SUPATYPE_PASSWORD`) |
+| `login` | Sign in to Supatype Cloud in your browser. It opens the accounts site, you approve, and type the code shown there into the terminal; the CLI stores a personal access token (`spt_...`) for push and deploy. The URL is always printed. The CLI asks the control plane where the accounts site is (`GET /api/v1/cli/login/config`), or you set `SUPATYPE_ACCOUNTS_URL`; if neither gives an address, login stops and says so. A Cloud behind a bot check refuses the CLI with `captcha_failed`; login then says that sign-in works only through the browser and points to `--token` for CI. Any other refusal prints the control plane's own message and exits 1. A new Cloud account cannot create a project until it is approved (closed beta) | `--api-url <url>` (a Cloud other than supatype.com; `SUPATYPE_API_URL` sets it too),`--name <name>` (the token's name, default `cli_<hostname>_<time>`), `--no-browser`, `--token <spt_...>` (store a token made in your account instead of signing in, for CI; `SUPATYPE_ACCESS_TOKEN` takes one too) |
 | `logout` | Clear stored Supatype Cloud credentials |  |
-| `whoami` | Show the current Supatype Cloud session |  |
-| `link --project <slug>` | Link this project to cloud or self-host (unified .supatype/link.json) | `--token <token>`, `--env <name>` |
-| `projects list` | List all projects in your organisation |  |
-| `projects create <name>` | Create a new project | `--tier <tier>`, `--region <region>` |
-| `projects pause <slug>` | Pause a project |  |
-| `projects resume <slug>` | Resume a paused project |  |
+| `whoami` | Show the current Supatype Cloud session, checked against the control plane. Exit 0 when valid, 1 when rejected, 2 when the control plane cannot be reached |  |
+| `link --project <slug>` | Link this project to cloud or self-host (unified .supatype/link.json). A cloud link asks the Cloud you signed in to with `login`, unless `--api-url` or `SUPATYPE_API_URL` names another | `--api-url <url>`, `--token <token>`, `--env <name>` |
+| `projects list` | List your projects. In a linked project it lists that project's organisation; before a link it lists every organisation you belong to (just the one, if you have one) | `--org <slug>` (one organisation only) |
+| `projects create <name>` | Create a new project, in your only organisation, or the one `--org` names (required when you belong to several and nothing is linked) | `--tier <tier>`, `--region <region>`, `--org <slug>` |
+| `projects pause <slug>` | Pause a project | `--org <slug>` |
+| `projects resume <slug>` | Resume a paused project | `--org <slug>` |
 | `domains list`, `add <domain>`, `remove <domainId>`, `verify <domainId>` | Manage custom domains for a project |  |
 | `envs create <name>` | Create a cloud environment (staging/preview) |  |
 | `db connection-string` | Show the database connection string for the linked project | `--transaction`, `--env <name>` |

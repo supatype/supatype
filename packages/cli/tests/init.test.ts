@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest"
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
@@ -498,6 +498,26 @@ describe("scaffold()", () => {
     expect(env).toMatch(/^SUPATYPE_SMTP_PORT=2525$/m)
   })
 
+  it("defaults the SMTP sender address to the admin email and says so", () => {
+    const said = vi.spyOn(console, "log").mockImplementation(() => undefined)
+    scaffold(tmpRoot, {
+      ...defaultScaffoldOptions("my-app"),
+      email: "smtp",
+      smtp: { host: "smtp.acme.test", port: 2525 },
+      adminEmail: "admin@acme.test",
+      adminPassword: "correct horse battery",
+    })
+    const env = readFileSync(join(tmpRoot, ".env"), "utf8")
+    expect(env).toMatch(/^SUPATYPE_SMTP_ADMIN_EMAIL=admin@acme\.test$/m)
+    expect(said.mock.calls.flat().join("\n")).toContain("SUPATYPE_SMTP_ADMIN_EMAIL in .env defaults to your admin email (admin@acme.test)")
+    said.mockRestore()
+  })
+
+  it("writes the SMTP sender address line blank when no admin email was given", () => {
+    scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app"), email: "smtp" })
+    expect(readFileSync(join(tmpRoot, ".env"), "utf8")).toMatch(/^SUPATYPE_SMTP_ADMIN_EMAIL=$/m)
+  })
+
   it("mixed local dev and s3 production writes both storage sections", () => {
     scaffold(tmpRoot, {
       ...defaultScaffoldOptions("my-app"),
@@ -509,6 +529,52 @@ describe("scaffold()", () => {
     const env = readFileSync(join(tmpRoot, ".env"), "utf8")
     expect(env).toContain("local development, SeaweedFS")
     expect(env).toContain("production, your own S3 bucket")
+  })
+
+  // Supatype Cloud brings its own storage, so init records no production entry for it, whichever local
+  // storage was picked. Self-host keeps recording it.
+  it("writes no production storage for Supatype Cloud", () => {
+    for (const storageLocal of ["local", "s3"] as const) {
+      scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app", "cloud"), storageLocal, storageProduction: storageLocal })
+      const config = readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")
+      const storageLine = config.split(/\r?\n/).find((line) => line.startsWith("  storage:"))
+      expect(storageLine).toBeDefined()
+      expect(storageLine).not.toContain("production")
+      rmSync(join(tmpRoot, "supatype.config.ts"))
+    }
+  })
+
+  // With no production entry written, the S3 comments must not call the bucket a production one.
+  it("describes an S3 bucket as local-only for Supatype Cloud, and unchanged for self-host and later", () => {
+    scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app", "cloud"), storageLocal: "s3", storageProduction: "s3" })
+    const cloudEnv = readFileSync(join(tmpRoot, ".env"), "utf8")
+    expect(cloudEnv).toContain("# Storage (local development only, your own S3 bucket)")
+    expect(cloudEnv).toContain("Supatype Cloud provides production storage.")
+    expect(cloudEnv).not.toContain("and production")
+    expect(cloudEnv).not.toContain("separate bucket for dev and production")
+    for (const target of ["self-host", "later"] as const) {
+      const root = join(tmpRoot, target)
+      mkdirSync(root, { recursive: true })
+      scaffold(root, { ...defaultScaffoldOptions("my-app", target), storageLocal: "s3", storageProduction: "s3" })
+      const env = readFileSync(join(root, ".env"), "utf8")
+      expect(env).toContain("# Storage (local development and production, your own S3 bucket)")
+      expect(env).toContain("Use a separate bucket for dev and production.")
+    }
+  })
+
+  it("says Cloud provides production storage for local SeaweedFS, and writes no self-host ports", () => {
+    scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app", "cloud"), storageLocal: "local", storageProduction: "local" })
+    const env = readFileSync(join(tmpRoot, ".env"), "utf8")
+    expect(env).toContain("# Storage (local development, SeaweedFS)")
+    expect(env).toContain("Production storage: Supatype Cloud provides it")
+    expect(env).not.toContain("SeaweedFS on your server")
+    expect(env).not.toContain("Self-host stack ports")
+    expect(env).not.toContain("SUPATYPE_PUBLISH_ADDRESS")
+  })
+
+  it("still records production storage for self-host", () => {
+    scaffold(tmpRoot, { ...defaultScaffoldOptions("my-app", "self-host"), storageLocal: "s3", storageProduction: "s3" })
+    expect(readFileSync(join(tmpRoot, "supatype.config.ts"), "utf8")).toContain('storage: { provider: "s3", production: "s3" }')
   })
 
   // 0.9.2: the self-host stack reads production storage from the config, so init records the answer

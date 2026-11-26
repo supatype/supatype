@@ -11,10 +11,11 @@ import { pushStartUndo } from "./dev-shutdown.js"
 import { askDocker, DOCKER_PULL_TIMEOUT_MS, DOCKER_QUERY_TIMEOUT_MS } from "./docker-exec.js"
 import { readDotEnvFiles } from "./env-file.js"
 import { spawnFailureText, type SpawnOutcome } from "./error-message.js"
-import { firstFreePort, KEYSPACE_PORT_BASE, KEYSPACE_PORT_SPAN } from "./postgres-ctl.js"
+import { describeKeyspacePorts, firstFreeKeyspacePort, keyspacePorts } from "./keyspace-port.js"
 
 const DEFAULT_HOST = "127.0.0.1"
 const VALKEY_ADDR_ENV = "SUPATYPE_VALKEY_ADDR"
+const VALKEY_PASSWORD_ENV = "SUPATYPE_VALKEY_PASSWORD"
 const IMAGE = "valkey/valkey:8-alpine"
 
 function containerName(projectName: string): string {
@@ -75,11 +76,13 @@ export interface ValkeySidecarResult {
   addr: string
   containerName: string | null
   started: boolean
+  /** The password of a Valkey SUPATYPE_VALKEY_ADDR names, from SUPATYPE_VALKEY_PASSWORD; none for the sidecar. */
+  password?: string
 }
 
 /** A Valkey this run uses and did not start; "" for none, when the REST cache bypasses. */
-export function externalValkey(addr: string): ValkeySidecarResult {
-  return { addr, containerName: null, started: false }
+export function externalValkey(addr: string, password?: string): ValkeySidecarResult {
+  return { addr, containerName: null, started: false, ...(password !== undefined && { password }) }
 }
 
 /** No Valkey for this run: the REST cache bypasses. */
@@ -98,11 +101,7 @@ export interface ValkeySidecarDeps {
   docker: DockerCaller
 }
 
-const machine: ValkeySidecarDeps = {
-  // The keyspace's ports, since 6379 may be held by something that does not answer.
-  freePort: () => firstFreePort(KEYSPACE_PORT_BASE, KEYSPACE_PORT_SPAN),
-  docker: askDockerFor,
-}
+const machine = { docker: askDockerFor }
 
 /**
  * Ensure Valkey is reachable for native dev: the one `SUPATYPE_VALKEY_ADDR` names, else this
@@ -119,11 +118,14 @@ export async function ensureValkeySidecar(
   cwd: string,
   given: Partial<ValkeySidecarDeps> = {},
 ): Promise<ValkeySidecarResult> {
-  const deps = { ...machine, ...given }
+  // The keyspace's ports (`SUPATYPE_KEYSPACE_PORT`, else from 6379, which may be held by something
+  // that does not answer).
+  const ports = keyspacePorts(cwd)
+  const deps = { ...machine, freePort: () => firstFreeKeyspacePort(ports), ...given }
   const envAddr = namedValkeyAddr(cwd)
   if (envAddr) {
     console.log(`[supatype] Using the Valkey SUPATYPE_VALKEY_ADDR names (${envAddr}).`)
-    return externalValkey(envAddr)
+    return externalValkey(envAddr, namedDotEnvValue(cwd, VALKEY_PASSWORD_ENV))
   }
   const name = containerName(projectName)
   await deps.docker(["rm", "-f", name])
@@ -136,7 +138,7 @@ export async function ensureValkeySidecar(
   }
   const port = await deps.freePort()
   if (port === null) {
-    console.warn(`[supatype] ⚠  No free port from ${KEYSPACE_PORT_BASE} for the Valkey sidecar, REST server cache will bypass.`)
+    console.warn(`[supatype] ⚠  No free port in ${describeKeyspacePorts(ports)} for the Valkey sidecar, REST server cache will bypass.`)
     return NO_VALKEY
   }
   return (await startContainer(name, port, deps)) ? awaitReachable(name, port) : NO_VALKEY
@@ -146,9 +148,14 @@ export async function ensureValkeySidecar(
  * The Valkey SUPATYPE_VALKEY_ADDR names: the shell's, then `.env` and `.env.local`'s, as for the
  * port variables. It was read from the shell only, so one in .env was ignored (0.9.2 round 2, R2-S21).
  */
-function namedValkeyAddr(cwd: string): string | undefined {
-  const fromShell = process.env[VALKEY_ADDR_ENV]?.trim()
-  return fromShell || readDotEnvFiles(cwd)[VALKEY_ADDR_ENV]?.trim() || undefined
+export function namedValkeyAddr(cwd: string): string | undefined {
+  return namedDotEnvValue(cwd, VALKEY_ADDR_ENV)
+}
+
+/** A variable's value from the shell, else `.env` and `.env.local`; undefined when neither holds it. */
+function namedDotEnvValue(cwd: string, name: string): string | undefined {
+  const fromShell = process.env[name]?.trim()
+  return fromShell || readDotEnvFiles(cwd)[name]?.trim() || undefined
 }
 
 /**
@@ -160,7 +167,7 @@ function namedValkeyAddr(cwd: string): string | undefined {
 async function startContainer(name: string, port: number, deps: ValkeySidecarDeps): Promise<boolean> {
   const run = await deps.docker(valkeyRunArgs(name, port))
   if (run.status === 0) {
-    pushStartUndo(() => stopValkeySidecar(name, deps.docker), { container: `the Valkey sidecar container (${name})` })
+    pushStartUndo(async () => { await stopValkeySidecar(name, deps.docker) }, { container: `the Valkey sidecar container (${name})` })
     return true
   }
   await stopValkeySidecar(name, deps.docker)
@@ -190,7 +197,8 @@ export function valkeyRunArgs(name: string, port: number): string[] {
   return ["run", "-d", "--name", name, "-p", `${DEFAULT_HOST}:${port}:6379`, IMAGE]
 }
 
-export async function stopValkeySidecar(containerName: string | null, docker: DockerCaller = askDockerFor): Promise<void> {
-  if (!containerName) return
-  await docker(["rm", "-f", containerName])
+/** Removes the container; true when Docker did, so a caller that says so does not say it falsely. */
+export async function stopValkeySidecar(containerName: string | null, docker: DockerCaller = askDockerFor): Promise<boolean> {
+  if (!containerName) return true
+  return (await docker(["rm", "-f", containerName])).status === 0
 }

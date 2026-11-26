@@ -5,7 +5,7 @@
  *   supatype deploy --app-only: only build & deploy the static site
  *   supatype deploy --schema-only: only push schema changes
  *   supatype deploy --skip-build: deploy existing build output (no build step)
- *   supatype deploy --preview: deploy to a preview URL
+ *   supatype deploy --preview: deploy to a preview URL (self-hosted links only; Cloud refuses it for now)
  *   supatype deploy rollback: roll back to previous deployment
  *   supatype deploy status: show current deployment info
  *   supatype deploy logs <version>, show build logs
@@ -13,16 +13,16 @@
 
 import { withPublishing } from "../model-versioning.js"
 import type { Command } from "commander"
-import { existsSync, readdirSync, statSync, createReadStream, mkdirSync, cpSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, statSync, mkdirSync, cpSync } from "node:fs"
 import { join, relative } from "node:path"
 import { loadConfig, loadSchemaAst } from "../config.js"
 import { pgSchema, schemaPathFromProject } from "../project-config.js"
 import { resolveHostDatabaseUrl } from "../host-database.js"
 import { deploySchemaToLinkedProject, pushSchemaToLinkedProject } from "./cloud.js"
-import { loadProjectLink } from "../link.js"
+import { loadProjectLink, type ProjectLink } from "../link.js"
 import { resolveTarget } from "../resolve-target.js"
 import { targetFetch } from "../target-client.js"
-import { isNumber, isShape, isString, nullable, optional, readJson } from "@supatype/shared"
+import { isNumber, isShape, isString, nullable, optional, readJson, type Guard } from "@supatype/shared"
 import { enginePush, type DiffResult } from "../engine-client.js"
 import { engineRequestIn, requireEngineFeaturesIn, stackEngine } from "../stack-engine.js"
 import { isDiffResult, isEnginePushResult } from "../engine-answers.js"
@@ -32,15 +32,18 @@ import {
   resolveAppConfig,
   validateStaticMode,
   validateBuildOutput,
+  spaIndexError,
   detectPackageManager,
   type ResolvedAppConfig,
 } from "../app/framework.js"
-import { commandSpawn } from "../build-spawn.js"
+import { commandSpawn, withProjectBins } from "../build-spawn.js"
 import { installCommand, type InstallCommand } from "../init-setup-steps.js"
 import { fatalError } from "../ui/fatal.js"
-import { frontendEnv } from "../frontend-env.js"
-import { describeFrontendSources, FrontendValuesRefused, resolveFrontendValues } from "../frontend-values.js"
-import { TIER_LIMITS, type Tier } from "./deploy-types.js"
+import { BuildRefused } from "../build-refused.js"
+import { siteBuildEnv } from "../site-build-env.js"
+import { publicValueCount } from "../site-public-env.js"
+import { describeFrontendSources } from "../frontend-values.js"
+import { deploySite, megabytes, overPlanLines } from "../site-deploy.js"
 import { spawnSync } from "node:child_process"
 import { error, info, plain, step, warn } from "../ui/messages.js"
 import { responseFailureText } from "../error-message.js"
@@ -72,7 +75,9 @@ export function deploySecurityDriftRefusal(
  * The environment `deploy` builds the app in: this process's, the app's own `build.env`, and the
  * deployment's API URL and anon key under every front-end name, through the resolver `supatype
  * build` uses (frontend-values.ts), which reads `build.env` first. Never the service role key.
- * Throws {@link FrontendValuesRefused} when either value is missing.
+ * Throws a {@link BuildRefused} when either value is missing, or when Cloud holds public values set
+ * in Studio and cannot hand them over. The site's public values
+ * (`build.publicEnv`, and what Studio set) go in under every prefix too.
  *
  * It used to set the URL copies only, from the control plane's address rather than the project's,
  * and no anon key, so a deployed app rendered a blank page.
@@ -82,15 +87,10 @@ export async function deployBuildEnv(
   opts: { env: string; appEnv: Record<string, string>; allowLocal?: boolean },
 ): Promise<NodeJS.ProcessEnv> {
   const buildEnv: NodeJS.ProcessEnv = { ...process.env, ...opts.appEnv }
-  const values = await resolveFrontendValues({
-    cwd,
-    env: opts.env,
-    allowLocal: opts.allowLocal === true,
-    processEnv: buildEnv,
-    command: "supatype deploy",
-  })
-  info(`Building with the ${describeFrontendSources(values)}`)
-  return { ...buildEnv, ...frontendEnv(values) }
+  const built = await siteBuildEnv(cwd, { env: opts.env, allowLocal: opts.allowLocal, shell: buildEnv, command: "supatype deploy" })
+  info(`Building with the ${describeFrontendSources(built.frontend)}`)
+  if (built.publicCount > 0) info(`Building with ${publicValueCount(built.publicCount)}`)
+  return { ...buildEnv, ...built.vars }
 }
 
 /**
@@ -118,15 +118,39 @@ async function installAndBuild(
   try {
     buildEnv = await deployBuildEnv(cwd, { ...opts, appEnv: appConfig.env })
   } catch (err) {
-    if (!(err instanceof FrontendValuesRefused)) throw err
+    if (!(err instanceof BuildRefused)) throw err
     fatalError(err.message)
   }
   const pm = detectPackageManager(appConfig.directory)
   info(`Installing dependencies (${pm})...`)
   runDeployStep(appConfig.directory, installCommand(pm), buildEnv, { timeoutMs: 5 * 60 * 1000, failure: "Dependency installation failed." })
   plain("\nBuilding...")
+  runAppBuild(appConfig, buildEnv)
+}
+
+/**
+ * Run the app's build command in its directory. The framework defaults (`vite build`, `astro build`)
+ * name binaries that live in `node_modules/.bin`, which only a package manager puts on PATH, so the
+ * app's own `.bin` and every one above it (a monorepo root's) are put there, as `npm run` does.
+ */
+export function runAppBuild(appConfig: Pick<ResolvedAppConfig, "directory" | "buildCommand">, env: NodeJS.ProcessEnv): void {
   const argv = appConfig.buildCommand.split(" ").filter((part) => part !== "")
-  runDeployStep(appConfig.directory, commandSpawn(argv), buildEnv, { timeoutMs: 10 * 60 * 1000, failure: "Build failed." })
+  runDeployStep(appConfig.directory, commandSpawn(argv), withProjectBins(env, appConfig.directory), { timeoutMs: 10 * 60 * 1000, failure: "Build failed." })
+}
+
+/** The largest site `deploy --local` or a self-hosted link copies, which no server checks. */
+const SELF_HOST_MAX_SITE_MB = 500
+
+/**
+ * Cloud does not host previews yet, so `deploy --preview` against a Cloud link is refused, before
+ * the config is read or anything is built. Undefined when the deploy may go ahead.
+ */
+export function cloudPreviewRefusal(
+  link: Pick<ProjectLink, "kind"> | null,
+  opts: { preview?: boolean | undefined; local?: boolean | undefined; schemaOnly?: boolean | undefined },
+): string | undefined {
+  if (opts.preview !== true || opts.local === true || opts.schemaOnly === true || link?.kind !== "cloud") return undefined
+  return "Previews are not available on Supatype Cloud yet. Run `supatype deploy` without --preview to deploy to production."
 }
 
 export function registerDeploy(program: Command): void {
@@ -148,7 +172,12 @@ export function registerDeploy(program: Command): void {
       "Put back policies, grants, labels and RLS changed outside Supatype; without it the deploy refuses",
     )
     .option("--allow-local", "Build the app against a local stack's address, which a deploy otherwise refuses")
+    .option(
+      "--reset-auth-overrides",
+      "Supatype Cloud: drop the auth settings saved in Studio so the config's apply in full",
+    )
     .action(async (opts: {
+      resetAuthOverrides?: boolean
       local?: boolean
       environment?: string
       env?: string
@@ -161,12 +190,18 @@ export function registerDeploy(program: Command): void {
       allowLocal?: boolean
     }) => {
       const cwd = process.cwd()
-      const config = loadConfig(cwd, { local: false })
       const link = loadProjectLink(cwd)
+      const previewRefused = cloudPreviewRefusal(link, opts)
+      if (previewRefused) {
+        error(previewRefused)
+        process.exit(1)
+      }
+      const config = loadConfig(cwd, { local: false })
       const envName = opts.env ?? opts.environment ?? "production"
       // A linked deploy is checked against the server it pushes to (`targetSchemaPush`), a local one
       // against the engine binary, before either sends the flag.
       const overwriteDrift = opts.overwriteDrift ?? false
+      const resetAuthOverrides = opts.resetAuthOverrides ?? false
 
       let schemaDone = false
 
@@ -176,7 +211,7 @@ export function registerDeploy(program: Command): void {
         !opts.appOnly &&
         !opts.skipBuild
       ) {
-        await explainingRefusal("supatype deploy", () => deploySchemaToLinkedProject(cwd, envName, { overwriteDrift }))
+        await explainingRefusal("supatype deploy", () => deploySchemaToLinkedProject(cwd, envName, { overwriteDrift, resetAuthOverrides }))
         schemaDone = true
         if (opts.schemaOnly) {
           return
@@ -231,7 +266,7 @@ export function registerDeploy(program: Command): void {
         } else if (link) {
           step("Schema Push (linked)")
           await explainingRefusal("supatype deploy", () =>
-            pushSchemaToLinkedProject(cwd, { force: opts.yes ?? true, env: envName, overwriteDrift }),
+            pushSchemaToLinkedProject(cwd, { force: opts.yes ?? true, env: envName, overwriteDrift, resetAuthOverrides }),
           )
         } else {
           error(
@@ -273,32 +308,35 @@ export function registerDeploy(program: Command): void {
           await installAndBuild(cwd, appConfig, { env: envName, allowLocal: opts.allowLocal === true })
         }
 
-        // Validate build output
-        const maxSizeMb = 500 // Default, should be tier-aware in cloud
-        const validationError = validateBuildOutput(appConfig.outputDirectory, maxSizeMb)
+        // Validate build output. Cloud applies its own tier limit and answers 413 when a site is over it.
+        const toCloud = link?.kind === "cloud" && !opts.local
+        const validationError = validateBuildOutput(appConfig.outputDirectory, toCloud ? undefined : SELF_HOST_MAX_SITE_MB)
         if (validationError) {
           error(validationError)
           process.exit(1)
         }
 
+        const spaError = spaIndexError(appConfig.outputDirectory, appConfig.spa)
+        if (spaError) {
+          error(spaError)
+          process.exit(1)
+        }
+
         // Deploy (--local never uploads to cloud, even if linked)
+        let url: string | undefined
         if (link && !opts.local) {
-          await deployStaticSite(cwd, appConfig.outputDirectory, {
+          url = await deployStaticSite(cwd, appConfig.outputDirectory, {
             preview: opts.preview ?? false,
             env: envName,
+            spa: appConfig.spa,
+            spaFromConfig: config.build.spa !== undefined,
           })
         } else {
           deploySelfHost(appConfig.outputDirectory, cwd)
         }
 
         info("Deployment complete!")
-        if (link && !opts.local) {
-          const target = resolveTarget(cwd, { env: envName })
-          const url = opts.preview
-            ? `${target.apiBaseUrl}/preview`
-            : target.apiBaseUrl
-          info(`URL: ${url}`)
-        }
+        if (url !== undefined) info(`URL: ${url}`)
       }
     })
 
@@ -329,10 +367,11 @@ export function registerDeploy(program: Command): void {
           orgId: target.orgId,
           environment: target.mode === "cloud" ? target.environment : undefined,
         },
-        isShape({ version: optional(nullable(isString)) }),
+        isShape({ version: optional(nullable(isString)), url: optional(nullable(isString)) }),
       )
 
       info(`Rolled back to deployment ${data.version ?? "previous"}.`)
+      if (data.url) info(`URL: ${data.url}`)
     })
 
   // supatype deploy status
@@ -367,14 +406,7 @@ export function registerDeploy(program: Command): void {
         return
       }
 
-      info(`Deployment: ${data.version ?? data.id ?? "unknown"}`)
-      info(`Status: ${data.status ?? "live"}`)
-      if (data.timestamp ?? data.createdAt) {
-        info(`Deployed: ${data.timestamp ?? data.createdAt}`)
-      }
-      if (data.size) info(`Size: ${(data.size / (1024 * 1024)).toFixed(1)}MB`)
-      if (data.buildDuration) info(`Build duration: ${data.buildDuration}s`)
-      if (data.url) info(`URL: ${data.url}`)
+      printDeploymentStatus(data)
     })
 
   // supatype deploy logs <version>
@@ -419,16 +451,36 @@ const isCurrentDeployment = isShape({
   buildDuration: optional(nullable(isNumber)),
   url: optional(nullable(isString)),
   status: optional(nullable(isString)),
+  planBytes: optional(nullable(isNumber)),
+  overSince: optional(nullable(isString)),
+  goodwillEndsAt: optional(nullable(isString)),
 })
 
-/** A deployment created for upload: where its files go, and its id. */
-const isCreatedUpload = isShape({ data: isShape({ deploymentId: isString, uploadUrl: isString }) })
+type CurrentDeployment = typeof isCurrentDeployment extends Guard<infer T> ? T : never
+
+/** The size line: against the plan when the server says what the plan is. */
+function sizeLine(size: number, planBytes: number | null | undefined): string {
+  if (planBytes) return `Size: ${megabytes(size)} MB of ${megabytes(planBytes)} MB plan`
+  return `Size: ${(size / (1024 * 1024)).toFixed(1)}MB`
+}
+
+function printDeploymentStatus(data: CurrentDeployment): void {
+  if (data.url) info(`URL: ${data.url}`)
+  info(`Deployment: ${data.version ?? data.id ?? "unknown"}`)
+  info(`Status: ${data.status ?? "live"}`)
+  if (data.timestamp ?? data.createdAt) info(`Deployed: ${data.timestamp ?? data.createdAt}`)
+  if (data.size) info(sizeLine(data.size, data.planBytes))
+  if (data.buildDuration) info(`Build duration: ${data.buildDuration}s`)
+  if (data.size && data.planBytes && data.goodwillEndsAt) {
+    for (const line of overPlanLines(data.size, data.planBytes, data.goodwillEndsAt)) warn(line)
+  }
+}
 
 async function deployStaticSite(
   cwd: string,
   outputDir: string,
-  opts: { preview?: boolean; env?: string },
-): Promise<void> {
+  opts: { preview?: boolean; env?: string; spa: boolean; spaFromConfig: boolean },
+): Promise<string> {
   const target = resolveTarget(cwd, { env: opts.env })
   const token = target.token
   if (!token) {
@@ -436,12 +488,10 @@ async function deployStaticSite(
   }
 
   info("Uploading build artifacts...")
-  const files = collectFiles(outputDir, outputDir)
-  info(`${files.length} files to upload (${formatSize(files.reduce((s, f) => s + f.size, 0))})`)
-
-  const { readFileSync } = await import("node:fs")
 
   if (target.apiPrefix === "/platform/v1") {
+    const files = collectFiles(outputDir, outputDir)
+    info(`${files.length} files to upload (${formatSize(files.reduce((s, f) => s + f.size, 0))})`)
     const filePayload = files.map((f) => ({
       path: f.relativePath,
       content: readFileSync(f.absolutePath).toString("base64"),
@@ -471,54 +521,15 @@ async function deployStaticSite(
         orgId: target.orgId,
       },
     )
-    return
+    return opts.preview ? `${target.apiBaseUrl}/preview` : target.apiBaseUrl
   }
 
-  const createRes = await fetch(`${target.apiBaseUrl}/api/v1/projects/${target.projectRef}/deployments`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...(target.orgId ? { "X-Org-Id": target.orgId } : {}),
-      ...(target.environment ? { "X-Supatype-Environment": target.environment } : {}),
-    },
-    body: JSON.stringify({
-      preview: opts.preview ?? false,
-      fileCount: files.length,
-      totalSize: files.reduce((s, f) => s + f.size, 0),
-      files: files.map((f) => ({ path: f.relativePath, size: f.size })),
-    }),
-  })
-
-  if (!createRes.ok) {
-    throw new Error(`Failed to create deployment: ${await responseFailureText(createRes)}`)
-  }
-
-  const { data } = await readJson(createRes, isCreatedUpload)
-
-  for (const file of files) {
-    const content = readFileSync(file.absolutePath)
-    await fetch(`${data.uploadUrl}/${file.relativePath}`, {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/octet-stream",
-        "X-Deployment-Id": data.deploymentId,
-      },
-      body: content,
-    })
-  }
-
-  await fetch(
-    `${target.apiBaseUrl}/api/v1/projects/${target.projectRef}/deployments/${data.deploymentId}/finalize`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...(target.orgId ? { "X-Org-Id": target.orgId } : {}),
-      },
-    },
+  const deployed = await deploySite(
+    { apiBaseUrl: target.apiBaseUrl, projectRef: target.projectRef, token, orgId: target.orgId, environment: target.environment },
+    outputDir,
+    { spa: opts.spa, spaFromConfig: opts.spaFromConfig, preview: opts.preview ?? false },
   )
+  return deployed.url
 }
 
 function deploySelfHost(outputDir: string, cwd: string): void {

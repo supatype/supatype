@@ -37,6 +37,8 @@ declare namespace Deno {
   function readDir(path: string): AsyncIterable<DirEntry>
   function stat(path: string): Promise<FileInfo>
   function utime(path: string, atime: Date | number, mtime: Date | number): Promise<void>
+  function realPath(path: string): Promise<string>
+  function symlink(target: string, path: string, options?: { type?: "dir" | "file" }): Promise<void>
   function readTextFile(path: string | URL): Promise<string>
 
   /** What `serve` returns: stopping it (stop.ts) waits for the requests in flight. */
@@ -45,6 +47,8 @@ declare namespace Deno {
     shutdown(): Promise<void>
     /** Resolves when the server has closed. */
     readonly finished: Promise<void>
+    /** Where it listens, which is how a test finds a port it asked for with 0. */
+    readonly addr: { hostname: string; port: number }
   }
 
   function serve(
@@ -76,6 +80,7 @@ declare namespace Deno {
 
   interface ChildProcess {
     readonly stdout: ReadableStream<Uint8Array>
+    readonly stderr: ReadableStream<Uint8Array>
     readonly status: Promise<{ success: boolean; code: number }>
     kill(signal?: "SIGTERM" | "SIGKILL"): void
   }
@@ -84,6 +89,11 @@ declare namespace Deno {
     constructor(command: string, options?: CommandOptions)
     spawn(): ChildProcess
   }
+}
+
+/** The slice of `@std/assert` the tests use; Deno resolves the specifier at runtime and tsc cannot. */
+declare module "jsr:@std/assert@1" {
+  export function assertEquals(actual: unknown, expected: unknown, msg?: string): void
 }
 
 /**

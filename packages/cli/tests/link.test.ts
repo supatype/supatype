@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { resolveTarget, targetSchemaRollback } from "../src/resolve-target.js"
-import { loadProjectLink, migrateLegacyLinkFiles } from "../src/link.js"
+import { createCloudLink, loadProjectLink, migrateLegacyLinkFiles } from "../src/link.js"
 import { scaffold } from "../src/commands/init.js"
 
 function writePlainConfig(dir: string): void {
@@ -143,5 +143,24 @@ describe("link model", () => {
     })
 
     vi.unstubAllGlobals()
+  })
+})
+
+describe("createCloudLink", () => {
+  const base = { projectRef: "myproj", cloudApiUrl: "https://api.example.com", token: "tok" }
+
+  it("stores the project ref beside the slug the link names the project by", () => {
+    expect(createCloudLink({ ...base, ref: "prj_1" }).ref).toBe("prj_1")
+  })
+
+  it("keeps the ref of the link it updates when it is for the same project", () => {
+    const existing = createCloudLink({ ...base, ref: "prj_1" })
+    expect(createCloudLink({ ...base, existing }).ref).toBe("prj_1")
+  })
+
+  it("does not carry a ref over to a different project, which only --force may link", () => {
+    const existing = createCloudLink({ ...base, ref: "prj_1" })
+    expect(() => createCloudLink({ ...base, projectRef: "other", existing })).toThrow(/supatype unlink/)
+    expect(createCloudLink({ ...base, projectRef: "other", existing, force: true }).ref).toBeUndefined()
   })
 })

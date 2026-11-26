@@ -19,6 +19,7 @@
 import { askDockerSync, DOCKER_QUERY_TIMEOUT_MS, dockerHasImage } from "./docker-exec.js"
 import { pinnedVersion, VERSION_PIN_LOCAL } from "./binary-cache.js"
 import { compareVersions } from "./engine-floor.js"
+import { readEnvFile } from "./env-file.js"
 import type { SupatypeProjectConfig } from "./project-config.js"
 import { pinnedComponentVersion, RELEASE_IMAGES } from "./release-images.js"
 
@@ -181,8 +182,31 @@ export function setPostgresTagCheck(check: PostgresTagCheck | undefined): void {
   resolved.clear()
 }
 
-/** {@link resolvePostgresImage} with Docker's check, asked once per process and warned about once. */
-export function postgresImageFor(config: SupatypeProjectConfig): PostgresImage {
+/**
+ * The image named by `SUPATYPE_POSTGRES_IMAGE`, in the shell or the project's `.env`, or undefined.
+ * Compose renders `${SUPATYPE_POSTGRES_IMAGE:-<resolved>}`, so this is the image that runs when it
+ * is set, and the shell wins over `.env` as it does for Compose.
+ */
+function environmentImage(cwd: string): string | undefined {
+  const named = process.env["SUPATYPE_POSTGRES_IMAGE"]?.trim() || readEnvFile(cwd)["SUPATYPE_POSTGRES_IMAGE"]?.trim()
+  return named || undefined
+}
+
+/**
+ * The image that runs: the one `SUPATYPE_POSTGRES_IMAGE` names, read like `database.image`, else
+ * {@link configuredPostgresImage}. `cwd` is the project whose `.env` is read.
+ */
+export function postgresImageFor(config: SupatypeProjectConfig, cwd: string = process.cwd()): PostgresImage {
+  const named = environmentImage(cwd)
+  return named !== undefined ? configuredImage(named) : configuredPostgresImage(config)
+}
+
+/**
+ * What the config alone resolves to ({@link resolvePostgresImage}) with Docker's check, asked once
+ * per process and warned about once. It is what compose is told as its default, and what is written
+ * to `.env`: the environment's own image is never copied back into it.
+ */
+export function configuredPostgresImage(config: SupatypeProjectConfig): PostgresImage {
   const key = `${config.database?.image?.trim() ?? ""}\n${pinnedVersion("postgres", config) ?? ""}`
   const known = resolved.get(key)
   if (known) return known

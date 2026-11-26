@@ -19,7 +19,7 @@
  * fall back to one while Kong was still starting, which is every dev start (KONG-N1). A Kong the
  * `up` started or recreated resolves afresh on its own, so it is left alone.
  */
-import { askDockerSync, DOCKER_QUERY_TIMEOUT_MS, type DockerAnswer } from "./docker-exec.js"
+import { askDockerState, askDockerSync, DOCKER_QUERY_TIMEOUT_MS, type DockerAnswer } from "./docker-exec.js"
 import { readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { composeBaseArgs, type ComposeStack } from "./compose-db-psql.js"
@@ -46,10 +46,14 @@ function compose(cwd: string, stack: ComposeStack, args: string[]): DockerAnswer
   return askDockerSync([...composeBaseArgs(cwd, stack), ...args], { cwd, timeoutMs: DOCKER_QUERY_TIMEOUT_MS })
 }
 
-/** True when the named compose service has a running container. */
+/**
+ * True when the named compose service has a running container, false when Docker answered that it
+ * has none. Docker not answering (timed out, daemon down) throws DockerNotResponding, which says
+ * nothing about the service.
+ */
 export function composeServiceIsRunning(cwd: string, stack: ComposeStack, service: string): boolean {
-  const result = compose(cwd, stack, ["ps", "-q", "--status", "running", service])
-  return result.status === 0 && typeof result.stdout === "string" && result.stdout.trim() !== ""
+  const result = askDockerState([...composeBaseArgs(cwd, stack), "ps", "-q", "--status", "running", service], { cwd })
+  return result.status === 0 && result.stdout.trim() !== ""
 }
 
 /**

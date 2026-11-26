@@ -14,7 +14,7 @@
     "push": "supatype push --yes",
     "keys": "supatype keys --write",
     "generate": "supatype generate",
-    "seed": "tsx --env-file-if-exists=.env seed.ts",
+    "seed": "supatype seed --local",
     "verify": "tsx --env-file-if-exists=.env verify.ts",
     "doctor": "supatype doctor",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p functions/tsconfig.json --noEmit && tsc -p hooks/tsconfig.json --noEmit"

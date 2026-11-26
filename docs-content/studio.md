@@ -35,7 +35,13 @@ Signing in is not enough on its own. Every person also needs a [Studio role](/do
 
 <h2 id="layout">Finding your way</h2>
 
-The sidebar holds the dashboard, Models, Database, Media & Storage, Authentication, Edge Functions, Realtime and Observability, plus Settings. Entries marked as coming soon open a placeholder page and do nothing yet.
+The sidebar lists, top to bottom: Dashboard and Models; Database and Media & Storage; Authentication; Edge Functions, Static site and Realtime; and Plugins. Settings is pinned at the bottom.
+
+Some entries depend on who you are or where Studio runs. Authentication is hidden from editors and viewers. Realtime is hidden when the server does not offer the Realtime inspector. Static site appears only when the host (Supatype Cloud or a self-host deployment that provides it) describes a site, and its Deployments page needs a host that can list deployments.
+
+Features that are not built yet have no sidebar entry. Some pages inside a group still say a feature is coming soon: Database Wrappers, Read Replicas and Analytical Warehouse under Database, Backups there too except on Supatype Cloud, and Auth Hooks and Attack Protection under Authentication.
+
+The Static site group shows the site address, whether it is served from files or proxied to an app, and what is served, with a Settings page for the serving mode, SPA fallback and response headers. A setting that `supatype.config.ts` sets is marked as such. Where a deployment can list site deployments, the group has a Deployments page. A deployment that cannot describe its site has no Static site group.
 
 **Jump to** in the top bar searches pages, users and records.
 
@@ -73,6 +79,8 @@ Each model has tabs beside the editor:
 | Cache | The model's cached REST responses |
 
 Editors do not see Schema or Rules. Cache is for admins and developers.
+
+When the cache service refuses a request, the Cache tab shows the reason the server gave, with the HTTP status after it. If the project has no keyspace behind the cache yet, it says that nothing is cached and reads go straight to the database.
 
 <h2 id="rich-text">Rich text and blocks</h2>
 
@@ -180,6 +188,7 @@ The GraphQL page sends queries to `POST /graphql/v1`. Pick a model to start from
 - Statements that drop, empty or overwrite data (`DROP`, `TRUNCATE`, `DELETE`, `UPDATE`, and an `ALTER` that drops something or turns off row level security) ask first and name what they change.
 - `EXPLAIN (FORMAT JSON)` draws the plan as a tree.
 - Query History lists earlier runs in this session.
+- A `DELETE` or `UPDATE` with no `WHERE` fails with `DELETE requires a WHERE clause`. That is `pg_safeupdate`, which the image loads for every session, this runner included. Write `WHERE true` to mean every row. On a connection of your own, `SET safeupdate.enabled = 0` turns the check off for that session.
 
 :::caution[Full access]
 Queries run as `supatype_sql_editor`, which has the rights of the role that owns your tables. Row level security does not apply and masked columns show in full. It is not a superuser. Every query is recorded. Only admins and developers can open it.

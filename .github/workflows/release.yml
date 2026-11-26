@@ -117,9 +117,22 @@ jobs:
       supatype_postgres_sha: ${{ needs.pins.outputs.postgres }}
     secrets: inherit
 
+  # ── Changelogs ──────────────────────────────────────────────────────────────
+  #
+  # A published package's changelog may not still say "Unreleased": client 0.9.1 shipped its
+  # breaking changes under that heading, so nothing told a reader which release they arrived in.
+  # Stamp each entry with its version in the release PR; this stops the tag if one was missed.
+  changelogs:
+    name: no published changelog says Unreleased
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: node scripts/check-changelogs.mjs
+
   # ── Extract version from tag ────────────────────────────────────────────────
   prepare:
-    needs: [gate, pins, train]
+    needs: [gate, pins, train, changelogs]
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -269,11 +282,22 @@ jobs:
       - name: Build
         run: pnpm turbo run build
 
+      # The CLI runs dist, not src. A dist built before the pin changed pins tags the CDN does not
+      # have (the e2e rerun3 CLI did), so compare the compiled pins with release/images.json.
+      - name: The CLI's built pins are release/images.json
+        run: node scripts/release-images.mjs check-dist
+
       - name: Typecheck
         run: pnpm turbo run typecheck
 
       - name: Test
         run: pnpm turbo run test
+
+      # Before anything is published: the project init writes must be installable at this version
+      # (FF-32). Every package it scaffolds is published here or already out, the client has the
+      # supatype-prepare bin, the public key is embedded, and the CLI program is on the CDN.
+      - name: Check the release is fit to publish
+        run: node scripts/check-cli-release.mjs "${{ needs.prepare.outputs.version }}"
 
       - name: Publish npm packages
         shell: bash

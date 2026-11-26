@@ -173,3 +173,67 @@ describe("exactColumnsOf", () => {
     expect(exactColumnsOf(["id"], undefined)).toEqual({})
   })
 })
+
+describe("array columns of exact values", () => {
+  const ARRAYS = JSON.stringify({
+    change: [
+      {
+        kind: "insert",
+        schema: "public",
+        table: "ledger",
+        columnnames: ["id", "ids", "rates", "prices", "tags", "counts", "grid"],
+        columntypes: ["uuid", "bigint[]", "numeric[]", "numeric(19,4)[]", "text[]", "integer[]", "bigint[]"],
+        columnvalues: [
+          "a-uuid",
+          "{9007199254740993,1,NULL,-9007199254740995}",
+          "{1.10,2.500}",
+          "{10.0000}",
+          "{a,b}",
+          "{1,2}",
+          "{{1,9007199254740993},{3,4}}",
+        ],
+      },
+    ],
+  })
+
+  it("names an array of exact values by its element kind", () => {
+    expect(exactKindOf("bigint[]")).toBe("bigint[]")
+    expect(exactKindOf("int8[]")).toBe("bigint[]")
+    expect(exactKindOf("numeric[]")).toBe("numeric[]")
+    expect(exactKindOf("numeric(19,4)[]")).toBe("numeric[]")
+    expect(exactKindOf("money[]")).toBe("numeric[]")
+    expect(exactKindOf("integer[]")).toBeNull()
+    expect(exactKindOf("text[]")).toBeNull()
+  })
+
+  it("delivers the elements as an array of exact strings, nulls kept", () => {
+    const [change] = parseWal2json(ARRAYS)
+    expect(change?.newRecord?.["ids"]).toEqual(["9007199254740993", "1", null, "-9007199254740995"])
+    expect(change?.newRecord?.["rates"]).toEqual(["1.10", "2.500"])
+    expect(change?.newRecord?.["prices"]).toEqual(["10.0000"])
+  })
+
+  it("keeps a multi-dimensional array's shape", () => {
+    const [change] = parseWal2json(ARRAYS)
+    expect(change?.newRecord?.["grid"]).toEqual([["1", "9007199254740993"], ["3", "4"]])
+  })
+
+  it("registers the array kinds and still parses other arrays into arrays", () => {
+    const [change] = parseWal2json(ARRAYS)
+    expect(change?.exactColumns).toEqual({
+      ids: "bigint[]",
+      rates: "numeric[]",
+      prices: "numeric[]",
+      grid: "bigint[]",
+    })
+    expect(change?.newRecord?.["tags"]).toEqual(["a", "b"])
+  })
+
+  it("passes an array that already arrived as an array through", () => {
+    expect(valueForColumn(["1", "2"], "bigint[]")).toEqual(["1", "2"])
+  })
+
+  it("reads an empty array", () => {
+    expect(valueForColumn("{}", "bigint[]")).toEqual([])
+  })
+})

@@ -32,7 +32,9 @@ Every page in these docs imports the client from this one file. In development, 
 
 A production build gets your deployment's values from `supatype build`, which runs your build command with them, or from the host's settings. When Supatype serves the app, the page can read them from the server instead, with `<script src="/supatype-env.js" vite-ignore></script>` in `index.html` (`vite-ignore` keeps `vite build` from warning that it cannot bundle it); a Next.js app serves the same script from a route ([Frameworks: Next.js](/docs/frameworks.html#nextjs)). For each value the build did not carry, the client reads the one that script set, at its first request. It never guesses the address from the page. `createClient` itself never throws, so a page that creates the client at module scope still prerenders. The first request made with no address or no anon key throws a `MissingClientValuesError` naming what is missing and the variables to set, rather than returning it as `{ data: null, error }`. [Deploy your frontend](/docs/deploying-your-frontend.html) covers each host.
 
-The session is saved and restored by default. Pass `auth: { persistSession: false }` to keep it in memory only.
+`supatype.url` and `supatype.anonKey` are the address and anon key the client uses: the ones given to `createClient`, else the ones the page set (see above), read each time you ask. Each is an empty string while neither has one, and neither throws. Use `anonKey` for a call the client does not make, such as opening a second connection or a plain `fetch` to the API.
+
+The session is saved and restored by default. A restored session keeps the user as it was, including `isAnonymous`, `identities` and `factors`, so a guest is still a guest after a reload. Pass `auth: { persistSession: false }` to keep it in memory only.
 
 `createClient` takes these options as well as `url` and `anonKey`:
 
@@ -61,7 +63,7 @@ Tables are named as in the database: `post`, `comment`, `post_tag`. Calling `cre
 
 Exact numbers keep every digit when you import from the generated `client.ts`. A `BigInt` column reads as a `bigint`. `Decimal` and `Money` columns read as strings.
 
-A number too large for JavaScript, in a column the client does not know, returns an error that names the column. This usually happens in an embed: select the column directly instead.
+A number too large for JavaScript, in a column the client does not know, returns an error that names the column. This usually happens in an embed: select the column directly instead. This covers a number inside an array too, at any depth, such as a json column holding `[9007199254740993]`. `BigInt[]` and `Decimal[]` columns the generated types describe keep every element exact instead.
 
 <h2 id="read">Read rows</h2>
 
@@ -89,6 +91,25 @@ const { data: post } = await supatype.from("post").select("*").eq("slug", "hello
 console.log(post?.title)
 ```
 
+<h3 id="many-to-many">Linking many-to-many rows</h3>
+
+A many-to-many link is a row in the junction table, and you write it like any other row. The junction is named after the two tables, sorted and joined with `_` (`lot_tag` for `lot` and `tag`), with a `<model>_id` column for each end. It is in the generated types, so `from("lot_tag")` is typed. Nested `connect` and `set` writes are not supported yet.
+
+```ts
+// add a link, and several at once
+await supatype.from("lot_tag").insert({ lot_id: lot.id, tag_id: tag.id })
+await supatype.from("lot_tag").insert(tags.map((t) => ({ lot_id: lot.id, tag_id: t.id })))
+
+// list a lot's tags, or the links themselves
+const { data } = await supatype.from("lot").select("title, tags:tag(name)").eq("id", lot.id)
+const { data: links } = await supatype.from("lot_tag").select("tag_id").eq("lot_id", lot.id)
+
+// remove a link
+await supatype.from("lot_tag").delete().eq("lot_id", lot.id).eq("tag_id", tag.id)
+```
+
+Who may write a link follows from its two ends. A link is readable by a caller who can read both rows, and writable by a caller who can read both and may update the model that owns the link: the one whose own `ManyToMany` field names the junction (either one, when both declare it). A refused insert returns an error. A delete the caller may not make removes no row and returns no error, so ask for the deleted rows with `.select()` if you need to know. See [Access Rules](/docs/schema/access-rules.html#many-to-many-junction-tables).
+
 `count` is `null` unless you ask for it:
 
 ```ts
@@ -115,6 +136,32 @@ await supatype.from("post").select("id").ilike("title", "%hello%").range(0, 19)
 
 Reads also take `order`, `limit` and `range`. Filters work on `update` and `delete` too.
 
+<h2 id="cache">Cache a read</h2>
+
+`.cache({ ttl })` keeps a read's result in the client's memory for `ttl` milliseconds. Add `server: true` to cache it on the server as well, for a model that declares a `cache`; add `public: true` to share one entry between users when the model allows it.
+
+```ts
+const { data, meta } = await supatype
+  .from("post")
+  .select("id, title")
+  .cache({ ttl: 30_000, server: true })  // milliseconds
+
+console.log(meta?.cacheStatus)  // "HIT", "MISS" or "BYPASS"
+```
+
+The cache status is `meta.cacheStatus`, on the result next to `data` and `error`: it is not a field of the result itself. It is `"HIT"` when a cache answered and `"MISS"` when the read went to the database. `"BYPASS"` appears only when the server says so in its `X-Supatype-Cache-Status` header. A model with no server cache, or a project with caching off, sends no header, and the read reports `"MISS"`. A read that did not call `.cache()` has no `meta.cacheStatus`, and `meta` itself can be absent.
+
+<h2 id="globals">Globals</h2>
+
+A singleton model (`singleton: true`) holds one row that always exists, such as site settings. `global(name)` reads and updates it without a filter. `name` is the model's snake case name, as in `_global_site_settings`; for a model that sets its own `tableName`, use `from(tableName)` instead.
+
+```ts
+const { data: settings } = await supatype.global<{ title: string }>("site_settings").get()
+await supatype.global("site_settings").update({ title: "New title" })
+```
+
+`get()` returns the row, or `null`. `update(fields)` changes only the fields you name and returns the row. Both return `{ data, error }`, and the model's access rules apply as for any other read or write.
+
 <h2 id="write">Insert, update, delete</h2>
 
 ```ts
@@ -130,6 +177,8 @@ await supatype.from("comment").delete().eq("id", commentId)
 ```
 
 A write returns no rows unless you add `.select()`: without it, `data` is `null`. Returning a row needs permission to read it, so leave `.select()` off when the access rules let the caller create a row but not read it. On a write, `single()` and `maybeSingle()` work only after `.select()`. On a delete, `.select()` returns the rows it deleted. `upsert` inserts or updates by primary key.
+
+An update or delete with no filter is refused, so `.delete()` alone returns an error instead of emptying the table. The `supatype/postgres` image loads `pg_safeupdate`, which raises `DELETE requires a WHERE clause` (or the same for `UPDATE`). To change every row, add a filter that matches all of them, such as `.not("id", "is", null)`.
 
 A `RichText` field takes a plain string on write.
 
@@ -241,7 +290,7 @@ await supatype.functions.invoke("stats", { method: "GET", headers: { "x-region":
 
 Inside a function, `ctx.url` is the API's internal address, for calls the function makes. `ctx.publicUrl` is the public address, for links you give to people.
 
-`supatype.rpc(name, params, options)` calls a Postgres function. Its options are `count`, `head`, `schema` for a function outside the default schema, and `idempotent`.
+`supatype.rpc(name, params, options)` calls a Postgres function. Its options are `count`, `head`, `schema` for a function outside the default schema, and `idempotent`. A function is not part of the schema: see [Server logic in a Postgres function](/docs/schema.html#server-logic) for writing one and what Supatype does not manage.
 
 <h2 id="graphql">GraphQL</h2>
 

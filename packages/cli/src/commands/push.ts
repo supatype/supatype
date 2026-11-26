@@ -12,6 +12,7 @@ import {
 } from "../model-hooks.js"
 import { rowCacheChangeNote } from "../model-cache.js"
 import { writeAppliedAstArtifacts } from "../applied-ast-artifacts.js"
+import { reloadHooksWorker } from "../hooks-worker-reload.js"
 import { adapterEntry, readHookUpload, type HookFailure } from "../hook-upload.js"
 import { checkServiceRoleRoutes, serviceRoleProblemLines } from "../service-role-check.js"
 import { fatalError } from "../ui/fatal.js"
@@ -20,7 +21,7 @@ import {
   resolveRuntimeProvider,
   schemaPathFromProject,
 } from "../project-config.js"
-import { isProjectDatabase, projectStackUrl, studioUrlAt } from "../local-stack.js"
+import { isProjectDatabase, projectStackUrl, stackStudioUrl } from "../local-stack.js"
 import { byoPreflight } from "../byo-preflight.js"
 import { devApiKeys, shellServiceRoleKey } from "../dev-api-keys.js"
 import { ensureEngine, engineRequest, type DiffResult } from "../engine-client.js"
@@ -40,6 +41,7 @@ import {
   type PlannedChange,
 } from "../diff-output.js"
 import { printRoleAccess } from "../diff-access.js"
+import { printChannelChanges } from "../diff-channels.js"
 import { printPushWarnings } from "../engine-push-output.js"
 import { askToOverwrite, pushConsentingToDrift } from "../drift-consent.js"
 import { consentDepsFromDiff, pushConsentingToDestructive, settleRenames } from "../destructive-consent.js"
@@ -48,12 +50,17 @@ import { pushOfferingAdoption, targetAdoptionSteps } from "../adopt-walkthrough.
 import { explainingRefusal } from "../push-refusal.js"
 import { isParsedBuckets, provisionBucketsFromAst, unprovisionedBuckets, type ParsedBuckets } from "../storage-provision.js"
 import { postApplyFailed } from "../post-apply.js"
+import { assertCloudAuthSettings, pushAuthSettings } from "../auth-settings-push.js"
+import { pushCorsOrigins } from "../cors-origins-push.js"
+import { pushPlatformSettings } from "../platform-settings-push.js"
 import { isHookDeployAnswer, isHookMap, isJsonObject, type HookDeployAnswer, type HookDeployBody } from "@supatype/shared"
+import { publicEnvFor } from "@supatype/types"
+import { publicValueCount, pushPublicEnv } from "../site-public-env.js"
 import type { ExtractedSchemaAstV2 } from "../schema-ast-v2.js"
 import { ensureFirstAdminUser } from "./admin.js"
 import { withAdminRoles } from "../studio-admin-roles.js"
 import { restoreSystemRelationTargets } from "../restore-system-relation-targets.js"
-import { cacheSeedingNotes, freeTierCacheNote } from "../api-config-cache.js"
+import { cacheKeyspaceNotes, cacheSeedingNotes, cloudCacheNotes } from "../api-config-cache.js"
 import { waitForRestReady } from "../rest-ready.js"
 import type { SupatypeProjectConfig } from "../project-config.js"
 import {
@@ -77,7 +84,7 @@ import {
   cacheSchemaSourcesLocally,
 } from "../schema-sources.js"
 import { confirm, logSkippedConfirm } from "../ui/confirm.js"
-import { error, info, plain } from "../ui/messages.js"
+import { error, info, plain, warn } from "../ui/messages.js"
 import { withSpinner } from "../ui/progress.js"
 import { projectOutputPaths, writeGeneratedTypes } from "../type-generation.js"
 import { isInteractive } from "../ui/interactive.js"
@@ -102,10 +109,15 @@ export function registerPush(program: Command): void {
       "--run-hooks",
       "Fire after-hooks for the rows this push's data migrations rewrite (skipped by default)",
     )
+    .option(
+      "--reset-auth-overrides",
+      "Supatype Cloud: drop the auth settings saved in Studio so the config's apply in full",
+    )
     .action(async (opts: {
       yes?: boolean
       overwriteDrift?: boolean
       runHooks?: boolean
+      resetAuthOverrides?: boolean
       connection?: string
       env?: string
       direct?: boolean
@@ -125,6 +137,7 @@ export function registerPush(program: Command): void {
         yes: opts.yes ?? false,
         overwriteDrift: opts.overwriteDrift ?? false,
         runHooks: opts.runHooks ?? false,
+        resetAuthOverrides: opts.resetAuthOverrides ?? false,
       }
       // A refusal (access changed by hand, another push running, an image Docker could not pull)
       // ends with what to do about it, whichever way the push went.
@@ -240,6 +253,8 @@ export interface PushRun {
   overwriteDrift: boolean
   /** `--run-hooks`: the push's data migrations fire after-hooks, which they skip by default. */
   runHooks?: boolean
+  /** `--reset-auth-overrides`: a push to Cloud drops the auth settings saved in Studio first. */
+  resetAuthOverrides?: boolean
 }
 
 /**
@@ -273,6 +288,8 @@ async function confirmRiskyChanges(changes: readonly PlannedChange[], run: PushR
   if (risky.length === 0 || run.yes) return true
   if (!isInteractive()) {
     logSkippedConfirm(`${risky.length} risky change(s) require confirmation`)
+    // A refusal in CI is a failed push, not a successful one that happened to apply nothing.
+    process.exitCode = 1
     return false
   }
   return confirm(`${risky.length} risky change(s) above. Proceed?`, { default: false })
@@ -289,6 +306,8 @@ async function pushViaTarget(
   // Before anything is read or asked: a server or engine that cannot honour the flag says so now.
   if (run.overwriteDrift) await requireTargetFeatures(target, [OVERWRITE_DRIFT_NEED])
   if (run.runHooks === true) await requireTargetFeatures(target, [RUN_HOOKS_NEED])
+  // Before the schema is applied: a config Cloud cannot take is refused with nothing changed.
+  assertCloudAuthSettings(config, target)
   if (!(await databaseIsReady(cwd, config, target, ast))) return
   const plan = (schema: unknown) =>
     withSpinner("Diffing against database", () => targetSchemaDiff(target, schema, { schema: pgSchema }))
@@ -307,6 +326,7 @@ async function pushViaTarget(
   else printDiffOperations(diff)
   // What each API role is left with, before anything is asked or applied (issue 16).
   printRoleAccess(diff)
+  printChannelChanges(diff)
   if (!(await confirmRiskyChanges(changes, run))) {
     plain("Aborted.")
     return
@@ -336,25 +356,59 @@ async function pushViaTarget(
   // The diff's were printed before applying; what is left is what the push found once applied.
   printPushWarnings(pushResult, diff.warnings ?? [])
 
-  const hooksFailed = target.mode === "cloud" || target.mode === "self-host"
-    ? await deployHooksToTarget(cwd, config, target, ast)
-    : false
+  const stepFailed = await runPostApplySteps(cwd, config, target, ast)
+  // After the hooks, which restart the worker, and whatever they did: neither needs the other.
+  const publicEnvFailed = target.mode === "cloud" || target.mode === "self-host" ? await deployPublicEnvToTarget(config, target) : false
+  const authFailed = await pushAuthSettings(cwd, config, target, { resetOverrides: run.resetAuthOverrides === true })
   // A linked self-host server runs the same compose stack, with the same PostgREST to wait for.
   if (target.mode === "self-host") await waitForRestReady(target.apiBaseUrl, undefined)
 
+  await finishTargetPush({ cwd, config, target, ast }, pushResult, stepFailed || publicEnvFailed || authFailed)
+}
+
+/**
+ * How a push ends once the schema is applied: the project's own stack and databases finish locally,
+ * a linked target reports what it did.
+ */
+export async function finishTargetPush(
+  push: { cwd: string; config: SupatypeProjectConfig; target: DeployTarget; ast: unknown },
+  pushResult: Awaited<ReturnType<typeof targetSchemaPush>>,
+  stepFailed: boolean,
+): Promise<void> {
+  const { cwd, config, target, ast } = push
   if (target.mode === "direct" || target.mode === "local") {
     await finishLocalPush(cwd, config, target, ast)
     return
   }
-
-  reportTargetPush(target, pushResult, hooksFailed)
+  // A linked push writes what the project's own one does: types, client and seed builder describe
+  // the schema just applied, and the next seed is refused when they describe an older one.
+  // Without the local public values: the push just sent this target its own, and the self-host stack
+  // in this folder serves the manifest those would be written into.
+  await generateTypesLocal(cwd, ast, config, false, { syncPublicEnv: false })
+  reportTargetPush(target, pushResult, stepFailed)
 }
+
+/**
+ * What a push and a deploy send after the schema, in order: the hooks (to a linked server), the
+ * allowed origins and the platform settings (to Cloud). One list for both commands: deploy used to
+ * stop at the schema, so a project only ever deployed ran without its hooks. Each step reports its own
+ * failure and the rest still run; true when any failed (post-apply.ts).
+ */
+export async function runPostApplySteps(cwd: string, config: SupatypeProjectConfig, target: DeployTarget, ast: unknown): Promise<boolean> {
+  const hooksFailed = target.mode === "cloud" || target.mode === "self-host"
+    ? await deployHooksToTarget(cwd, config, target, ast)
+    : false
+  const corsFailed = await pushCorsOrigins(target, config)
+  const platformFailed = await pushPlatformSettings(cwd, config, target)
+  return hooksFailed || corsFailed || platformFailed
+}
+
 
 /**
  * How a push to a linked target ended. One whose step after the schema failed ends with that, not
  * "Pushed to ..." and the API URL, which read as success above the failure.
  */
-function reportTargetPush(
+export function reportTargetPush(
   target: DeployTarget,
   pushResult: Awaited<ReturnType<typeof targetSchemaPush>>,
   stepFailed: boolean,
@@ -364,8 +418,7 @@ function reportTargetPush(
   // Cloud only. A self-host control plane has tiers too and they mean nothing there, so the same
   // sentence would be telling a self-hosted project to upgrade something it already has.
   if (target.mode === "cloud") {
-    const note = freeTierCacheNote((pushResult as { cache?: { tables?: string[]; honoured?: boolean } }).cache)
-    if (note) info(note)
+    for (const note of cloudCacheNotes(pushResult.cache)) info(note)
   }
   const envUrl = target.link?.environments?.[target.environment]?.apiUrl?.replace(/\/$/, "")
   if (envUrl) {
@@ -464,12 +517,14 @@ function applyToTarget(
 async function finishLocalPush(cwd: string, config: SupatypeProjectConfig, target: DeployTarget, ast: unknown): Promise<void> {
   await writeLocalAdminConfig(ast, config)
   const stackUrl = projectStackUrl(cwd, config, target.databaseUrl)
-  const studioUrl = stackUrl === undefined ? undefined : studioUrlAt(stackUrl)
+  const studioUrl = stackStudioUrl(config, stackUrl)
   if (target.databaseUrl) {
     await ensureFirstAdminUser(target.databaseUrl, { cwd, studioUrl })
   }
-  await generateTypesLocal(ast, config, isProjectDatabase(cwd, config, target.databaseUrl))
+  const written = await generateTypesLocal(cwd, ast, config, isProjectDatabase(cwd, config, target.databaseUrl))
   if (stackUrl !== undefined && resolveRuntimeProvider(config) === "docker") {
+    // The stack's worker started before this file existed on a first push, and loads handlers once.
+    await reloadHooksWorker(cwd, config, written, { baseUrl: stackUrl, anonKey: devApiKeys(cwd).anonKey })
     // A push to the running stack's database can change its tier, and PostgREST follows.
     const { followRecordedTier } = await import("../dev-compose.js")
     await followRecordedTier(cwd, config, { recreate: true })
@@ -478,7 +533,7 @@ async function finishLocalPush(cwd: string, config: SupatypeProjectConfig, targe
   if (stackUrl !== undefined && resolveRuntimeProvider(config) === "docker") {
     await waitForRestReady(stackUrl, devApiKeys(cwd).anonKey)
   }
-  reportCacheSeeding(cwd, ast)
+  await reportCacheSeeding(cwd, ast)
   reportLocalPush(target, studioUrl, storageFailed)
 }
 
@@ -546,6 +601,24 @@ export async function deployHooksToTarget(
   const { hooks, validators, cache, tables } = manifestMaps(ast)
   const keep = failed.length > 0 ? { keep: failed.map((hook) => hook.name) } : {}
   return uploadHooks(target, { handlers, map: hooks, validators, cache, tables, ...keep }, named.length, failed)
+}
+
+/**
+ * Send the target the public values `build.publicEnv` gives its environment, on every push (empty
+ * when the config names none, which clears what an earlier push sent). A refusal comes after the
+ * schema was applied, so it says that and ends the push non-zero (post-apply.ts). True when it failed.
+ */
+export async function deployPublicEnvToTarget(config: SupatypeProjectConfig, target: DeployTarget): Promise<boolean> {
+  const values = publicEnvFor(config.build?.publicEnv, target.environment)
+  try {
+    await pushPublicEnv(target, values)
+  } catch (err) {
+    postApplyFailed(`its public values were not sent to ${target.apiBaseUrl}: ${errorMessage(err)}`, "The values sent before, if any, are still the ones the site reads.")
+    return true
+  }
+  const count = Object.keys(values).length
+  if (count > 0) info(`Sent ${publicValueCount(count)} for ${target.environment}`)
+  return false
 }
 
 /**
@@ -654,8 +727,9 @@ function emptyDeploy(body: HookDeployBody): boolean {
  *
  * Never an error, and never a rewrite of an entry that already exists. See `seedApiConfigCache`.
  */
-function reportCacheSeeding(cwd: string, ast: unknown): void {
-  for (const note of cacheSeedingNotes(cwd, ast)) info(note)
+async function reportCacheSeeding(cwd: string, ast: unknown): Promise<void> {
+  for (const note of await cacheSeedingNotes(cwd, ast)) info(note)
+  for (const note of await cacheKeyspaceNotes(cwd, ast)) warn(note)
 }
 
 /** The generated adapter, flattened to the name handlers were rewritten to import. */
@@ -665,14 +739,19 @@ function readGeneratedAdapter(hooksDir: string): { name: string; source: string 
   return adapterEntry(readFileSync(file, "utf8"))
 }
 
-async function generateTypesLocal(ast: unknown, config: SupatypeProjectConfig, ownDatabase: boolean): Promise<void> {
+async function generateTypesLocal(
+  cwd: string,
+  ast: unknown,
+  config: SupatypeProjectConfig,
+  ownDatabase: boolean,
+  { syncPublicEnv = true }: { syncPublicEnv?: boolean } = {},
+): Promise<{ hooksModuleWritten: boolean }> {
   // Independent of `output`: a project with hooks needs its handler types whether or not it asked
   // for client types, and the module is written next to the functions that import it.
-  const cwd = process.cwd()
   // The row cache is configured at postmaster start, so this is the one cache setting a push
   // cannot make take effect on its own. Only for the project's own database: `.env` configures that
   // container, and a push to any other database has no container to recreate (A2-N4).
-  const { lines, rowCache } = writeAppliedAstArtifacts(cwd, config, ast, { rowCacheEnv: ownDatabase })
+  const { lines, rowCache, hooksModuleWritten } = writeAppliedAstArtifacts(cwd, config, ast, { rowCacheEnv: ownDatabase, syncPublicEnv })
   for (const line of lines) info(line)
   if (rowCache !== null) {
     info(
@@ -688,6 +767,7 @@ async function generateTypesLocal(ast: unknown, config: SupatypeProjectConfig, o
     writeGeneratedTypes({ cwd, ast, ...projectOutputPaths(config.output) }),
   )
   for (const message of written) info(message)
+  return { hooksModuleWritten }
 }
 
 /** Create the schema's buckets on the project's own stack at `baseUrl`. */

@@ -69,15 +69,27 @@ SERVICE_ROLE_KEY=
 # Public URLs
 API_EXTERNAL_URL=https://api.your-domain.com
 SITE_URL=https://your-domain.com
-
-# SMTP for auth emails
-SUPATYPE_MAILER_MAILER_PROVIDER=smtp
-SUPATYPE_SMTP_HOST=smtp.sendgrid.net
-SUPATYPE_SMTP_PORT=587
-SUPATYPE_SMTP_USER=apikey
-SUPATYPE_SMTP_PASS=your-smtp-password
-SUPATYPE_SMTP_ADMIN_EMAIL=noreply@your-domain.com
 ```
+
+Email delivery is not set here. `supatype self-host compose` writes the mailer settings into `.env`
+from the `email` block of `supatype.config.ts`, so a provider typed into `.env` by hand is put back
+to the config's value (`console` when the config has no `email`) the next time you run it, and the CLI
+prints a warning naming the key. Set it in the config instead:
+
+```typescript title="supatype.config.ts"
+email: {
+  provider: "smtp",
+  smtp: {
+    host: "smtp.sendgrid.net",
+    port: 587,
+    user: "apikey",
+    pass: process.env.SMTP_PASS,
+    admin_email: "noreply@your-domain.com",
+  },
+},
+```
+
+See [Configuration](/docs/self-hosting/configuration.html#email) for every key.
 
 Generate the API keys from `JWT_SECRET` and write them into `.env`:
 
@@ -216,8 +228,8 @@ missing, or `API_EXTERNAL_URL` is still a `localhost` address, it stops before t
 lists every source it tried, instead of building a site that renders a blank page.
 
 The server also answers `/supatype-env.js` with its own address and anon key. An `index.html` that
-loads it with `<script src="/supatype-env.js"></script>` (`supatype init` adds the tag for a static
-app) gets both values when the page loads, so one build runs on every deployment that serves it.
+loads it with `<script src="/supatype-env.js" vite-ignore></script>` (`supatype init` adds the tag for a static
+app; `vite-ignore` stops `vite build` warning that the file does not exist) gets both values when the page loads, so one build runs on every deployment that serves it.
 For an API-only project, set `server.public_env: false` in `supatype.config.ts` to turn that
 address off; the anon key is public either way. Building on Vercel, Netlify, Cloudflare Pages or
 in CI is covered in [Deploy your frontend](/docs/deploying-your-frontend.html).

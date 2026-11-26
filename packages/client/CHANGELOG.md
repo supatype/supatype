@@ -1,6 +1,80 @@
 # Changelog
 
-## Unreleased
+## 0.9.3
+
+### Breaking Changes
+
+* **bindings:** `watchTable` (on `@supatype/client/bindings`) takes the client as its first argument, not
+  `client.realtime`, because it now reads the table to seed its rows. The Vue, Solid and Svelte
+  bindings are updated; anyone calling it directly must pass the client, as `watchTable(client, table,
+  options, handlers)`.
+
+### Features
+
+* **client:** `client.anonKey`, beside `client.url`: the anon key as given, else as the page set it,
+  read each time and an empty string while neither has one.
+* **realtime:** `client.realtime.isConnected`, `client.realtime.connectionState` and
+  `client.realtime.onConnectionChange(listener)`, which returns an unsubscribe function. The state is
+  `"connected"`, `"connecting"` (first connect, a reconnect after a drop or a sign-in swap, or a wait
+  before retrying) or `"disconnected"`. Channel statuses are unchanged. Exports
+  `RealtimeConnectionState`, `RealtimeConnectionListener` and the `ChannelSubscription` type.
+* **bindings:** `watchChannel`, `watchConnection` and `channelSlot` on `@supatype/client/bindings`, which the
+  Vue, Solid and Svelte `useChannel` / `createChannel` share. `watchTable` takes the client, not its realtime
+  client, so it can read the table: its rows are seeded by a read after each join and re-join and kept by
+  upsert on a key (the `key` option, default `id`), so the Vue, Solid and Svelte `useSubscription` /
+  `createSubscription` hold rows that existed before subscribing and recover from a drop.
+* **realtime:** `channel(name, { private: true })` asserts that a channel is guarded by a schema
+  `Channel` declaration. The join carries `private: true`. The server enforces declarations whether
+  or not it is set; the option makes a name no declaration matches a refused join (a typo fails at
+  once) and makes the client refuse to join at all when the server does not announce
+  `private_channels` on its first frame, since an older server would ignore the flag and admit an
+  open channel. A private join waits for that first frame before it is sent.
+* **realtime:** `RealtimeChannelError` (a `RealtimeError`) is what a channel's status callback gets
+  with `CHANNEL_ERROR` for any channel-scoped refusal. `reason` is `unsupported_server`,
+  `join_denied`, `not_declared`, `does_not_fit`, `unavailable`, `shared_instance`, `withdrawn` or
+  `refused`; `channel` names it and `retryable` is true for `unavailable`. It was a plain `Error`
+  with the server's message, which `message` still carries. `isRealtimeChannelError(value)` tells one from any other error, across copies of the package.
+* **realtime:** access the server takes away from a channel you hold (token change, periodic
+  re-check, declaration removed) reaches every handle as `CHANNEL_ERROR` with reason `withdrawn`.
+  It was swallowed for a handle with no row listener. The client does not rejoin by itself;
+  subscribing again does.
+* **realtime:** a refusal is read from the `code` the server sends, not from its sentence, so a reworded
+  message cannot change what the client does. A server that sends no code is still read by its
+  sentence, and a code the client does not know is `refused`.
+* **realtime:** a broadcast, presence track or payload the server refuses on a channel that is
+  joined no longer moves the channel to `CHANNEL_ERROR`. `onRefused((refusal) => ...)` on a channel
+  handle receives `{ channel, code, message }` with `code` one of `send_denied`, `track_denied` or
+  `payload_refused`; the status stays `SUBSCRIBED`. `ChannelActionRefusal` and
+  `ChannelActionRefusalCode` are exported.
+* **realtime:** `ChannelOptions` is exported. A broadcast sent from the database with
+  `_supatype.realtime_send` reaches `onBroadcast` listeners like any other; the README says so.
+* **realtime:** `channel()` takes a `ChannelName`: a topic the schema declares (`lot:${string}` for
+  `Channel<"lot:{id}", ...>`, `lobby:${string}` for a trailing `*`, `${number}` for an Integer
+  parameter), which autocompletes, or any other string, which an `open` server still admits. The
+  declared topics come from the new `SupatypeChannels` interface that `supatype generate` fills in;
+  `DeclaredTopic` and `DeclaredTopics<T>` are exported. Before generating, the name is a plain string.
+* **bindings:** `watchChannel` and `channelSlot` take a `ChannelName`, as `channel()` does, so the Vue, Solid
+  and Svelte channel bindings accept a declared topic or any other string.
+* **bindings:** `watchChannel` and `channelSlot` take `ChannelOptions` as a last argument, and a binding's
+  `error` for a refused or withdrawn channel is the `RealtimeChannelError` itself, not a copy of its message.
+* **bindings:** `watchChannel` and `channelSlot` take an `onRefused` callback, which the Vue, Solid and
+  Svelte channel bindings expose as `refusal`.
+
+### Bug Fixes
+
+* **realtime:** a socket that fails before it opens is dropped and retried. Node's built-in
+  WebSocket, refused with a 502 while realtime restarted, fired error and never close, so the client
+  counted it as live and stopped reconnecting for good.
+* **realtime:** a socket still connecting after 10 seconds is given up and replaced. One opened while
+  realtime restarted behind the gateway could stay connecting with no error and no close.
+* **auth:** a restored session kept the user without `isAnonymous`, so a guest looked registered after
+  every reload. The persisted user's camelCase keys, including those of `identities` and `factors`
+  (`userId`, `identityData`, `factorType`, ...), are read back, and a user stored without the flag takes
+  it from the token's `is_anonymous` claim.
+* **realtime:** reconnect backoff is capped at 30 seconds. It doubled from one second for 10 attempts,
+  reaching 512 seconds.
+
+## 0.9.1 (2026-11-09)
 
 ### Breaking Changes
 
@@ -15,20 +89,6 @@
   `details` and `hint` are absent rather than `null` when the server gave none, and an rpc refusal
   is the `PostgrestError` itself. `AuthRedirectError` is a class too, with `provider` as one more
   own field. `SupatypeErrorFields` is the fields' type, as the constructor takes them.
-* **query:** `insert`, `update`, `upsert` and `delete` ask for no rows back and resolve to
-  `data: null`, as postgrest-js does. Chain `.select()` (or `.select(columns)`) to get the written
-  rows. Returning a row needs the right to read it, so a table whose rules let a caller create but
-  not read (an anon order form, say) refused every insert with 401 `42501`. A plain `delete()`
-  resolves to `null` rather than `[]`. On a model that keeps drafts, the drafts are read back only
-  after `.select()`.
-* **query:** `.single()` and `.maybeSingle()` on a write are a type error until `.select()` is
-  chained. Called without it from untyped code, they answer an error and send nothing.
-* **query:** `fetchWithOptional401Retry`'s `onUnauthorized` (and `GraphqlTransport.onUnauthorized`)
-  is an `UnauthorizedHandler`: `(refusedToken: string) => Promise<boolean>`, answering whether the
-  session now holds a different token. It was `() => Promise<void>`.
-* **bindings:** `runMutation(client, table, operation, data, request)` takes one `MutationRequest`
-  (`filter`, `publish`, `select`) in place of the positional `filter` and update options, and returns
-  rows only when `request.select` asks for them (`true`, or the columns as `.select()` takes them).
 
 ### Features
 
@@ -59,6 +119,25 @@
 
 ### Bug Fixes
 
+* **realtime:** a change frame that names an exact-column kind this client does not know is no
+  longer dropped. The unknown kind is ignored and that column's value passes through as sent, while
+  the kinds it does know are still converted, so a kind added by a newer service never costs a
+  change. The REST field-kinds document already behaved this way and is now pinned by the same
+  shared check.
+* **client:** a response is refused, with the same error as a single lossy number, when a number
+  inside an array in a column the generated types do not describe would lose digits in
+  `JSON.parse`. The error names the column. Elements are checked at any nesting depth by the
+  rules that already applied to a single value: a literal is lossy when its value changes, so
+  `19.0000` and `1e2` pass. Columns registered as `bigint[]` or `numeric[]` are still kept exact,
+  not refused. A json column holding an array of numbers too large for a double was read with
+  rounded elements before; it is now refused.
+* **client:** an array of exact values no longer loses digits. A stored `bigint[]` of
+  9007199254740993 came back as 9007199254740992 and a `numeric[]` of 1.10 as 1.1, because only a
+  number that was the direct value of a column was protected from `JSON.parse`. Every element of
+  a `bigint[]` or `numeric[]` column, at any nesting depth, is now kept as written: `bigint[]`
+  elements are native bigints and `numeric[]` elements are exact strings, as the single values
+  are. Nulls inside an array stay null. A generated `client.ts` from before this change still
+  works, and registers no array kinds until `supatype push` regenerates it.
 * **client:** `MissingClientValuesError` gives the script tag as
   `<script src="/supatype-env.js" vite-ignore></script>`, the form `vite build` leaves alone. The
   tag it gave made every `vite build` warn that it could not bundle the script.
@@ -85,11 +164,6 @@
   from a server too old to serve it) and to open it in the browser. A page with no element is told
   to add it, as before.
 
-* **auth:** a request refused with 401 is sent again only when the server said the token was
-  expired or invalid (`PGRST301`, `PGRST303`, or "JWT expired"), a session was there to refresh, and
-  the refresh produced a different token. Every 401 used to be sent twice, an anon write a row rule
-  refused among them. The refresh now runs even when the local clock still calls the token valid,
-  since the server has said otherwise.
 * **bindings:** `reportThrown(where, thrown)` turns a request that threw instead of answering
   `{ data, error }` into the binding's `error`, and logs it once with `console.error`. A thrown
   `Error` is kept as it is, so `instanceof` still names it; the SDK's own error classes get the shape
@@ -108,3 +182,32 @@
   from one. Server refusals, client-side refusals (`Not authenticated`) and `reportThrown` follow
   suit: `reportThrown` keeps an SDK error as it is and holds any other thrown value as the `cause`
   of a `SupatypeError`.
+
+## 0.9.0 (2026-11-04)
+
+### Breaking Changes
+
+* **query:** `insert`, `update`, `upsert` and `delete` ask for no rows back and resolve to
+  `data: null`, as postgrest-js does. Chain `.select()` (or `.select(columns)`) to get the written
+  rows. Returning a row needs the right to read it, so a table whose rules let a caller create but
+  not read (an anon order form, say) refused every insert with 401 `42501`. A plain `delete()`
+  resolves to `null` rather than `[]`. On a model that keeps drafts, the drafts are read back only
+  after `.select()`.
+* **query:** `.single()` and `.maybeSingle()` on a write are a type error until `.select()` is
+  chained. Called without it from untyped code, they answer an error and send nothing.
+* **query:** `fetchWithOptional401Retry`'s `onUnauthorized` (and `GraphqlTransport.onUnauthorized`)
+  is an `UnauthorizedHandler`: `(refusedToken: string) => Promise<boolean>`, answering whether the
+  session now holds a different token. It was `() => Promise<void>`.
+* **bindings:** `runMutation(client, table, operation, data, request)` takes one `MutationRequest`
+  (`filter`, `publish`, `select`) in place of the positional `filter` and update options, and returns
+  rows only when `request.select` asks for them (`true`, or the columns as `.select()` takes them).
+
+### Bug Fixes
+
+* **auth:** a request refused with 401 is sent again only when the server said the token was
+  expired or invalid (`PGRST301`, `PGRST303`, or "JWT expired"), a session was there to refresh, and
+  the refresh produced a different token. Every 401 used to be sent twice, an anon write a row rule
+  refused among them. The refresh now runs even when the local clock still calls the token valid,
+  since the server has said otherwise.
+
+

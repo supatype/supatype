@@ -5,7 +5,7 @@ import { useApiQuery } from "../hooks/useApiQuery.js"
 import { useProjectProxy } from "../hooks/useProjectProxy.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { bodyErrorText, type Guard, isBoolean, isJsonObject, isNumber, isShape, isString, optional, readJson, readJsonObject } from "../lib/json.js"
-import { Badge, Button, Card, Checkbox, CodeBlock, ConfirmButton, Input, Select, Table, Tabs, Textarea, Th, Td, type DestructiveQuestion, type TabsSpec } from "../components/ui.js"
+import { Badge, Button, Card, CodeBlock, ConfirmButton, Input, Tabs, TextLink, type DestructiveQuestion, type TabsSpec } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ConnectionStringPanel } from "../components/database/ConnectionStringPanel.js"
 import { ApiCorsSettings } from "./ApiCorsSettings.js"
@@ -23,21 +23,6 @@ interface ApiKey {
   last_used: string | null
 }
 
-interface EnvVar {
-  key: string
-  value: string
-  sensitive: boolean
-  source: "env" | "config" | "override"
-}
-
-interface AuthProviderConfig {
-  provider: string
-  enabled: boolean
-  client_id: string
-  client_secret_set: boolean
-  scopes: string
-}
-
 type SettingsTab = "general" | "keys" | "env" | "cors" | "database" | "integrations"
 
 // ─── General Settings Tab ─────────────────────────────────────────────────────
@@ -45,42 +30,31 @@ type SettingsTab = "general" | "keys" | "env" | "cors" | "database" | "integrati
 function GeneralSettings(): React.ReactElement {
   const client = useStudioClient()
   const adminConfig = useAdminConfig()
-  const [projectName, setProjectName] = useState(adminConfig.branding?.appName ?? "")
-  const [siteUrl, setSiteUrl] = useState("")
-  const [apiUrl] = useState(client.url)
-  const [region] = useState("")
-  const [saved, setSaved] = useState(false)
-
-  const handleSave = () => {
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
-  }
+  const projectName = adminConfig.projectName ?? ""
+  const siteUrl = adminConfig.siteUrl ?? ""
 
   return (
     <Card className="p-4">
       <h3>Project Configuration</h3>
+      <p className="mt-2 max-w-[600px] text-xs text-muted-foreground">
+        Read-only. These are set when the stack starts; Studio cannot change them.
+      </p>
       <div className="flex flex-col gap-4 max-w-[600px] mt-4">
         <div>
           <label className="block text-[0.8rem] text-muted-foreground mb-1">Project Name</label>
-          <Input value={projectName} onChange={(e) => setProjectName(e.target.value)} />
+          <Input className="text-muted-foreground" value={projectName} readOnly />
+          <p className="text-xs text-zinc-600 mt-1">Set in <code>supatype.config.ts</code>.</p>
         </div>
         <div>
           <label className="block text-[0.8rem] text-muted-foreground mb-1">Site URL</label>
-          <Input value={siteUrl} onChange={(e) => setSiteUrl(e.target.value)} />
-          <p className="text-xs text-zinc-600 mt-1">Used for email templates and OAuth redirect URLs.</p>
+          <Input className="text-muted-foreground" value={siteUrl} readOnly />
+          <p className="text-xs text-zinc-600 mt-1">
+            Set in <code>supatype.config.ts</code> or <code>SITE_URL</code>. Used for email templates and OAuth redirect URLs.
+          </p>
         </div>
         <div>
           <label className="block text-[0.8rem] text-muted-foreground mb-1">API URL</label>
-          <Input className="text-muted-foreground" value={apiUrl} readOnly />
-        </div>
-        <div>
-          <label className="block text-[0.8rem] text-muted-foreground mb-1">Region</label>
-          <Input className="text-muted-foreground" value={region} readOnly />
-          <p className="text-xs text-zinc-600 mt-1">Region cannot be changed after project creation.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="primary" onClick={handleSave}>Save Changes</Button>
-          {saved ? <span className="text-green-400 text-xs">Saved</span> : null}
+          <Input className="text-muted-foreground" value={client.url} readOnly />
         </div>
       </div>
     </Card>
@@ -189,152 +163,6 @@ function ApiKeysSettings(): React.ReactElement {
   )
 }
 
-// ─── Environment Variables Tab ────────────────────────────────────────────────
-
-function EnvSettings(): React.ReactElement {
-  const [envVars, setEnvVars] = useState<EnvVar[]>([])
-  const [editingKey, setEditingKey] = useState<string | null>(null)
-  const [editValue, setEditValue] = useState("")
-  const [showAddForm, setShowAddForm] = useState(false)
-  const [newKey, setNewKey] = useState("")
-  const [newValue, setNewValue] = useState("")
-  const [newSensitive, setNewSensitive] = useState(false)
-  const [revealedKeys, setRevealedKeys] = useState<Set<string>>(new Set())
-
-  const toggleReveal = (key: string) => {
-    setRevealedKeys((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
-
-  const handleEditStart = (envVar: EnvVar) => {
-    setEditingKey(envVar.key)
-    setEditValue(envVar.value)
-  }
-
-  const handleEditSave = () => {
-    if (!editingKey) return
-    setEnvVars((prev) => prev.map((v) => v.key === editingKey ? { ...v, value: editValue } : v))
-    setEditingKey(null)
-  }
-
-  const handleAdd = () => {
-    if (!newKey.trim()) return
-    setEnvVars((prev) => [...prev, { key: newKey.trim(), value: newValue, sensitive: newSensitive, source: "override" }])
-    setShowAddForm(false)
-    setNewKey("")
-    setNewValue("")
-    setNewSensitive(false)
-  }
-
-  const handleDelete = (key: string) => {
-    setEnvVars((prev) => prev.filter((v) => v.key !== key))
-  }
-
-  return (
-    <Card className="p-4">
-      <div className="flex justify-between items-center mb-4">
-        <div>
-          <h3 className="m-0">Environment Variables</h3>
-          <p className="text-[0.8rem] text-muted-foreground mt-1">
-            Configure environment variables for your project services.
-          </p>
-        </div>
-        <Button variant="primary" size="sm" onClick={() => setShowAddForm(true)}>+ Add Variable</Button>
-      </div>
-
-      {/* Add form */}
-      {showAddForm ? (
-        <Card className="p-3 mb-4 bg-accent/30">
-          <div className="flex gap-2 items-end flex-wrap">
-            <div className="w-[200px]">
-              <label className="block text-[0.8rem] text-muted-foreground mb-1">Key</label>
-              <Input value={newKey} onChange={(e) => setNewKey(e.target.value)} placeholder="MY_VAR" />
-            </div>
-            <div className="flex-1">
-              <label className="block text-[0.8rem] text-muted-foreground mb-1">Value</label>
-              <Input value={newValue} onChange={(e) => setNewValue(e.target.value)} placeholder="value" />
-            </div>
-            <Checkbox className="pb-1.5" label="Sensitive" checked={newSensitive} onChange={(e) => setNewSensitive(e.target.checked)} />
-            <Button variant="primary" onClick={handleAdd}>Add</Button>
-            <Button onClick={() => setShowAddForm(false)}>Cancel</Button>
-          </div>
-        </Card>
-      ) : null}
-
-      {envVars.length === 0 ? (
-        <EmptyState
-          title="Environment variables are managed via the cloud dashboard or CLI"
-          description="Live configuration management will be available in a future release."
-        />
-      ) : (
-        <Card className="overflow-auto">
-          <Table>
-            <thead>
-              <tr className="border-b border-border">
-                <Th>Key</Th>
-                <Th>Value</Th>
-                <Th>Source</Th>
-                <Th>Actions</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {envVars.map((v) => (
-                <tr key={v.key} className="border-b border-border hover:bg-accent/50">
-                  <Td>
-                    <code className="text-primary">{v.key}</code>
-                    {v.sensitive ? <Badge variant="red" className="ml-1.5 text-[0.5rem]">secret</Badge> : null}
-                  </Td>
-                  <Td>
-                    {editingKey === v.key ? (
-                      <div className="flex gap-1">
-                        <Input
-                          className="flex-1 font-mono text-xs"
-                          value={editValue}
-                          onChange={(e) => setEditValue(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter") handleEditSave(); if (e.key === "Escape") setEditingKey(null) }}
-                          autoFocus
-                        />
-                        <Button size="xs" onClick={handleEditSave}>Save</Button>
-                        <Button size="xs" onClick={() => setEditingKey(null)}>Cancel</Button>
-                      </div>
-                    ) : (
-                      <code className="font-mono text-xs">
-                        {v.sensitive && !revealedKeys.has(v.key) ? "\u2022".repeat(20) : v.value}
-                      </code>
-                    )}
-                  </Td>
-                  <Td>
-                    <Badge variant={v.source === "env" ? "blue" : v.source === "config" ? "green" : "yellow"} className="text-[0.6rem]">
-                      {v.source}
-                    </Badge>
-                  </Td>
-                  <Td>
-                    <div className="flex gap-1">
-                      {v.sensitive ? (
-                        <Button size="xs" onClick={() => toggleReveal(v.key)}>
-                          {revealedKeys.has(v.key) ? "Hide" : "Show"}
-                        </Button>
-                      ) : null}
-                      <Button size="xs" onClick={() => handleEditStart(v)}>Edit</Button>
-                      {v.source === "override" ? (
-                        <Button size="xs" variant="destructive" onClick={() => handleDelete(v.key)}>Remove</Button>
-                      ) : null}
-                    </div>
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        </Card>
-      )}
-    </Card>
-  )
-}
-
 // ─── CORS Origins Tab ─────────────────────────────────────────────────────────
 
 /**
@@ -354,140 +182,6 @@ function CorsSettings({ demoMode }: { demoMode: boolean }): React.ReactElement {
         Owners, admins and developers can change the list here; <code>supatype dev</code> allows every origin.
       </p>
     </Card>
-  )
-}
-
-// ─── Auth Settings Tab ────────────────────────────────────────────────────────
-
-function AuthSettings(): React.ReactElement {
-  const [providers, setProviders] = useState<AuthProviderConfig[]>([])
-  const [editingProvider, setEditingProvider] = useState<string | null>(null)
-  const [editClientId, setEditClientId] = useState("")
-  const [editSecret, setEditSecret] = useState("")
-  const [editScopes, setEditScopes] = useState("")
-
-  // Auth config
-  const [emailConfirmation, setEmailConfirmation] = useState(false)
-  const [autoConfirmDev, setAutoConfirmDev] = useState(false)
-  const [jwtExpiry, setJwtExpiry] = useState(0)
-  const [redirectUrls, setRedirectUrls] = useState("")
-
-  const toggleProvider = (provider: string) => {
-    setProviders((prev) => prev.map((p) => p.provider === provider ? { ...p, enabled: !p.enabled } : p))
-  }
-
-  const startEditProvider = (p: AuthProviderConfig) => {
-    setEditingProvider(p.provider)
-    setEditClientId(p.client_id)
-    setEditSecret("")
-    setEditScopes(p.scopes)
-  }
-
-  const saveProvider = () => {
-    if (!editingProvider) return
-    setProviders((prev) => prev.map((p) =>
-      p.provider === editingProvider ? {
-        ...p,
-        client_id: editClientId,
-        client_secret_set: editSecret.length > 0 || p.client_secret_set,
-        scopes: editScopes,
-      } : p
-    ))
-    setEditingProvider(null)
-  }
-
-  return (
-    <div className="space-y-4">
-      {/* Auth providers */}
-      <Card className="p-4">
-        <h3>Authentication Providers</h3>
-        <div className="flex flex-col gap-3 mt-4">
-          {providers.length === 0 ? (
-            <EmptyState
-              title="No authentication providers configured"
-              description="Live provider management will be available in a future release."
-            />
-          ) : null}
-          {providers.map((p) => (
-            <div key={p.provider} className="border border-border rounded-md p-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Badge variant={p.enabled ? "green" : "red"}>{p.enabled ? "Enabled" : "Disabled"}</Badge>
-                  <span className="font-medium text-sm capitalize">{p.provider}</span>
-                  {p.client_id ? (
-                    <code className="text-xs text-zinc-600">{p.client_id.slice(0, 15)}...</code>
-                  ) : null}
-                </div>
-                <div className="flex gap-2">
-                  <Button size="xs" onClick={() => toggleProvider(p.provider)}>
-                    {p.enabled ? "Disable" : "Enable"}
-                  </Button>
-                  {p.provider !== "email" ? (
-                    <Button size="xs" onClick={() => startEditProvider(p)}>Configure</Button>
-                  ) : null}
-                </div>
-              </div>
-
-              {editingProvider === p.provider ? (
-                <div className="mt-3 pt-3 border-t border-border grid grid-cols-1 gap-2 max-w-[500px]">
-                  <div>
-                    <label className="block text-[0.8rem] text-muted-foreground mb-1">Client ID</label>
-                    <Input value={editClientId} onChange={(e) => setEditClientId(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="block text-[0.8rem] text-muted-foreground mb-1">
-                      Client Secret {p.client_secret_set ? "(already set, leave blank to keep)" : ""}
-                    </label>
-                    <Input type="password" value={editSecret} onChange={(e) => setEditSecret(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="block text-[0.8rem] text-muted-foreground mb-1">Scopes</label>
-                    <Input value={editScopes} onChange={(e) => setEditScopes(e.target.value)} placeholder="openid email profile" />
-                  </div>
-                  <div className="flex gap-2">
-                    <Button variant="primary" onClick={saveProvider}>Save</Button>
-                    <Button onClick={() => setEditingProvider(null)}>Cancel</Button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      {/* Auth configuration */}
-      <Card className="p-4">
-        <h3>Auth Configuration</h3>
-        <div className="flex flex-col gap-4 max-w-[500px] mt-4">
-          <Checkbox className="gap-2 text-sm text-foreground" label="Require email confirmation" checked={emailConfirmation} onChange={(e) => setEmailConfirmation(e.target.checked)} />
-          <Checkbox className="gap-2 text-sm text-foreground" label="Auto-confirm in development mode" checked={autoConfirmDev} onChange={(e) => setAutoConfirmDev(e.target.checked)} />
-          <div>
-            <label className="block text-[0.8rem] text-muted-foreground mb-1">JWT Expiry (seconds)</label>
-            <Input
-              type="number"
-              className="w-[200px]"
-              value={jwtExpiry}
-              onChange={(e) => setJwtExpiry(Number(e.target.value))}
-            />
-          </div>
-          <div>
-            <label className="block text-[0.8rem] text-muted-foreground mb-1">
-              Redirect URLs (one per line)
-            </label>
-            <Textarea
-              aria-label="Redirect URLs (one per line)"
-              className="py-1.5 min-h-[80px] resize-y"
-              value={redirectUrls}
-              onChange={(e) => setRedirectUrls(e.target.value)}
-            />
-            <p className="text-xs text-zinc-600 mt-1">
-              Only these URLs are allowed as redirect targets after OAuth login.
-            </p>
-          </div>
-          <Button variant="primary" className="self-start">Save Auth Settings</Button>
-        </div>
-      </Card>
-    </div>
   )
 }
 
@@ -719,7 +413,7 @@ interface SettingsTabDef extends RoleRequirement {
 const SETTINGS_TABS: SettingsTabDef[] = [
   { key: "general", label: "General", needs: "administer", activity: "change the project settings" },
   { key: "keys", label: "API Keys", needs: "manageKeys", activity: "see the project's API keys" },
-  { key: "env", label: "Environment", needs: "administer", activity: "manage environment variables" },
+  { key: "env", label: "Environment", needs: "administer", activity: "manage function secrets" },
   { key: "cors", label: "CORS", needs: "manageDomains", activity: "manage allowed origins" },
   { key: "database", label: "Database", needs: "schemaView", activity: "view the database settings" },
   { key: "integrations", label: "Integrations", needs: "administer", activity: "manage integrations" },
@@ -731,12 +425,28 @@ const SETTINGS_TAB_BAR: TabsSpec<SettingsTab> = {
   items: SETTINGS_TABS.map((t) => ({ id: t.key, label: t.label })),
 }
 
+/**
+ * Secrets are managed in one place, the Functions section, because data hooks run as functions and
+ * read the same store. This tab says so and links there.
+ */
+function EnvironmentNote(): React.ReactElement {
+  return (
+    <Card className="p-4">
+      <h3 className="m-0">Environment</h3>
+      <p className="text-[0.8rem] text-muted-foreground mt-1">
+        Function and data hook secrets are managed in the <TextLink to="/edge-functions?tab=env">Functions section</TextLink>, where
+        the same secrets arrive in each function&apos;s and hook&apos;s <code>ctx.env</code>.
+      </p>
+    </Card>
+  )
+}
+
 function SettingsTabBody({ tab, demoMode }: { tab: SettingsTab; demoMode: boolean }): React.ReactElement {
   const client = useStudioClient()
   switch (tab) {
     case "general": return <GeneralSettings />
     case "keys": return <ApiKeysSettings />
-    case "env": return <EnvSettings />
+    case "env": return <EnvironmentNote />
     case "cors": return <CorsSettings demoMode={demoMode} />
     case "database": return <DatabaseSettings client={client} />
     case "integrations": return <IntegrationsSettings />

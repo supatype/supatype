@@ -4,14 +4,14 @@ import { nextText } from "./fixtures/stream.js"
 import { expectObject } from "./fixtures/expect-json.js"
 import {
   connect,
-  freePort,
   serviceToken,
   settle,
   subscribe,
-  testEnv,
+  ANY_PORT, testEnv,
   userToken,
   type Peer,
 } from "./fixtures/socket.js"
+import { undeclaredChannels } from "./fixtures/fake-channel-db.js"
 
 /**
  * The Studio broadcast tester's endpoint: one fan-out with client broadcasts, sized, validated and
@@ -50,10 +50,10 @@ describe("POST /admin/v1/broadcast", () => {
   }
 
   beforeAll(async () => {
-    port = await freePort()
-    adminPort = await freePort()
-    server = new RealtimeServer(testEnv(port, { adminPort }))
+    server = new RealtimeServer(testEnv(ANY_PORT, { adminPort: ANY_PORT }), { channelDb: undeclaredChannels() })
     await server.start()
+    port = server.port
+    adminPort = server.adminPort ?? 0
   })
 
   afterAll(async () => {

@@ -24,6 +24,8 @@ const CASES: ReadonlyArray<readonly [singular: string, plural: string]> = [
   ["Blog Person", "Blog People"],
   ["Page Cache", "Page Caches"],
   ["Site Data", "Site Data"],
+  ["Feedback", "Feedback"],
+  ["Customer Feedback", "Customer Feedback"],
 ]
 
 describe("inflect", () => {

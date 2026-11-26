@@ -62,13 +62,15 @@ function useGlobalSave(
   values: Record<string, unknown>,
   setValues: (row: Record<string, unknown>) => void,
   problems: Refusal,
-): { saving: boolean; save: () => Promise<void> } {
+): { saving: boolean; savedAt: number | null; save: () => Promise<void> } {
   const client = useAdminClient()
   const [saving, setSaving] = useState(false)
+  const [savedAt, setSavedAt] = useState<number | null>(null)
 
   const save = async (): Promise<void> => {
     if (!passesChecks(problems, globalConfig.fields, values)) return
     setSaving(true)
+    setSavedAt(null)
     clearRefusal(problems)
     try {
       const table = client.from(globalConfig.tableName)
@@ -80,14 +82,17 @@ function useGlobalSave(
         : await table.update(changes).eq(PRIMARY_KEY, key).select().maybeSingle()
       if (result.error) reportRefusal(problems, result.error, globalConfig.fields, values)
       // The created row's key, so the next save updates it rather than inserting a second.
-      else if (isJsonObject(result.data)) setValues(result.data)
+      else {
+        if (isJsonObject(result.data)) setValues(result.data)
+        setSavedAt(Date.now())
+      }
     } catch (err) {
       problems.setError(err instanceof Error ? err.message : "Failed to save")
     } finally {
       setSaving(false)
     }
   }
-  return { saving, save }
+  return { saving, savedAt, save }
 }
 
 export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): React.ReactElement {
@@ -98,7 +103,7 @@ export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): R
   const { currentLocale, defaultLocale } = useLocale()
   const problems = useRefusal()
   const { values, setValues, loading } = useGlobalRow(globalConfig, problems.setError)
-  const { saving, save } = useGlobalSave(globalConfig, values, setValues, problems)
+  const { saving, savedAt, save } = useGlobalSave(globalConfig, values, setValues, problems)
   const handleChange = useCallback((fieldName: string, value: unknown) => {
     setValues((prev) => ({ ...prev, [fieldName]: value }))
   }, [setValues])
@@ -125,6 +130,7 @@ export function GlobalEditView({ global: globalConfig }: GlobalEditViewProps): R
         recordSyncKey="global"
         slugFollowSource={false}
         saving={saving}
+        savedAt={savedAt}
         {...(canWrite && { onSave: () => { void save() } })}
         isCreate={isCreate}
         fieldErrors={problems.fieldErrors}

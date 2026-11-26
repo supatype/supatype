@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { REST_READY_WITHIN_MS, waitForRestReady, type RestReadyDeps } from "../src/rest-ready.js"
+import { noteRestAwaitsFirstPush, REST_READY_WITHIN_MS, waitForRestReady, type RestReadyDeps } from "../src/rest-ready.js"
 
 /**
  * PU1: PostgREST 14 answers 503 (PGRST002) on every request while it cannot build its schema cache,
@@ -73,5 +73,22 @@ describe("waiting for REST after a push (PU1)", () => {
     expect(s.lines).toHaveLength(2)
     expect(s.lines[1]).toMatch(/still answered 503 after 40 s/)
     expect(s.lines[1]).toMatch(/self-host compose logs --service postgrest/)
+  })
+})
+
+describe("a fresh self-host stack's REST before its first push", () => {
+  it("says to push when REST answers 503, and nothing otherwise", async () => {
+    const waiting = stack([503])
+    expect(await noteRestAwaitsFirstPush("http://localhost:55560", "anon-key", waiting.deps)).toBe(true)
+    expect(waiting.lines).toEqual([
+      "[supatype] The REST API answers 503 until your schema exists. Run `supatype push` to create it.",
+    ])
+    expect(waiting.elapsed()).toBe(0)
+
+    for (const answer of [200, new Error("connection refused")]) {
+      const s = stack([answer])
+      expect(await noteRestAwaitsFirstPush("http://localhost:55560", "anon-key", s.deps)).toBe(false)
+      expect(s.lines).toEqual([])
+    }
   })
 })

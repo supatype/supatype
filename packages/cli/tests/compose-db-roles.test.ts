@@ -174,4 +174,17 @@ describe("reconcileSqlEditorPassword", () => {
     expect(input).toContain("WHERE EXISTS (SELECT FROM pg_roles WHERE rolname = 'supatype_sql_editor')")
     expect(input).toContain("\\gexec")
   })
+
+  // The image grants the editor its owner WITH INHERIT TRUE, SET FALSE so submitted SQL cannot
+  // SET ROLE into the owner, and the editor's objects reach the owner through the image's
+  // SECURITY DEFINER reassign function. The start sets the password and grants nothing, so it
+  // can never undo that containment.
+  it("sets only the password and grants the editor nothing", async () => {
+    await reconcileSqlEditorPassword(paths(), cwd, "supatype-kitchen-sink")
+    const { input } = psqlCall()
+
+    expect(input).not.toMatch(/\bGRANT\b/i)
+    expect(input).not.toMatch(/SET\s+TRUE/i)
+    expect(input).not.toContain("supatype_auth_admin")
+  })
 })

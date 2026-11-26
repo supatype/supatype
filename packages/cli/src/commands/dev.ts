@@ -81,7 +81,11 @@ import {
   hasMeaningfulOverrides,
   describeActiveOverrides,
   postgresArchiveTag,
+  pinnedVersion,
+  download,
+  type PlatformId,
 } from "../binary-cache.js"
+import { assertEngineSupportsSchema, assertRealtimeSupportsSchema } from "../engine-floor.js"
 import { ensureBinary } from "../ensure-binary.js"
 import {
   assertSupported,
@@ -117,7 +121,7 @@ import {
   waitForDevShutdown,
 } from "../dev-shutdown.js"
 import { startNativeRealtime } from "../native-realtime.js"
-import { nativeWorkerDenoEnv, prepareNativeWorker } from "../native-worker.js"
+import { denoPreflightWarning, nativeWorkerDenoEnv, prepareNativeWorker } from "../native-worker.js"
 import { configSnapshot } from "../config-snapshot.js"
 import { refuseInsideDevApp } from "../dev-self-start.js"
 import { patchRouteManifest, recordNativeRoutes } from "../route-manifest.js"
@@ -128,8 +132,10 @@ import {
 } from "../native-storage.js"
 import { keepsObjectsLocally, serverStoreRoot } from "../local-storage.js"
 import { writeAppliedAstArtifacts } from "../applied-ast-artifacts.js"
+import { cacheSeedingNotes } from "../api-config-cache.js"
 import { writeAppViteEnv } from "../app-vite-env.js"
 import { nativeAuthProviderEnv, warnMissingAuthProviderSecrets } from "../auth-providers.js"
+import { nativeAuthGroupsEnv } from "../auth-groups-env.js"
 import { warnSmtpWithoutHost } from "../config-mailer-env.js"
 import { nativeSamlEnv } from "../saml-config.js"
 import { AUTHENTICATOR_PASSWORD_ENV } from "../native-roles-sql.js"
@@ -141,11 +147,13 @@ import {
   nativeKeyspaceServerEnv,
   nativeServerCoreEnv,
   nativeServerDotEnvLayer,
+  nativeServerInheritsEnv,
   type NativeCache,
 } from "../native-dev-env.js"
 import { ensureValkeySidecar, externalValkey, type RespCredentials } from "../valkey-sidecar.js"
 import {
   nativeKeyspaceAddr,
+  machineKeyspaceChecks,
   nativeKeyspacePort,
   writeKeyspacePasswordFile,
 } from "../native-keyspace.js"
@@ -167,6 +175,7 @@ import {
 import { claimPortLock, isPortLock, type PortClaimHeld, type PortLock } from "../native-port-lock.js"
 import { leftoverOwnPostgres, recordNativeDevPid, type NativeDevState } from "../native-leftover-postgres.js"
 import { stopLeftoverServices } from "../native-leftover-services.js"
+import { cleanStaleNativeSession } from "../native-stale-session.js"
 import {
   isPasswordRejected,
   pgClientEnv,
@@ -318,6 +327,8 @@ async function requireDevEngineSupports(
 export function registerDev(program: Command): void {
   program
     .command("dev")
+    // `dev stop` is not a command; a stray word must not start the stack it was meant to stop.
+    .allowExcessArguments(false)
     .description("Start local Postgres, apply schema, and run supatype-server")
     .option("--no-watch", "Start services but do not watch for schema changes, or (Docker) for function changes")
     .option("--stream", "Print interleaved logs instead of the interactive TUI")
@@ -376,6 +387,9 @@ export function registerDev(program: Command): void {
       const nativeState: NativeDevState = { dataDir: nativeDataDir(config), pidDir: join(nativeStateRoot(config), "pid") }
       let portClaim: NativePortClaim | null = null
       if (provider !== "docker") {
+        // A dev that was force-quit leaves its Valkey container and session file; say what is removed.
+        const cleaned = await cleanStaleNativeSession(cwd)
+        if (cleaned !== null) console.log(`[supatype] ${cleaned}`)
         // The functions worker runs on every native dev (native-worker.ts), so Deno's port is checked too.
         portClaim = await claimNativeDevPorts({
           postgres: pgPort,
@@ -479,7 +493,7 @@ export function registerDev(program: Command): void {
         // The RESP keyspace, when this archive carries it and can require a password: one process
         // instead of a Postgres and a Valkey container. The port is chosen rather than fixed
         // because 6379 is the first thing a developer's own Redis or a leftover sidecar takes.
-        const keyspacePort = await nativeKeyspacePort(config, pgBinDir, pgInstall.version)
+        const keyspacePort = await nativeKeyspacePort(config, pgBinDir, pgInstall.version, machineKeyspaceChecks(cwd))
         // The project's password, from .env or the file SUPATYPE_KEYSPACE_PASSWORD_FILE names
         // (R2-S16), which the keyspace reads itself from a file only this user can read, and
         // requires from its first client (N-RB2).
@@ -598,6 +612,8 @@ export function registerDev(program: Command): void {
       // The functions worker the image runs, from the CLI's copy, on every start (native-worker.ts).
       await showDevStep("Starting services")
       const worker = await prepareNativeWorker(cwd, config)
+      const denoWarning = denoPreflightWarning(worker.denoBin, cwd)
+      if (denoWarning !== null) console.warn(denoWarning)
 
       // The server passes its environment, the key included, on to Deno, but the functions worker
       // reads the key from a file: a --watch reload evaluates it again in an environment an
@@ -701,17 +717,20 @@ export function registerDev(program: Command): void {
         SUPATYPE_API_HOST: "localhost",
         SUPATYPE_SITE_URL: `http://localhost:${serverPort}`,
         // External URL, mailer provider, emailed-link paths and the send-email hook.
-        ...nativeAuthMailerEnv(config.email, serverPort),
+        ...nativeAuthMailerEnv(config.email, serverPort, providerEnvironment),
         SUPATYPE_LOG_LEVEL: "info",
         SUPATYPE_DISABLE_SIGNUP: "false",
         ...serverStorageEnv(nativeStorage, config),
         // .env last, so a SUPATYPE_EXTERNAL_* value there wins over auth.providers in the config.
         ...nativeAuthProviderEnv(config, `http://localhost:${serverPort}`, providerEnvironment),
+        // auth hooks, captcha, password, sessions, MFA, phone and rate limits. After the mailer, so
+        // auth.hooks.sendEmail wins over email.send_email_hook.
+        ...nativeAuthGroupsEnv(config, providerEnvironment),
         // auth.sso.saml, with the signing key from .env (generated there the first time SAML is on).
         ...nativeSamlEnv(cwd, config),
-        ...nativeServerDotEnvLayer({ dotEnv, config, denoPort }),
+        ...nativeServerDotEnvLayer({ dotEnv, config, denoPort, environment: providerEnvironment }),
         // After .env, which can hold a keyspace password for a Docker phase of the project (N-RB2).
-        ...nativeKeyspaceServerEnv(cache),
+        ...nativeKeyspaceServerEnv(cache, providerEnvironment),
       }
 
       await haltIfStopping()
@@ -720,6 +739,8 @@ export function registerDev(program: Command): void {
         pidDir,
         colour: "\x1b[32m",
         env: serverEnv,
+        // Not the whole shell: an older server passes all it has on to the Deno that runs functions.
+        inheritEnv: nativeServerInheritsEnv,
       })
       serverProc.start()
       pushStartUndo(() => serverProc.stop())
@@ -863,6 +884,7 @@ export function registerDev(program: Command): void {
         composePath: selfHostComposePaths(cwd).composePath,
         dbPort: pgPort,
         runEnv: { [DEV_DB_PORT_ENV]: String(pgPort) },
+        ...(cache.sidecar.containerName !== null && { valkeyContainer: cache.sidecar.containerName }),
       }))
 
       // ── 10. Schema watch ──────────────────────────────────────────────────
@@ -1086,6 +1108,12 @@ async function readNativeSchema(
   skipFieldKinds: ReadonlySet<string> | undefined,
 ): Promise<ExtractedSchemaAstV2> {
   const built = await buildNativeAst(cwd, schemaPath, config, skipFieldKinds)
+  // The check `supatype push` makes: a pinned engine too old to read part of the schema drops it silently.
+  if (config) {
+    assertEngineSupportsSchema(built.ast, pinnedVersion("engine", config))
+    // Native dev runs the realtime it resolves, and one that predates channels enforces none (FF-34).
+    assertRealtimeSupportsSchema(built.ast, pinnedVersion("realtime", config))
+  }
   if (built.adapted.length > 0) {
     console.warn(
       `[supatype] ${built.adapted.length} field(s) replaced with JSONB, required extensions not available:\n` +
@@ -1139,7 +1167,7 @@ async function writeNativeSchemaArtifacts(
   const { cwd, engineBin, astPath } = paths
   if (paths.storagePath || paths.storageApi) await provisionDeclaredBuckets(engineBin, cwd, astPath, paths)
   if (paths.adminConfigPath) await writeNativeAdminConfig(paths, paths.adminConfigPath, ast, config)
-  if (config) writeNativeAppliedAst(cwd, config, ast)
+  if (config) await writeNativeAppliedAst(cwd, config, ast)
   await writeNativeTypes(cwd, ast, config)
 }
 
@@ -1316,21 +1344,19 @@ async function resolvePgInstall(config: Awaited<ReturnType<typeof loadConfig>>):
   return { binDir: join(extractedDir, "bin"), version }
 }
 
-async function extractPostgresArchive(
+/** Unpacks the cached Postgres archive for `version`, fetching it first when this machine has none. */
+export async function extractPostgresArchive(
   pgCacheDir: string,
   version: string,
-  platform: { os: string; arch: string },
+  platform: PlatformId,
   extractDir: string,
 ): Promise<void> {
   const ext = platform.os === "windows" ? ".zip" : ".tar.gz"
   const archiveName = `supatype-pg-${postgresArchiveTag(version)}-${platform.os}-${platform.arch}${ext}`
   const archivePath = join(pgCacheDir, archiveName)
 
-  if (!existsSync(archivePath)) {
-    throw new Error(
-      `Postgres ${version} archive not found. Run: supatype update`,
-    )
-  }
+  // Fetched like the engine, server and PostgREST are: a first `dev` on a clean home needs no `update`.
+  if (!existsSync(archivePath)) await download("postgres", version, platform)
 
   extractArchive(archivePath, extractDir)
 }
@@ -1623,8 +1649,11 @@ function ensureProjectDatabase(db: ProjectDatabase): void {
  * only go into one that exists, and the first push runs before native dev records its functions,
  * which switches functions (`services.functions`) before the server reads it.
  */
-function writeNativeAppliedAst(cwd: string, config: SupatypeProjectConfig, ast: unknown): void {
+export async function writeNativeAppliedAst(cwd: string, config: SupatypeProjectConfig, ast: unknown): Promise<void> {
   const manifestPath = join(cwd, ".supatype", "manifest.json")
   if (!existsSync(manifestPath)) patchRouteManifest(manifestPath, {})
   for (const line of writeAppliedAstArtifacts(cwd, config, ast, { rowCacheEnv: false }).lines) console.log(`[supatype] ${line}`)
+  // The declaration is a ceiling and the allowlist is what is on: only a push seeded the allowlist, so
+  // a declared `.cache({ server: true })` answered BYPASS under native dev (S-24).
+  for (const note of await cacheSeedingNotes(cwd, ast)) console.log(`[supatype] ${note}`)
 }

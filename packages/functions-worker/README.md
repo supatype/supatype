@@ -18,14 +18,19 @@ External Deno runtime for edge functions. **supatype-server** proxies `/function
 | `SUPATYPE_FUNCTIONS_ROOT` | yes | Directory of function sources (e.g. `/project/functions`) |
 | `PORT` | no | Listen port (default `8001`) |
 | `SUPATYPE_FUNCTION_NAME` | no | Single-function mode |
-| `SUPATYPE_URL` | no | **In-compose:** `http://kong:8000` (Docker DNS). Do not inject the public/host gateway URL, `localhost` inside the container cannot reach Kong on the host. Use for server-side `fetch` / `createClient`. Handed to every function as `ctx.url`. |
-| `SUPATYPE_INTERNAL_URL` | no | Same as `SUPATYPE_URL` in Compose (`http://kong:8000`) |
+| `SUPATYPE_URL` | no | **In-compose:** `http://kong:8100` (Docker DNS, Kong's worker listener: port 8000 strips the forwarding headers the worker adds). Do not inject the public/host gateway URL, `localhost` inside the container cannot reach Kong on the host. Use for server-side `fetch` / `createClient`. Handed to every function as `ctx.url`. |
+| `SUPATYPE_INTERNAL_URL` | no | Same as `SUPATYPE_URL` in Compose (`http://kong:8100`) |
 | `SUPATYPE_PUBLIC_URL` | no | The project's public address, the gateway URL a browser or an app uses. Handed to every function as `ctx.publicUrl`, for links you give to people. Compose sets it from `API_EXTERNAL_URL`, the address the server is told is its own. Unset, `ctx.publicUrl` falls back to `ctx.url` and the worker logs one warning at start |
 | `SUPATYPE_ANON_KEY`, `SUPATYPE_SERVICE_ROLE_KEY` | no | Injected per invocation when set |
 | `SITE_URL` | no | Public site URL for browser-facing links (not the same as `SUPATYPE_URL`) |
 | `SUPATYPE_DB_URL` | no | Handed to every function as `ctx.dbUrl`. Off by default; Compose sets it from the project's `SUPATYPE_FUNCTIONS_DB_URL`. See [Direct database access](#direct-database-access-ctxdburl) |
 
 Per-function env files: `{root}/.env.{name}.local`; shared: `{root}/.env.local`.
+
+Before any function is imported the worker deletes every other variable from its environment, so
+function code finds only the worker's settings, `DENO_*` and what the OS needs (the list is
+`env-allowlist.ts`). A launcher that passes more, as native `supatype dev` once passed the server's
+whole environment, cannot widen what a function reads through `Deno.env`.
 
 Tests: `deno task test` starts this worker as the image does and reads a function's context back over HTTP.
 
@@ -38,8 +43,8 @@ Compose passes that value to this worker as `SUPATYPE_DB_URL`, and when the URL 
 separate variable from the project's `DATABASE_URL` on purpose, so handing functions a database
 connection is a decision rather than a default.
 
-What it is not: a request through the API. It connects as whatever role the URL names, so it
-**bypasses the schema's row rules and field masking**. With the admin URL
+What it is not: a request through the API. It connects as whatever role the URL names, so the schema's row rules and field
+masking apply for that role, and a superuser or `BYPASSRLS` role skips both. With the admin URL
 (`supatype_admin`, the one in `DATABASE_URL`) a function reads and writes every row and every
 column of every table, whatever the schema says. Every function in the project receives it, and a
 function is a public endpoint.
@@ -58,8 +63,15 @@ GRANT SELECT ON public.orders TO functions_reader;
 SUPATYPE_FUNCTIONS_DB_URL=postgresql://functions_reader:a-long-random-password@db:5432/my-project
 ```
 
+The last path segment is the database name: the `POSTGRES_DB` value in the project's `.env` (`supatype init` sets it to the project name), not a fixed string.
+
 Then run `supatype self-host compose up -d` (it renders the file again), or restart
 `supatype dev`. In the function, treat the URL as a credential: never return it or log it.
+
+Drivers verified against a live Postgres on this image's Deno (2.9.8): `npm:postgres` (latest),
+`npm:postgres@3.4.5` and `npm:pg`. `npm:postgres` 4.0 and later fails on Deno before 2.8 with
+`Not implemented: LibuvStreamWrap.prototype.useUserBuffer` (or `socket._handle.useUserBuffer is not a
+function`), and every 3.4 release runs there, so an older image needs `npm:postgres@3.4.5`.
 
 ```ts
 import postgres from "npm:postgres@3.4.5"

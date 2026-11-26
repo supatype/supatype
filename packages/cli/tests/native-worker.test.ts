@@ -12,7 +12,7 @@ vi.mock("../src/ensure-binary.js", async () => {
   return {
     ensureBinary: async () => {
       if (!deno.available) throw new Error("no deno for this platform")
-      return join(cacheRoot(), "deno", "2.2.0", "deno")
+      return join(cacheRoot(), "deno", "2.9.8", "deno")
     },
   }
 })
@@ -26,7 +26,7 @@ vi.mock("../src/binary-cache.js", async (importOriginal) => ({
 
 const { cacheRoot } = await import("../src/binary-cache.js")
 const { nativeWorkerDenoEnv, prepareNativeWorker } = await import("../src/native-worker.js")
-const cachedDeno = join(cacheRoot(), "deno", "2.2.0", "deno")
+const cachedDeno = join(cacheRoot(), "deno", "2.9.8", "deno")
 
 /**
  * Local test round 3d (N19): native dev started no functions worker in a project with no functions/
@@ -77,7 +77,7 @@ describe("native dev's Deno while the release CDN fails", () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined)
     const worker = await prepareNativeWorker(cwd, projectConfig({ provider: "native" }))
     expect(worker.denoBin).toBe(cachedDeno)
-    expect(logs.join("\n")).toContain(`Deno runtime: ${cachedDeno} (v2.2.0)`)
+    expect(logs.join("\n")).toContain(`Deno runtime: ${cachedDeno} (v2.9.8)`)
   })
 
   it("tells the server to run no Deno when none could be provisioned", async () => {

@@ -158,3 +158,60 @@ describe("stringifyWithBigInts", () => {
     expect(stringifyWithBigInts({ rows: [{ views: 1n }] })).toBe('{"rows":[{"views":"1"}]}')
   })
 })
+
+describe("array columns", () => {
+  const arrayFields: ExactFields = { ids: "bigint[]", rates: "numeric[]", views: "bigint" }
+
+  it("quotes every element of an exact-kind array, which JSON.parse would otherwise round", () => {
+    const body = '[{"ids":[9007199254740993,2],"rates":[1.10,0.0100]}]'
+    expect(JSON.parse(body)).toEqual([{ ids: [9007199254740992, 2], rates: [1.1, 0.01] }])
+
+    expect(JSON.parse(quoteExactNumbers(body, arrayFields))).toEqual([
+      { ids: ["9007199254740993", "2"], rates: ["1.10", "0.0100"] },
+    ])
+  })
+
+  it("quotes elements of nested arrays and leaves null alone", () => {
+    const body = '{"ids":[[9007199254740993,null],[-5]]}'
+    expect(JSON.parse(quoteExactNumbers(body, arrayFields))).toEqual({
+      ids: [["9007199254740993", null], ["-5"]],
+    })
+  })
+
+  it("does not touch arrays belonging to another column or to an embed", () => {
+    const body = '[{"other":[9007199254740993],"post":{"ids":[9007199254740993]}}]'
+    expect(quoteExactNumbers(body, arrayFields)).toBe(body)
+  })
+
+  it("does not treat a key inside an object in the array as the array column", () => {
+    const body = '[{"ids":[{"views":9007199254740993}]}]'
+    expect(quoteExactNumbers(body, arrayFields)).toBe(body)
+  })
+
+  it("converts bigint[] elements to bigint and keeps numeric[] as strings", () => {
+    const row = { ids: ["9007199254740993", null, ["7"]], rates: ["1.10"], views: "3" }
+    expect(coerceExactKinds([row], arrayFields)).toEqual([
+      { ids: [9007199254740993n, null, [7n]], rates: ["1.10"], views: 3n },
+    ])
+  })
+})
+
+describe("findLossyNumbers inside arrays", () => {
+  it("names a column whose array holds a literal that will not survive the parse", () => {
+    expect(findLossyNumbers('[{"ids":[9007199254740993]}]')).toEqual(["ids"])
+  })
+
+  it("names the column for an element at any depth, once", () => {
+    const body = '[{"grid":[[1,[9007199254740993]],[9007199254740995]]}]'
+    expect(findLossyNumbers(body)).toEqual(["grid"])
+  })
+
+  it("passes an array whose elements all round-trip", () => {
+    expect(findLossyNumbers('[{"ids":[1,2,9007199254740992,1.5,null,"x"]}]')).toEqual([])
+  })
+
+  it("applies the same rules to elements: trailing zeros pass, lost digits do not", () => {
+    expect(findLossyNumbers('[{"rates":[19.0000,1e2]}]')).toEqual([])
+    expect(findLossyNumbers('[{"rates":[12345678901234567890.1234]}]')).toEqual(["rates"])
+  })
+})

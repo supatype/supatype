@@ -41,6 +41,21 @@ describe("dockerProgram", () => {
     expect(dockerProgram(true, { PATH: tmpdir() }, "win32")).toEqual({ file: "docker", shell: true })
     expect(dockerProgram(false, { PATH: "/usr/bin" }, "linux")).toEqual({ file: "docker", shell: false })
   })
+
+  it("takes the first docker PATH offers, as Windows does, not any docker.exe later on it", () => {
+    const exeDir = standInDocker()
+    const shimDir = mkdtempSync(join(tmpdir(), "supatype-docker-shim-"))
+    dirs.push(shimDir)
+    writeFileSync(join(shimDir, "docker.cmd"), "@echo off")
+    const shimFirst = [shimDir, exeDir].join(";")
+    expect(dockerProgram(true, { PATH: shimFirst }, "win32")).toEqual({ file: "docker", shell: true })
+    expect(dockerProgram(false, { PATH: shimFirst }, "win32")).toEqual({ file: "docker", shell: true })
+    expect(dockerProgram(false, { PATH: [exeDir, shimDir].join(";") }, "win32")).toEqual({ file: "docker", shell: false })
+  })
+
+  it("uses the shell on Windows for a call that did not ask, when docker is only a .cmd shim", () => {
+    expect(dockerProgram(false, { PATH: tmpdir() }, "win32")).toEqual({ file: "docker", shell: true })
+  })
 })
 
 /** When the hung stand-in would write its second file, from its start: well past the call's limit. */

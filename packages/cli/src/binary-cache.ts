@@ -19,6 +19,7 @@
 import { setTimeout as sleep } from "node:timers/promises"
 import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto"
 import { isJsonObject } from "@supatype/shared"
+import { cdnGet, downloadToFile } from "./cdn-fetch.js"
 import { errorMessage } from "./error-message.js"
 import { readJsonObjectFile } from "./json-file.js"
 import { progress } from "./ui/messages.js"
@@ -530,7 +531,9 @@ async function fetchVerifiedArtifact(
   const match = extractChecksum(manifest, archiveNameCandidates(component, version, platform))
 
   const binaryUrl = `${releaseDirUrl(component, version)}/${match.filename}`
-  await withRetry(() => streamToFileWithProgress(binaryUrl, tmpPath))
+  // A partial file left by an earlier run is not ours to resume; the retries below are.
+  if (existsSync(tmpPath)) unlinkSync(tmpPath)
+  await withRetry(() => downloadToFile(binaryUrl, tmpPath, `${component} ${version}`))
   await verifyChecksum(tmpPath, match.checksum, component)
 
   writeFileSync(destPath, readFileSync(tmpPath))
@@ -571,9 +574,9 @@ async function fetchEngineLicense(manifest: string, releaseUrl: string, target: 
     return "this release does not publish one"
   }
   try {
-    const resp = await fetch(`${releaseUrl}/${ENGINE_LICENSE_FILE}`)
+    const resp = await cdnGet(`${releaseUrl}/${ENGINE_LICENSE_FILE}`)
     if (!resp.ok) return `HTTP ${resp.status} from ${releaseUrl}/${ENGINE_LICENSE_FILE}`
-    const body = Buffer.from(await resp.arrayBuffer())
+    const body = resp.bytes
     if (createHash("sha256").update(body).digest("hex") !== expected) return "it does not match the signed checksum"
     writeFileSync(target, body)
     return undefined
@@ -595,7 +598,8 @@ export async function fetchChecksums(
   minisigUrl: string,
   binaryFilenames: string | string[],
 ): Promise<ChecksumMatch> {
-  return extractChecksum(await fetchVerifiedChecksums(checksumsUrl, minisigUrl), binaryFilenames)
+  const text = await withRetry(() => fetchVerifiedChecksums(checksumsUrl, minisigUrl))
+  return extractChecksum(text, binaryFilenames)
 }
 
 /**
@@ -617,11 +621,11 @@ export class ReleaseVerificationError extends Error {
  * in it, the engine's LICENSE included, so a caller that needs two entries fetches it once.
  */
 async function fetchVerifiedChecksums(checksumsUrl: string, minisigUrl: string): Promise<string> {
-  const csResp = await fetch(checksumsUrl)
+  const csResp = await cdnGet(checksumsUrl)
   if (!csResp.ok) {
-    throw new Error(`Failed to fetch checksums from ${checksumsUrl}: HTTP ${csResp.status}`)
+    throw new Error(`Failed to fetch checksums from ${checksumsUrl}: HTTP ${csResp.status}. Try again in a moment.`)
   }
-  const checksumsText = await csResp.text()
+  const checksumsText = csResp.text()
 
   const pubKey = releasePublicKey()
   if (!pubKey) {
@@ -645,14 +649,14 @@ async function fetchVerifiedChecksums(checksumsUrl: string, minisigUrl: string):
   }
 
   // Minisign signature is mandatory when a public key is configured.
-  const sigResp = await fetch(minisigUrl)
+  const sigResp = await cdnGet(minisigUrl)
   if (!sigResp.ok) {
     throw new Error(
       `Failed to fetch checksum signature from ${minisigUrl}: HTTP ${sigResp.status}\n` +
         "Cannot verify release integrity. Aborting download.",
     )
   }
-  const sigText = await sigResp.text()
+  const sigText = sigResp.text()
   verifyMinisign(Buffer.from(checksumsText, "utf8"), sigText, pubKey)
 
   return checksumsText
@@ -771,56 +775,6 @@ export function extractChecksum(
 export interface ChecksumMatch {
   filename: string
   checksum: string
-}
-
-// ---------------------------------------------------------------------------
-// Streaming download with progress bar
-// ---------------------------------------------------------------------------
-
-async function streamToFileWithProgress(url: string, destPath: string): Promise<void> {
-  const resp = await fetch(url)
-  if (!resp.ok) throw new Error(`Failed to download from ${url}: HTTP ${resp.status}`)
-  if (!resp.body) throw new Error("Response body is null")
-
-  const totalStr = resp.headers.get("content-length")
-  const total = totalStr ? parseInt(totalStr, 10) : null
-  let downloaded = 0
-
-  const file = createWriteStream(destPath)
-  const reader = resp.body.getReader()
-
-  try {
-    while (true) {
-      // Node types a fetch body's chunks as `any`; a byte stream yields `Uint8Array`, so check it.
-      const chunk: { done: boolean; value?: unknown } = await reader.read()
-      if (chunk.done) break
-      const value = chunk.value
-      if (!(value instanceof Uint8Array)) throw new Error(`Download of ${url} yielded a chunk that is not bytes`)
-
-      await new Promise<void>((res, rej) => {
-        file.write(value, (err) => (err ? rej(err) : res()))
-      })
-      downloaded += value.length
-
-      if (total && process.stdout.isTTY) {
-        const pct = Math.min(100, Math.floor((downloaded / total) * 100))
-        const filled = Math.floor(pct / 5)
-        const bar = "=".repeat(filled).padEnd(20)
-        process.stdout.write(
-          `\r  [${bar}] ${pct}%  ${(downloaded / 1_000_000).toFixed(1)} / ${(total / 1_000_000).toFixed(1)} MB`,
-        )
-      }
-    }
-
-    if (total && process.stdout.isTTY) process.stdout.write("\n")
-
-    await new Promise<void>((res, rej) => {
-      file.end((err?: Error | null) => (err ? rej(err) : res()))
-    })
-  } catch (err) {
-    file.destroy()
-    throw err
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -963,21 +917,33 @@ async function verifyChecksum(filePath: string, expected: string, component: Com
 // Retry with exponential backoff
 // ---------------------------------------------------------------------------
 
-async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+/** SUPATYPE_RETRY_DELAY_MS replaces the 1 s base so tests need not wait. */
+function retryBaseMs(): number {
+  const raw = process.env["SUPATYPE_RETRY_DELAY_MS"]
+  const ms = raw === undefined ? Number.NaN : Number(raw)
+  return Number.isFinite(ms) && ms >= 0 ? ms : 1_000
+}
+
+export async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
   for (let i = 1; i <= attempts; i++) {
     try {
       return await fn()
     } catch (err) {
       if (i === attempts || err instanceof ReleaseVerificationError) throw err
-      const delay = Math.pow(3, i - 1) * 1_000 // 1 s, 3 s, 9 s
+      const delay = Math.pow(3, i - 1) * retryBaseMs() // 1 s, 3 s, 9 s
       console.error(
-        `[supatype] Download attempt ${i}/${attempts} failed: ${errorMessage(err)}. ` +
+        `[supatype] Download attempt ${i}/${attempts} failed: ${asSentence(errorMessage(err))} ` +
           `Retrying in ${delay / 1_000}s...`,
       )
       await sleep(delay)
     }
   }
   throw new Error("unreachable")
+}
+
+/** `text` ending in one full stop: download errors already end in one ("...; try again."). */
+function asSentence(text: string): string {
+  return text.endsWith(".") ? text : `${text}.`
 }
 
 // ---------------------------------------------------------------------------
@@ -1044,16 +1010,16 @@ export function versionFor(component: Component, config: SupatypeProjectConfig):
  */
 export async function fetchLatestVersion(component: Component): Promise<string> {
   const url = `${CDN_BASE}/${component}/latest.json`
-  const resp = await fetch(url)
+  const resp = await withRetry(() => cdnGet(url))
   if (!resp.ok) {
-    throw new Error(`Failed to fetch latest version for ${component} from ${url}: HTTP ${resp.status}`)
+    throw new Error(`Failed to fetch latest version for ${component} from ${url}: HTTP ${resp.status}. Try again in a moment.`)
   }
   return readLatestVersion(resp, `latest.json for ${component}`)
 }
 
 /** The version a CDN `latest.json` (`{"version":"x.y.z"}`) names, or a throw naming the file. */
-export async function readLatestVersion(resp: Response, what: string): Promise<string> {
-  const data = await resp.json()
+export async function readLatestVersion(resp: { text(): string }, what: string): Promise<string> {
+  const data: unknown = JSON.parse(resp.text())
   const version = isJsonObject(data) ? data["version"] : undefined
   if (typeof version !== "string" || version.trim() === "") {
     throw new Error(`Invalid ${what}: missing "version" field`)

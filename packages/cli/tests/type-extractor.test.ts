@@ -377,7 +377,7 @@ export type Post = Model<{
     writeFileSync(
       schemaPath,
       `
-import type { Model, UUID, Bucket, BucketPublic, BucketLoggedIn, BucketOwner, FileAsset } from "@supatype/types"
+import type { Model, UUID, Bucket, BucketPublic, BucketLoggedIn, BucketOwner, FileAsset, Eq, All, Folder, AuthUid, Claim, Literal } from "@supatype/types"
 
 export type avatars = Bucket<"avatars", { accessMode: "public"; access: ${access} }>
 
@@ -409,6 +409,67 @@ export type Profile = Model<{
     const schemaPath = bucketWithAccess("{ read: BucketPublic; remove: BucketOwner }")
     expect(() => extractSchemaAstFromTypes(schemaPath, join(schemaPath, ".."))).toThrow(
       /Bucket "avatars": `remove` is not a bucket rule\. Use read, create, update or delete\./,
+    )
+  })
+
+  it("extracts a per-user folder rule as the first folder equal to the caller", () => {
+    const schemaPath = bucketWithAccess(
+      "{ create: Eq<Folder<1>, AuthUid>; update: Eq<Folder<1>, AuthUid> }",
+    )
+    const ast = extractSchemaAstFromTypes(schemaPath, join(schemaPath, ".."))
+    const rule = {
+      type: "compare",
+      op: "eq",
+      left: { kind: "folder", index: 1 },
+      right: { kind: "authUid" },
+    }
+    expect(ast?.storageBuckets?.find((x) => x.id === "avatars")?.access).toEqual({
+      create: rule,
+      update: rule,
+    })
+  })
+
+  it("extracts a registered-only rule from a claim", () => {
+    const schemaPath = bucketWithAccess(
+      '{ create: All<[BucketLoggedIn, Eq<Claim<"is_anonymous">, Literal<false>>]> }',
+    )
+    const ast = extractSchemaAstFromTypes(schemaPath, join(schemaPath, ".."))
+    expect(ast?.storageBuckets?.find((x) => x.id === "avatars")?.access).toEqual({
+      create: {
+        type: "all",
+        rules: [
+          { type: "authenticated" },
+          {
+            type: "compare",
+            op: "eq",
+            left: { kind: "claim", path: "is_anonymous" },
+            right: { kind: "literal", value: false },
+          },
+        ],
+      },
+    })
+  })
+
+  it.each(["0", "-1", "1.5", '"1"'])("refuses Folder<%s>, which is not a position from 1", (position) => {
+    const schemaPath = bucketWithAccess(`{ create: Eq<Folder<${position}>, AuthUid> }`)
+    expect(() => extractSchemaAstFromTypes(schemaPath, join(schemaPath, ".."))).toThrow(
+      /`Folder<>` takes the folder's position as a whole number from 1/,
+    )
+  })
+
+  it("refuses Folder in a model's rule", () => {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-folder-model-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `import type { Model, UUID, Eq, Folder, AuthUid } from "@supatype/types"
+export type Note = Model<{ id: UUID }, { access: { read: Eq<Folder<1>, AuthUid> } }>
+`,
+      "utf8",
+    )
+    expect(() => extractSchemaAstFromTypes(schemaPath, dir)).toThrow(
+      /Model "Note": `Folder<>` is not supported in an `access` rule/,
     )
   })
 
@@ -1908,5 +1969,30 @@ export type Note = Model<{
   it("refuses an Owner or OwnerFrom argument that is not a string literal", () => {
     expect(() => accessOf(`Owner<string>`)).toThrow(/Owner<>.*string literal/)
     expect(() => accessOf(`OwnerFrom<string>`)).toThrow(/OwnerFrom<>.*string literal/)
+  })
+})
+
+describe("fields stored as jsonb by fallback", () => {
+  function extractWarnings(fields: string): readonly string[] {
+    const dir = mkdtempSync(join(tmpdir(), "supatype-types-"))
+    dirs.push(dir)
+    const schemaPath = join(dir, "schema.ts")
+    writeFileSync(
+      schemaPath,
+      `import type { Model, UUID, JSON } from "@supatype/types"\nexport type Bid = Model<{ id: UUID\n${fields} }>\n`,
+    )
+    return extractSchemaAstFromTypes(schemaPath, dir)?.warnings ?? []
+  }
+
+  it("warns for a single string literal, naming the model, the field and the type", () => {
+    const warnings = extractWarnings(`  kind: "outbid"\n`)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('Field "Bid.kind"')
+    expect(warnings[0]).toContain('"outbid"')
+    expect(warnings[0]).toContain("jsonb")
+  })
+
+  it("says nothing for types that have a column type", () => {
+    expect(extractWarnings(`  title: string\n  count: number\n  meta: JSON\n  kind: "a" | "b"\n`)).toEqual([])
   })
 })

@@ -103,6 +103,7 @@
     </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html">CLI</a></li>
+      <li><a href="/docs/versions.html">Versions</a></li>
     </ul></div>
     <div><span class="label">MORE</span><ul>
       <li><a href="/licensing.html">Licensing</a></li>
@@ -160,6 +161,7 @@
     <p><code>.supatype/link.json</code> holds secrets and is never committed, so a CI host has no link. There, set <code>SUPATYPE_URL</code> in the host's settings: <code>supatype build</code> fetches the anon key from <code>&lt;SUPATYPE_URL&gt;/supatype-env.json</code>, copies both to every framework's names, and stops the build when one is missing. Set <code>SUPATYPE_ANON_KEY</code> as well only when that server does not publish it (<code>server.public_env: false</code>, or a plain <code>http://</code> address). <code>supatype deploy</code> builds your app with the same values, and takes <code>--allow-local</code> too.</p>
 
     <h2 id="supatype-hosts">Supatype hosts it</h2>
+    <p>A missing page on a plain static site serves <code>index.html</code>, on a self-hosted stack and on Supatype Cloud alike, so a single-page app's routes load on a refresh. Set <code>spa: false</code> in the <code>build</code> section of <code>supatype.config.ts</code> to answer 404 instead, and <code>spa: true</code> to turn the fallback on for a framework whose Cloud default is off. <code>supatype deploy</code> sends the setting to Cloud and <code>supatype self-host compose</code> gives it to the self-hosted server. With nothing set, both hosts take the same default from the framework: on for a plain static site, Vite and Remix SPA, off for Next.js, Astro, SvelteKit and Nuxt, whose pages are pre-rendered. A deploy with the fallback on refuses when the build has no <code>index.html</code> at its root: add one, or set <code>spa: false</code>.</p>
     <p>When a self-hosted stack serves your app (<code>app.mode: "static"</code>), its server answers <code>/supatype-env.js</code> with its own address and anon key:</p>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> curl https://example.com/supatype-env.js
@@ -211,7 +213,7 @@ window.__SUPATYPE_ENV__ = {"url":"https://example.com","anonKey":"eyJhbGciOi..."
 <pre>&lt;head&gt;
   {__DEV__ ? null : &lt;script src="/supatype-env.js" /&gt;}
   &lt;meta charSet="utf-8" /&gt;</pre></div>
-    <p>Expo renders <code>+html.tsx</code> only when <code>web.output</code> in <code>app.json</code> is <code>"static"</code> or <code>"server"</code>, as a new app's is. With <code>"single"</code>, put <code>&lt;script src="/supatype-env.js"&gt;&lt;/script&gt;</code> in the head of <code>public/index.html</code> instead. A <code>"static"</code> export is plain files: have Supatype host them with <code>supatype app add --static ./dist</code>. A <code>"server"</code> export, the default from SDK 58, renders each page in a Node server (<code>npx expo serve</code>); the Supatype server in front of it answers <code>/supatype-env.js</code> itself, whatever the app mode. On any other host, build with the values instead.</p>
+    <p>Expo renders <code>+html.tsx</code> only when <code>web.output</code> in <code>app.json</code> is <code>"static"</code> or <code>"server"</code>, as a new app's is. With <code>"single"</code>, put <code>&lt;script src="/supatype-env.js" vite-ignore&gt;&lt;/script&gt;</code> in the head of <code>public/index.html</code> instead. A <code>"static"</code> export is plain files: have Supatype host them with <code>supatype app add --static ./dist</code>. A <code>"server"</code> export, the default from SDK 58, renders each page in a Node server (<code>npx expo serve</code>); the Supatype server in front of it answers <code>/supatype-env.js</code> itself, whatever the app mode. On any other host, build with the values instead.</p>
     <p>A native build, for iOS or Android and on EAS, has no page, so it takes its values at build time under <code>EXPO_PUBLIC_SUPATYPE_URL</code> and <code>EXPO_PUBLIC_SUPATYPE_ANON_KEY</code>. <code>expo export</code> and EAS builds run in production mode, which never reads <code>.env.development.local</code>, where <code>supatype dev</code> and <code>keys</code> put the local stack's values. Give them your deployment's: on a linked machine, build through <code>supatype build</code>; for an EAS build, set the two names in the project's EAS environment variables, with the values <code>supatype keys --print frontend --env production</code> prints.</p>
     <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="pr">$</span> supatype build -- npx expo export --platform android</pre></div>

@@ -64,7 +64,7 @@ export const DatabasePasswordPanel: FC<DatabasePasswordPanelProps> = ({
 
       <p className="text-xs text-gray-500">
         It was shown once when this project was created and is not recoverable here. If you no
-        longer have it, reset it below \u2014 the new password is shown once.
+        longer have it, reset it below. The new password is shown once.
       </p>
 
       {/* Reset database password */}

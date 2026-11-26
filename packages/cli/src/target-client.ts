@@ -1,7 +1,9 @@
+import { trimApiUrl } from "./api-url.js"
 import { isJsonObject, isUnknown, type Guard } from "@supatype/shared"
 import { readAuthAnswer } from "./auth-answer.js"
 import { fetchWithin } from "./fetch-within.js"
-import { bodyReason, httpFailureText, isConnectionRefused, redact } from "./error-message.js"
+import { isPersonalAccessToken } from "./personal-access-token.js"
+import { bodyReason, errorMessage, httpFailureText, isConnectionRefused, redact } from "./error-message.js"
 
 export interface TargetFetchOptions {
   method: string
@@ -11,6 +13,11 @@ export interface TargetFetchOptions {
   token?: string | undefined
   orgId?: string | undefined
   environment?: string | undefined
+  /**
+   * Cloud-only: the acting mode a request through the control plane's project proxy asks for. The
+   * control plane decides whether the caller may have it (`elevated` is for owners and admins).
+   */
+  actingMode?: "elevated" | undefined
   /**
    * Give up after this many milliseconds, with an error saying so. None when unset: a push can run
    * for minutes, and a stream ({@link targetStream}) until it is stopped. Both sends of a request
@@ -51,10 +58,13 @@ export class TargetApiError extends Error {
   }
 }
 
-function isAuthExpiry(status: number, code?: string, message?: string): boolean {
+/** Whether a 401 says the token is no longer good: by its `code`, the control plane's `error` code, or its older message. */
+function isAuthExpiry(status: number, json: unknown): boolean {
   if (status !== 401) return false
+  const code = bodyString(json, "code")
   if (code === "TOKEN_EXPIRED" || code === "NO_SESSION" || code === "INVALID_TOKEN") return true
-  const m = (message ?? "").toLowerCase()
+  if (bodyString(json, "error") === "invalid_token") return true
+  const m = (bodyReason(json) ?? "").toLowerCase()
   return m.includes("token expired") || m.includes("authentication required")
 }
 
@@ -64,7 +74,7 @@ const REFRESH_TIMEOUT_MS = 10_000
 async function refreshAccessToken(
   authRefresh: NonNullable<TargetFetchOptions["authRefresh"]>,
 ): Promise<string> {
-  const url = `${authRefresh.cloudApiUrl.replace(/\/$/, "")}/auth/refresh`
+  const url = `${trimApiUrl(authRefresh.cloudApiUrl)}/auth/refresh`
   let res: Response
   let body: unknown
   try {
@@ -78,7 +88,7 @@ async function refreshAccessToken(
       return {}
     })
   } catch (err) {
-    if (!isTimeout(err)) throw err
+    if (!isTimeout(err)) throw requestFailure(url, undefined, err)
     throw new Error(`Renewing the Cloud session: ${url} did not answer within ${REFRESH_TIMEOUT_MS / 1000} s. Run: supatype login`, { cause: err })
   }
   const answer = readAuthAnswer(body)
@@ -122,15 +132,28 @@ function send(url: string, opts: TargetFetchOptions, token: string | undefined, 
   if (token !== undefined && token !== "") headers["Authorization"] = `Bearer ${token}`
   if (opts.orgId) headers["X-Org-Id"] = opts.orgId
   if (opts.environment) headers["X-Supatype-Environment"] = opts.environment
+  if (opts.actingMode) headers["X-Supatype-Acting-Mode"] = opts.actingMode
   return fetch(url, {
     method: opts.method,
     headers,
     ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),
     ...(signal !== undefined ? { signal } : {}),
   }).catch((err: unknown) => {
-    if (!isConnectionRefused(err)) throw err
-    throw new Error(unreachableText(url, opts), { cause: err })
+    throw requestFailure(url, opts.unreachableHint, err)
   })
+}
+
+/**
+ * What a request that got no answer throws. Node's fetch rejects with `TypeError: fetch failed` and
+ * the reason (a host that does not resolve, a reset, a certificate) in its `cause`, so printing the
+ * message alone said nothing of where or why. A refused connection and any other failure now say the
+ * URL and the cause's own words; a deadline or an abort passes through as it is, for its callers.
+ */
+function requestFailure(url: string, hint: string | undefined, err: unknown): unknown {
+  if (isConnectionRefused(err)) return new Error(unreachableText(url, hint), { cause: err })
+  if (!(err instanceof TypeError)) return err
+  const reason = errorMessage(err.cause ?? err)
+  return new Error(`Could not reach ${redact(url)}: ${reason}.`, { cause: err })
 }
 
 /**
@@ -138,9 +161,9 @@ function send(url: string, opts: TargetFetchOptions, token: string | undefined, 
  * knows. Bun's own words for it name neither ("Unable to connect. Is the computer able to access
  * the url?"), and Node's say only "fetch failed".
  */
-function unreachableText(url: string, opts: TargetFetchOptions): string {
+function unreachableText(url: string, hint: string | undefined): string {
   const said = `Could not connect to ${redact(url)}: connection refused.`
-  return opts.unreachableHint === undefined ? said : `${said} ${opts.unreachableHint}`
+  return hint === undefined ? said : `${said} ${hint}`
 }
 
 /** Whether `err` is the abort of a request that ran out of time. */
@@ -168,14 +191,23 @@ async function acceptedResponse(url: string, opts: TargetFetchOptions, signal?: 
   let res = await send(url, opts, opts.token, signal ?? budgetSignal(opts.timeoutMs))
   if (res.ok) return res
   let answer = await answerOf(res)
-  if (opts.authRefresh && isAuthExpiry(answer.status, bodyString(answer.json, "code"), bodyReason(answer.json))) {
+  const renewal = renewalOf(opts)
+  if (renewal && isAuthExpiry(answer.status, answer.json)) {
     const spent = Date.now() - started
-    const token = await refreshAccessToken(opts.authRefresh)
+    const token = await refreshAccessToken(renewal)
     res = await send(url, opts, token, signal ?? budgetSignal(opts.timeoutMs === undefined ? undefined : opts.timeoutMs - spent))
     if (res.ok) return res
     answer = await answerOf(res)
   }
   throw refusal(answer, url, opts)
+}
+
+/**
+ * How to renew the session `opts.token` belongs to, when it can be. A personal access token has no
+ * session to renew: it is sent as it is, and a refusal of it is final.
+ */
+function renewalOf(opts: TargetFetchOptions): TargetFetchOptions["authRefresh"] {
+  return isPersonalAccessToken(opts.token) ? undefined : opts.authRefresh
 }
 
 /** A signal that aborts after `ms` (at least 1), or none without a limit. */
@@ -189,12 +221,26 @@ function budgetSignal(ms: number | undefined): AbortSignal | undefined {
  * was empty: a plain-text or empty refusal used to show only `API error: 500 <url>`. The URL is
  * added when the body names no reason of its own, so an anonymous failure says where it came from.
  */
+/**
+ * A refusal's machine code. Self-host names it in `code`; Supatype Cloud names it in `error`
+ * (`{ error: "pointer_not_pushed", message, statusCode }`), where `error` is a snake_case slug, never
+ * a sentence, so only a slug there counts as a code.
+ */
+function refusalCode(json: unknown): string | undefined {
+  const code = bodyString(json, "code")
+  if (code !== undefined) return code
+  const error = bodyString(json, "error")
+  return error !== undefined && /^[a-z][a-z0-9_]*$/.test(error) ? error : undefined
+}
+
 function refusal(result: FetchAnswer, url: string, opts: TargetFetchOptions): TargetApiError {
-  const code = bodyString(result.json, "code")
+  const code = refusalCode(result.json)
   const said = httpFailureText(result.status, result.statusText, result.text)
   const message = bodyReason(result.json) === undefined ? `${said} (${url})` : said
-  if (isAuthExpiry(result.status, code, message) && !opts.authRefresh) {
-    return new TargetApiError(`${message}. Session expired, run: supatype login`, result.status, code)
+  const pat = isPersonalAccessToken(opts.token)
+  if (isAuthExpiry(result.status, result.json) && (pat || !opts.authRefresh)) {
+    const ended = pat ? "Access token revoked or expired" : "Session expired"
+    return new TargetApiError(`${message}. ${ended}, run: supatype login`, result.status, code)
   }
   return new TargetApiError(message, result.status, code, isJsonObject(result.json) ? result.json : undefined)
 }
@@ -203,7 +249,7 @@ function refusal(result: FetchAnswer, url: string, opts: TargetFetchOptions): Ta
  * Where under the target's base URL a request goes: the control plane's API, or `/auth/v1`, the auth
  * server behind the same gateway, for its admin API (`supatype sso`).
  */
-export type TargetApiPrefix = "/api/v1" | "/platform/v1" | "/auth/v1"
+export type TargetApiPrefix = "/api/v1" | "/platform/v1" | "/auth/v1" | "/admin/v1"
 
 /**
  * A request to the control plane or a project's API. The answer is the body's `data` when it has
@@ -226,11 +272,44 @@ export async function targetFetch(
   opts: TargetFetchOptions,
   guard: Guard<unknown> = isUnknown,
 ): Promise<unknown> {
-  const url = `${baseUrl.replace(/\/$/, "")}${apiPrefix}${opts.path}`
+  const url = `${trimApiUrl(baseUrl)}${apiPrefix}${opts.path}`
   const result = await timedAnswer(url, opts)
-  const answer = isJsonObject(result.json) && result.json["data"] !== undefined ? result.json["data"] : result.json
+  const answer = unwrapData(result.json)
   if (!guard(answer)) throw new Error(`Unexpected response from ${url} (HTTP ${result.status})`)
   return answer
+}
+
+/** The body's `data` when it has one, else the body. */
+function unwrapData(json: unknown): unknown {
+  return isJsonObject(json) && json["data"] !== undefined ? json["data"] : json
+}
+
+/**
+ * {@link targetFetch} for an answer whose control plane puts some fields beside `data` rather
+ * than inside it (Cloud's push answers `{ data, cache }`). The named siblings are carried onto the
+ * unwrapped answer when it is an object, so a caller reads them from one place whichever shape
+ * answered. A field `data` already holds wins.
+ */
+export async function targetFetchWithSiblings<T>(
+  baseUrl: string,
+  apiPrefix: TargetApiPrefix,
+  opts: TargetFetchOptions,
+  guard: Guard<T>,
+  siblings: readonly string[],
+): Promise<T> {
+  const url = `${baseUrl.replace(/\/$/, "")}${apiPrefix}${opts.path}`
+  const result = await timedAnswer(url, opts)
+  const data = unwrapData(result.json)
+  const answer =
+    isJsonObject(result.json) && isJsonObject(data) && data !== result.json
+      ? { ...pickPresent(result.json, siblings), ...data }
+      : data
+  if (!guard(answer)) throw new Error(`Unexpected response from ${url} (HTTP ${result.status})`)
+  return answer
+}
+
+function pickPresent(from: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
+  return Object.fromEntries(keys.filter((key) => from[key] !== undefined).map((key) => [key, from[key]]))
 }
 
 /** The whole answer to a request, within `opts.timeoutMs` when it is set. */
@@ -253,7 +332,7 @@ export async function targetStream(
   apiPrefix: "/api/v1" | "/platform/v1" | "/admin/v1",
   opts: TargetFetchOptions,
 ): Promise<ReadableStream<Uint8Array>> {
-  const url = `${baseUrl.replace(/\/$/, "")}${apiPrefix}${opts.path}`
+  const url = `${trimApiUrl(baseUrl)}${apiPrefix}${opts.path}`
   const res = await streamStart(url, opts)
   if (res.body === null) throw new Error(`${url} answered with no body to stream`)
   return res.body

@@ -405,7 +405,7 @@ export class QueryBuilder<TRow> extends FilterBuilder implements PromiseLike<Que
       this.applyServerCacheHeader({ ...(await this.getHeaders()), ...mergedExtra })
 
     const cached = await this.cachedResult(url, resolveRequestHeaders)
-    if (cached) return withMeta(cached, { cacheStatus: "HIT" })
+    if (cached) return withMeta(cached, { cacheStatus: "CLIENT" })
 
     let res: Response
     try {

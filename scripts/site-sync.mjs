@@ -37,7 +37,7 @@ const sidebar = [
     ["The image", "/postgres.html"], ["pg_keyspace", "/postgres/pg-keyspace.html"], ["pg_topics", "/postgres/pg-topics.html"],
     ["pg_guard", "/postgres/pg-guard.html"], ["supatype_mask", "/postgres/supatype-mask.html"],
   ]],
-  ["REFERENCE", "Docs", [["CLI", "/docs/cli.html"]]],
+  ["REFERENCE", "Docs", [["CLI", "/docs/cli.html"], ["Versions", "/docs/versions.html"]]],
   ["MORE", null, [["Licensing", "/licensing.html"], ["Privacy", "/privacy.html", { llms: false }], ["Changelog", "/changelog.html"], ["llms.txt", "/llms.txt"]]],
 ]
 
@@ -226,6 +226,53 @@ function sitemapXml() {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>\n`
 }
 
+// What a release is made of: the latest released CLI (the newest dated heading in its changelog,
+// since an undated one is not out yet), and the engine, server and Postgres tags that
+// release/images.json pins and the Deno the functions worker runs on. Read from the files, so the
+// versions page and the llms-full.txt stamp cannot drift from them; --check fails when they do.
+let facts
+function releaseFacts() {
+  facts ??= readReleaseFacts()
+  return facts
+}
+
+function readReleaseFacts() {
+  const changelog = readPath(`${repo}packages/cli/CHANGELOG.md`)
+  const released = changelog.match(/^## (\d+\.\d+\.\d+) \((\d{4}-\d{2}-\d{2})\)/m)
+  if (!released) throw new Error("packages/cli/CHANGELOG.md has no dated release heading")
+  const pins = JSON.parse(readPath(`${repo}release/images.json`))
+  const deno = readPath(`${repo}packages/cli/releases/deno/VERSION`).trim()
+  return { cli: released[1], date: released[2], pins, deno }
+}
+
+const versionMarkers = ["<!-- versions:start -->", "<!-- versions:end -->"]
+function versionTable({ cli, date, pins, deno }) {
+  const row = (name, version, note) => `        <tr><td>${name}</td><td><code>${version}</code></td><td>${note}</td></tr>`
+  const image = (key, name, note) => row(name, pins[key].tag, `${note} (<code>${pins[key].image}</code>)`)
+  return [
+    versionMarkers[0],
+    `    <div class="tbl"><table>`,
+    `      <thead><tr><th scope="col">Component</th><th scope="col">Version</th><th scope="col">What it is</th></tr></thead>`,
+    `      <tbody>`,
+    row("CLI and npm packages", cli, `The latest release, ${date}. The published <code>@supatype/*</code> packages, such as <code>@supatype/client</code> and <code>@supatype/react</code>, carry the same number`),
+    image("engine", "Schema engine", "Parses the schema, plans and applies a push"),
+    image("server", "Server", "The Supatype server: the API, auth and the services behind it"),
+    image("postgres", "Postgres", "The database image, with its extensions"),
+    row("Deno", deno, "The runtime for functions and hooks"),
+    `      </tbody>`,
+    `    </table></div>`,
+    versionMarkers[1],
+  ].join("\n")
+}
+
+function withVersionTable(html) {
+  const [start, end] = versionMarkers
+  const from = html.indexOf(start)
+  const to = html.indexOf(end)
+  if (from < 0 || to < from) throw new Error("docs/docs/versions.html: no versions markers")
+  return html.slice(0, from) + versionTable(releaseFacts()) + html.slice(to + end.length)
+}
+
 // llms-full.txt keeps its hand-written summary down to the docs heading, then carries every page
 // in the sidebar as Markdown, so a language model reads the docs without scraping HTML.
 const docsHeading = "## Documentation pages"
@@ -234,7 +281,10 @@ function llmsFullTxt(current, synced) {
   const summary = current.split(`\n${docsHeading}\n`)[0].trimEnd()
   const sections = pageUrls.filter((url) => sidebarEntry(url).llms).map((url) => pageMarkdown(synced[url], url))
   const intro = `Every page of the docs and guides, as Markdown, generated from the pages on ${site}/.`
-  return `${summary}\n\n${docsHeading}\n\n${intro}\n\n${sections.join("\n\n")}\n`
+  const { cli, date, pins, deno } = releaseFacts()
+  const stamp = `Docs version: Supatype ${cli} (released ${date}). Engine ${pins.engine.tag}, server ${pins.server.tag}, Postgres ${pins.postgres.tag}, Deno ${deno}.`
+  const withStamp = summary.replace(/^(# [^\n]*\n)(\nDocs version: [^\n]*\n)?/, `$1\n${stamp}\n`)
+  return `${withStamp}\n\n${docsHeading}\n\n${intro}\n\n${sections.join("\n\n")}\n`
 }
 
 // docs-content/ holds the docs pages and guides. The www pages (Licensing, Changelog, Privacy)
@@ -280,7 +330,8 @@ const assets = ["site.css", "site.js"].map((name) => ({
   version: createHash("sha256").update(read(name)).digest("hex").slice(0, 10),
   link: new RegExp(`(?<=(?:href|src)="/)${name.replaceAll(".", "\\.")}(?:\\?v=[0-9a-f]+)?(?=")`),
 }))
-const pages = Object.fromEntries([...pageUrls, ...extraUrls].map((url) => [url, read(fileOf(url))]))
+const pageSource = (url) => (url === "/docs/versions.html" ? withVersionTable(read(fileOf(url))) : read(fileOf(url)))
+const pages = Object.fromEntries([...pageUrls, ...extraUrls].map((url) => [url, pageSource(url)]))
 const headings = Object.fromEntries(pageUrls.map((url) => [url, match(pages[url], /<h1>([^<]*)<\/h1>/, "<h1>", fileOf(url))[1]]))
 const synced = Object.fromEntries(Object.entries(pages).map(([url, html]) => [url, syncedPage(html, url, headings)]))
 const home = read("index.html")
@@ -288,7 +339,7 @@ const llmsFull = read("llms-full.txt")
 // Each result is a path from the repo root, what the file holds now (null if missing) and what it
 // should hold (null to delete it).
 const results = [
-  ...Object.keys(pages).map((url) => [`docs/${fileOf(url)}`, pages[url], synced[url]]),
+  ...Object.keys(pages).map((url) => [`docs/${fileOf(url)}`, read(fileOf(url)), synced[url]]),
   ["docs/index.html", home, withHead(home, "/", "index.html")],
   ["docs/llms-full.txt", llmsFull, llmsFullTxt(llmsFull, synced)],
   ["docs/sitemap.xml", read("sitemap.xml"), sitemapXml()],

@@ -56,7 +56,7 @@ The server checks every Studio request against this table.
 | Give and remove Studio roles | Yes | No | No | No |
 
 :::caution[SQL editor]
-The SQL editor signs in as `supatype_sql_editor`. It is not a superuser, but it is a member of the database owner. Row level security does not apply there, and masked columns show in full. Every query is recorded.
+The SQL editor signs in as `supatype_sql_editor`. It is not a superuser, but it is a member of the database owner. Row level security does not apply there, and masked columns show in full. Every query is recorded. After each statement, everything the editor created is handed to the project owner. A table, view or function you make there ends up owned by the owner, not by `supatype_sql_editor`. A `SECURITY DEFINER` function written in the editor therefore runs with the owner's rights, and the owner is not a superuser.
 :::
 
 :::note[Bucket rules]

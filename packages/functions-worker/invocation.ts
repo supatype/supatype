@@ -34,7 +34,7 @@ export interface FunctionContext {
   readonly functionName: string
   /**
    * The project's API base URL, reachable from inside this container: for calling the API from the
-   * function. Under compose it is `http://kong:8000`, a name nothing outside the stack resolves.
+   * function. Under compose it is `http://kong:8100`, Kong's worker listener, a name nothing outside the stack resolves.
    */
   readonly url: string
   /**
@@ -56,17 +56,19 @@ export interface FunctionContext {
    * `SUPATYPE_FUNCTIONS_DB_URL`, which compose hands this worker as `SUPATYPE_DB_URL` (and joins it
    * to the `functions-db` network when the URL names the stack's `db`).
    *
-   * It connects as whatever role the URL names and is not a request through the API, so row rules
-   * and field masking do not apply to it. The operator should give it a least-privilege role
-   * granted only what the functions need, never the admin URL. A credential: never returned or
-   * logged.
+   * It connects as whatever role the URL names and is not a request through the API, so model
+   * hooks do not run. Row rules and field masking apply for that role: a superuser or BYPASSRLS
+   * role (the admin role, service_role) skips both. The operator should give it a least-privilege
+   * login role that is neither, granted only what the functions need, never the admin URL. A
+   * credential: never returned or logged.
    */
   readonly dbUrl?: string
   readonly region: string
   /**
    * Values from the functions directory's `.env.local` (or `SUPATYPE_SHARED_ENV_FILE`), then those
    * `functions env set` gave a self-hosted project (`SUPATYPE_FUNCTION_ENV_FILE`), then
-   * `.env.<function>.local`, which wins. Per route, and read again on every call.
+   * `.env.<function>.local`, then the function's own managed values (`fn.<function>.json` beside the managed
+   * file, which Supatype Cloud writes), which win over all of those. Per route, and read again on every call.
    *
    * They are here, never in `Deno.env`: that is the worker's one process environment, shared by
    * every call running at once, so a value put there for one function would reach every other.
@@ -74,17 +76,23 @@ export interface FunctionContext {
   readonly env: Readonly<Record<string, string>>
 }
 
-/** The parts the worker needs internally but a handler has no use for. */
-interface InvocationStore {
-  readonly context: FunctionContext
-  /**
-   * The hook-depth header to carry onto outbound calls, when this invocation is a hook.
-   *
-   * Here rather than patched onto `globalThis.fetch` per call. That patch was the second global
-   * mutation the lock was protecting: two concurrent hooks would patch over each other, and the
-   * first to finish would restore the other's patch.
-   */
+/**
+ * What the request that started an invocation says, which its calls back into the stack carry on.
+ *
+ * Here rather than patched onto `globalThis.fetch` per call. That patch was the second global
+ * mutation the lock was protecting: two concurrent hooks would patch over each other, and the
+ * first to finish would restore the other's patch.
+ */
+export interface InboundCall {
+  /** The hook-depth header to carry onto outbound calls, when this invocation is a hook. */
   readonly hookDepth: string | null
+  /** The end user's address (`St-Forwarded-For`, else `X-Real-IP`), or null when the request had none. */
+  readonly clientAddress: string | null
+}
+
+/** The parts the worker needs internally but a handler has no use for. */
+interface InvocationStore extends InboundCall {
+  readonly context: FunctionContext
 }
 
 const store = new AsyncLocalStorage<InvocationStore>()
@@ -92,10 +100,10 @@ const store = new AsyncLocalStorage<InvocationStore>()
 /** Run an invocation with its context available to everything it calls. */
 export function runInvocation<T>(
   context: FunctionContext,
-  hookDepth: string | null,
+  inbound: InboundCall,
   run: () => Promise<T>,
 ): Promise<T> {
-  return store.run({ context, hookDepth }, run)
+  return store.run({ context, ...inbound }, run)
 }
 
 /** The invocation being served on this call stack, or undefined outside one. */
@@ -103,7 +111,8 @@ export function currentInvocation(): FunctionContext | undefined {
   return store.getStore()?.context
 }
 
-/** The hook depth to propagate, or null when this is not a hook call. */
-export function currentHookDepth(): string | null {
-  return store.getStore()?.hookDepth ?? null
+/** What the request being served says, or undefined outside an invocation. */
+export function currentCall(): InboundCall | undefined {
+  const current = store.getStore()
+  return current === undefined ? undefined : { hookDepth: current.hookDepth, clientAddress: current.clientAddress }
 }

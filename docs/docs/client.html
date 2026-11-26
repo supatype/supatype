@@ -103,6 +103,7 @@
     </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html">CLI</a></li>
+      <li><a href="/docs/versions.html">Versions</a></li>
     </ul></div>
     <div><span class="label">MORE</span><ul>
       <li><a href="/licensing.html">Licensing</a></li>
@@ -129,7 +130,8 @@
 })</pre></div>
     <p>Every page in these docs imports the client from this one file. In development, <code>supatype init</code>, <code>supatype dev</code> and <code>supatype keys</code> write the local stack's <code>VITE_SUPATYPE_URL</code> and <code>VITE_SUPATYPE_ANON_KEY</code>, with <code>PUBLIC_</code>, <code>NEXT_PUBLIC_</code> and <code>EXPO_PUBLIC_</code> copies for other frameworks, to <code>.env.development.local</code>. Vite, Next.js and Expo read that file in development only, so a production build never ships them. Read these rather than copying a URL from an example: <code>init</code> picks a free gateway port for each project, kept in <code>.env</code> as <code>API_EXTERNAL_URL</code>.</p>
     <p>A production build gets your deployment's values from <code>supatype build</code>, which runs your build command with them, or from the host's settings. When Supatype serves the app, the page can read them from the server instead, with <code>&lt;script src="/supatype-env.js" vite-ignore&gt;&lt;/script&gt;</code> in <code>index.html</code> (<code>vite-ignore</code> keeps <code>vite build</code> from warning that it cannot bundle it); a Next.js app serves the same script from a route (<a href="/docs/frameworks.html#nextjs">Frameworks: Next.js</a>). For each value the build did not carry, the client reads the one that script set, at its first request. It never guesses the address from the page. <code>createClient</code> itself never throws, so a page that creates the client at module scope still prerenders. The first request made with no address or no anon key throws a <code>MissingClientValuesError</code> naming what is missing and the variables to set, rather than returning it as <code>{ data: null, error }</code>. <a href="/docs/deploying-your-frontend.html">Deploy your frontend</a> covers each host.</p>
-    <p>The session is saved and restored by default. Pass <code>auth: { persistSession: false }</code> to keep it in memory only.</p>
+    <p><code>supatype.url</code> and <code>supatype.anonKey</code> are the address and anon key the client uses: the ones given to <code>createClient</code>, else the ones the page set (see above), read each time you ask. Each is an empty string while neither has one, and neither throws. Use <code>anonKey</code> for a call the client does not make, such as opening a second connection or a plain <code>fetch</code> to the API.</p>
+    <p>The session is saved and restored by default. A restored session keeps the user as it was, including <code>isAnonymous</code>, <code>identities</code> and <code>factors</code>, so a guest is still a guest after a reload. Pass <code>auth: { persistSession: false }</code> to keep it in memory only.</p>
     <p><code>createClient</code> takes these options as well as <code>url</code> and <code>anonKey</code>:</p>
     <div class="tbl"><table>
       <thead><tr><th scope="col">Option</th><th scope="col">What it does</th></tr></thead>
@@ -157,7 +159,7 @@
     </table></div>
     <p>Tables are named as in the database: <code>post</code>, <code>comment</code>, <code>post_tag</code>. Calling <code>createClient</code> with no type argument picks up the generated types. To type a client against a schema you do not generate, such as a second project or a test double, pass the database type: <code>createClient&lt;MyDatabase&gt;({ ... })</code>.</p>
     <p>Exact numbers keep every digit when you import from the generated <code>client.ts</code>. A <code>BigInt</code> column reads as a <code>bigint</code>. <code>Decimal</code> and <code>Money</code> columns read as strings.</p>
-    <p>A number too large for JavaScript, in a column the client does not know, returns an error that names the column. This usually happens in an embed: select the column directly instead.</p>
+    <p>A number too large for JavaScript, in a column the client does not know, returns an error that names the column. This usually happens in an embed: select the column directly instead. This covers a number inside an array too, at any depth, such as a json column holding <code>[9007199254740993]</code>. <code>BigInt[]</code> and <code>Decimal[]</code> columns the generated types describe keep every element exact instead.</p>
 
     <h2 id="read">Read rows</h2>
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
@@ -176,6 +178,20 @@
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">const</span> { data: post } = <span class="k">await</span> supatype.from(<span class="s">"post"</span>).select(<span class="s">"*"</span>).eq(<span class="s">"slug"</span>, <span class="s">"hello-world"</span>).maybeSingle()
 console.log(post?.title)</pre></div>
+    <h3 id="many-to-many">Linking many-to-many rows</h3>
+    <p>A many-to-many link is a row in the junction table, and you write it like any other row. The junction is named after the two tables, sorted and joined with <code>_</code> (<code>lot_tag</code> for <code>lot</code> and <code>tag</code>), with a <code>&lt;model&gt;_id</code> column for each end. It is in the generated types, so <code>from("lot_tag")</code> is typed. Nested <code>connect</code> and <code>set</code> writes are not supported yet.</p>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="c">// add a link, and several at once</span>
+<span class="k">await</span> supatype.from(<span class="s">"lot_tag"</span>).insert({ lot_id: lot.id, tag_id: tag.id })
+<span class="k">await</span> supatype.from(<span class="s">"lot_tag"</span>).insert(tags.map((t) =&gt; ({ lot_id: lot.id, tag_id: t.id })))
+
+<span class="c">// list a lot's tags, or the links themselves</span>
+<span class="k">const</span> { data } = <span class="k">await</span> supatype.from(<span class="s">"lot"</span>).select(<span class="s">"title, tags:tag(name)"</span>).eq(<span class="s">"id"</span>, lot.id)
+<span class="k">const</span> { data: links } = <span class="k">await</span> supatype.from(<span class="s">"lot_tag"</span>).select(<span class="s">"tag_id"</span>).eq(<span class="s">"lot_id"</span>, lot.id)
+
+<span class="c">// remove a link</span>
+<span class="k">await</span> supatype.from(<span class="s">"lot_tag"</span>).delete().eq(<span class="s">"lot_id"</span>, lot.id).eq(<span class="s">"tag_id"</span>, tag.id)</pre></div>
+    <p>Who may write a link follows from its two ends. A link is readable by a caller who can read both rows, and writable by a caller who can read both and may update the model that owns the link: the one whose own <code>ManyToMany</code> field names the junction (either one, when both declare it). A refused insert returns an error. A delete the caller may not make removes no row and returns no error, so ask for the deleted rows with <code>.select()</code> if you need to know. See <a href="/docs/schema/access-rules.html#many-to-many-junction-tables">Access Rules</a>.</p>
     <p><code>count</code> is <code>null</code> unless you ask for it:</p>
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">const</span> { count } = <span class="k">await</span> supatype.from(<span class="s">"post"</span>).select(<span class="s">"id"</span>, { count: <span class="s">"exact"</span> }).eq(<span class="s">"kind"</span>, <span class="s">"news"</span>)
@@ -199,6 +215,24 @@ console.log(count)</pre></div>
 <span class="k">await</span> supatype.from(<span class="s">"post"</span>).select(<span class="s">"id"</span>).ilike(<span class="s">"title"</span>, <span class="s">"%hello%"</span>).range(0, 19)</pre></div>
     <p>Reads also take <code>order</code>, <code>limit</code> and <code>range</code>. Filters work on <code>update</code> and <code>delete</code> too.</p>
 
+    <h2 id="cache">Cache a read</h2>
+    <p><code>.cache({ ttl })</code> keeps a read's result in the client's memory for <code>ttl</code> milliseconds. Add <code>server: true</code> to cache it on the server as well, for a model that declares a <code>cache</code>; add <code>public: true</code> to share one entry between users when the model allows it.</p>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> { data, meta } = <span class="k">await</span> supatype
+  .from(<span class="s">"post"</span>)
+  .select(<span class="s">"id, title"</span>)
+  .cache({ ttl: <span class="k">30_000</span>, server: <span class="k">true</span> })  <span class="c">// milliseconds</span>
+
+console.log(meta?.cacheStatus)  <span class="c">// "HIT", "MISS" or "BYPASS"</span></pre></div>
+    <p>The cache status is <code>meta.cacheStatus</code>, on the result next to <code>data</code> and <code>error</code>: it is not a field of the result itself. It is <code>"HIT"</code> when a cache answered and <code>"MISS"</code> when the read went to the database. <code>"BYPASS"</code> appears only when the server says so in its <code>X-Supatype-Cache-Status</code> header. A model with no server cache, or a project with caching off, sends no header, and the read reports <code>"MISS"</code>. A read that did not call <code>.cache()</code> has no <code>meta.cacheStatus</code>, and <code>meta</code> itself can be absent.</p>
+
+    <h2 id="globals">Globals</h2>
+    <p>A singleton model (<code>singleton: true</code>) holds one row that always exists, such as site settings. <code>global(name)</code> reads and updates it without a filter. <code>name</code> is the model's snake case name, as in <code>_global_site_settings</code>; for a model that sets its own <code>tableName</code>, use <code>from(tableName)</code> instead.</p>
+    <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
+<pre><span class="k">const</span> { data: settings } = <span class="k">await</span> supatype.global&lt;{ title: <span class="t">string</span> }&gt;(<span class="s">"site_settings"</span>).get()
+<span class="k">await</span> supatype.global(<span class="s">"site_settings"</span>).update({ title: <span class="s">"New title"</span> })</pre></div>
+    <p><code>get()</code> returns the row, or <code>null</code>. <code>update(fields)</code> changes only the fields you name and returns the row. Both return <code>{ data, error }</code>, and the model's access rules apply as for any other read or write.</p>
+
     <h2 id="write">Insert, update, delete</h2>
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">const</span> { data: created, error: insertError } = <span class="k">await</span> supatype
@@ -211,6 +245,7 @@ console.log(count)</pre></div>
 <span class="k">await</span> supatype.from(<span class="s">"comment"</span>).update({ body: <span class="s">"Edited"</span> }).eq(<span class="s">"id"</span>, commentId)
 <span class="k">await</span> supatype.from(<span class="s">"comment"</span>).delete().eq(<span class="s">"id"</span>, commentId)</pre></div>
     <p>A write returns no rows unless you add <code>.select()</code>: without it, <code>data</code> is <code>null</code>. Returning a row needs permission to read it, so leave <code>.select()</code> off when the access rules let the caller create a row but not read it. On a write, <code>single()</code> and <code>maybeSingle()</code> work only after <code>.select()</code>. On a delete, <code>.select()</code> returns the rows it deleted. <code>upsert</code> inserts or updates by primary key.</p>
+    <p>An update or delete with no filter is refused, so <code>.delete()</code> alone returns an error instead of emptying the table. The <code>supatype/postgres</code> image loads <code>pg_safeupdate</code>, which raises <code>DELETE requires a WHERE clause</code> (or the same for <code>UPDATE</code>). To change every row, add a filter that matches all of them, such as <code>.not("id", "is", null)</code>.</p>
     <p>A <code>RichText</code> field takes a plain string on write.</p>
     <p>Some owner columns can be left out. A <code>SupatypeAuthUserId</code> field that the <code>create</code> rule names in <code>Owner&lt;&gt;</code>, and that has no default of its own, defaults to the caller. A relation's key, such as <code>author_id</code>, is not filled in, so send it.</p>
 
@@ -293,7 +328,7 @@ console.log(reply)</pre></div>
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">await</span> supatype.functions.invoke(<span class="s">"stats"</span>, { method: <span class="s">"GET"</span>, headers: { <span class="s">"x-region"</span>: <span class="s">"eu"</span> } })</pre></div>
     <p>Inside a function, <code>ctx.url</code> is the API's internal address, for calls the function makes. <code>ctx.publicUrl</code> is the public address, for links you give to people.</p>
-    <p><code>supatype.rpc(name, params, options)</code> calls a Postgres function. Its options are <code>count</code>, <code>head</code>, <code>schema</code> for a function outside the default schema, and <code>idempotent</code>.</p>
+    <p><code>supatype.rpc(name, params, options)</code> calls a Postgres function. Its options are <code>count</code>, <code>head</code>, <code>schema</code> for a function outside the default schema, and <code>idempotent</code>. A function is not part of the schema: see <a href="/docs/schema.html#server-logic">Server logic in a Postgres function</a> for writing one and what Supatype does not manage.</p>
 
     <h2 id="graphql">GraphQL</h2>
     <div class="cb"><div class="cb-bar"><span>typescript</span><button type="button" class="cb-copy">Copy</button></div>
@@ -360,6 +395,8 @@ console.log(first?.author.name, first?.body.root.children?.[0])</pre></div>
     <a href="#types">Generated types</a>
     <a href="#read">Read rows</a>
     <a href="#filters">Filters</a>
+    <a href="#cache">Cache a read</a>
+    <a href="#globals">Globals</a>
     <a href="#write">Insert, update, delete</a>
     <a href="#drafts">Drafts and publishing</a>
     <a href="#auth">Auth</a>

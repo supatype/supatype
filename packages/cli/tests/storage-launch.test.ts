@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { archiveNameCandidates, validateArtifactFormat } from "../src/binary-cache.js"
+import { windowsZipTool } from "./packed/release-fixture.js"
 import { storageExecutableName, unpackedStorage } from "../src/storage-launch.js"
 
 /**
@@ -25,7 +26,7 @@ function archive(name: string, files: Record<string, string>): string {
   for (const [file, text] of Object.entries(files)) writeFileSync(join(stage, file), text)
   const out = join(dir, name)
   const result = out.endsWith(".zip")
-    ? spawnSync("powershell.exe", ["-NoProfile", "-Command", `Compress-Archive -Path '${stage}\\*' -DestinationPath '${out}'`])
+    ? spawnSync(windowsZipTool(), ["-a", "-c", "-f", out, "-C", stage, "."])
     : spawnSync("tar", ["-czf", out, "-C", stage, "."])
   if (result.status !== 0) throw new Error(`could not build ${out}: ${result.stderr}`)
   return out

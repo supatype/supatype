@@ -67,7 +67,7 @@ function serviceRoleKey(cwd: string): string {
   return key
 }
 
-function adminHeaders(cwd: string): Record<string, string> {
+export function adminHeaders(cwd: string): Record<string, string> {
   const key = serviceRoleKey(cwd)
   return {
     Authorization: `Bearer ${key}`,
@@ -105,6 +105,27 @@ function formatCacheApiError(
   return `${operation} failed (${status}): ${trimmed || "(empty body)"}`
 }
 
+/** How long a push waits to learn whether the server has a keyspace: it is a note, not a gate. */
+const KEYSPACE_PROBE_TIMEOUT_MS = 5_000
+
+/**
+ * Whether the server this project's API address reaches has a keyspace to cache in, from its
+ * `/admin/v1/cache` answer: 503 "keyspace not configured" is no, any answer that lists is yes.
+ * Null when that cannot be told: a plan that does not offer the cache, no service-role key, or a
+ * server that did not answer.
+ */
+export async function keyspaceConnected(cwd: string): Promise<boolean | null> {
+  try {
+    const url = `${resolveProjectApiUrl(cwd)}/admin/v1/cache?limit=1`
+    const res = await fetch(url, { headers: adminHeaders(cwd), signal: AbortSignal.timeout(KEYSPACE_PROBE_TIMEOUT_MS) })
+    if (res.ok) return true
+    const body = await res.text()
+    return res.status === 503 && /keyspace|valkey/.test(body) ? false : null
+  } catch {
+    return null
+  }
+}
+
 function normalizeListResponse(data: {
   entries?: RestCacheEntrySummary[] | null
   cursor?: string | null
@@ -115,7 +136,26 @@ function normalizeListResponse(data: {
   }
 }
 
+/** The most empty pages one list follows before it gives up and hands back the cursor. */
+const MAX_EMPTY_PAGES = 200
+
+/**
+ * A page of entries. A SCAN page may be empty while the scan is not over, so an empty page with a
+ * cursor is followed to the next rather than reported as "no entries" (S-25); the cursor is
+ * returned once it has entries, or once the scan ends, or after {@link MAX_EMPTY_PAGES} empty ones.
+ */
 export async function listRestCacheEntries(
+  cwd: string,
+  opts?: { table?: string | undefined; cursor?: string | undefined; limit?: number | undefined },
+): Promise<RestCacheListResponse> {
+  let page = await listRestCachePage(cwd, opts)
+  for (let hops = 0; page.entries.length === 0 && page.cursor !== "0" && hops < MAX_EMPTY_PAGES; hops++) {
+    page = await listRestCachePage(cwd, { ...opts, cursor: page.cursor })
+  }
+  return page
+}
+
+async function listRestCachePage(
   cwd: string,
   opts?: { table?: string | undefined; cursor?: string | undefined; limit?: number | undefined },
 ): Promise<RestCacheListResponse> {

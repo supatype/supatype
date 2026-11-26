@@ -11,8 +11,8 @@ export interface SettingRow {
   label: string
   value: string
   on: boolean
-  /** The variable that sets it on self-host, and whether the generated compose file passes it from `.env`. */
-  envVar: string
+  /** The variable that sets it on self-host (none for a setting only supatype.config.ts reaches), and whether the generated compose file passes it from `.env`. */
+  envVar?: string
   fromDotEnv: boolean
   /** The supatype.config.ts key that renders `envVar`, when there is one. */
   configKey?: string
@@ -64,6 +64,9 @@ function Code({ children }: { children: string }): React.ReactElement {
 /** Where a value is set: supatype.config.ts, the `.env` line, the auth server's environment, or Cloud. */
 function Source({ row, cloud }: { row: SettingRow; cloud: boolean }): React.ReactElement {
   if (cloud) return <span className="text-muted-foreground">Managed by Supatype Cloud</span>
+  if (row.envVar === undefined) {
+    return <span className="text-muted-foreground">supatype.config.ts{row.configKey !== undefined ? <> <Code>{row.configKey}</Code></> : null}</span>
+  }
   if (row.configKey !== undefined) {
     return (
       <span className="text-muted-foreground">

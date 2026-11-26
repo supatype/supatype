@@ -15,6 +15,8 @@ supatype push --env staging
 supatype status --env staging
 ```
 
+`supatype seed` on a linked server sends the collected seed documents to the server's control plane (`POST /projects/:ref/seed`, status at `GET /projects/:ref/seed/status`), which runs the engine against the stack's database, so the CLI needs no database credential. The server is one environment, `production`, so `--confirm-production` is needed without a terminal, and `--environment` must be `production` or omitted. Before seeding, the server runs the engine's diff and refuses with 409 `schema_not_pushed` when the database lacks the seed's schema: run `supatype push` first. Seed files must `export default` a function. `--local` or `--connection` seed a database from this machine instead. See [seeding.md](seeding.md#linked-projects).
+
 For local dev, `supatype dev` writes `.supatype/environment.json` with the Kong URL and database connection. `supatype push` uses the control plane automatically when that file exists.
 
 ## Local dev (Docker)
@@ -34,7 +36,7 @@ Use `--direct` on schema commands to bypass the control plane and invoke the loc
 ## Functions: `ctx.url` and `ctx.publicUrl`
 
 Every function is handed two addresses. `ctx.url` is for calling the API from inside the function:
-compose sets it to `http://kong:8000`, a name only the stack's own network resolves. `ctx.publicUrl`
+compose sets it to `http://kong:8100`, a name only the stack's own network resolves. `ctx.publicUrl`
 is the project's public address, for links you give to people (an email, a redirect, a URL in a
 response): compose sets it from `API_EXTERNAL_URL`, the same value the server is told is its own,
 so set that in `.env` to your domain (`supatype dev` writes the gateway's localhost address). A
@@ -47,8 +49,8 @@ Functions receive a raw Postgres connection URL as `ctx.dbUrl` only when the ope
 `DATABASE_URL`. When the URL names the stack's `db` service, the functions worker also joins the
 `functions-db` network so it can reach Postgres.
 
-It is not a request through the API: it connects as whatever role the URL names and **bypasses
-row rules and field masking**. With the admin URL (`supatype_admin`, as in `DATABASE_URL`) every
+It is not a request through the API: it connects as whatever role the URL names. Row rules and field masking apply for
+that role; a superuser or `BYPASSRLS` role skips both. With the admin URL (`supatype_admin`, as in `DATABASE_URL`) every
 function, each of them a public endpoint, can read and write every row and column. Use a
 least-privilege role granted only what the functions need:
 
@@ -63,6 +65,8 @@ GRANT SELECT ON public.orders TO functions_reader;
 # .env (host is the compose service, db)
 SUPATYPE_FUNCTIONS_DB_URL=postgresql://functions_reader:a-long-random-password@db:5432/my-project
 ```
+
+The last path segment is the database name: the `POSTGRES_DB` value in the project's `.env`, not a fixed string.
 
 Apply it with `supatype self-host compose up -d` (it renders the file again and recreates what
 changed), or restart `supatype dev`. In a function, check `ctx.dbUrl !== undefined` before connecting, and never
@@ -346,7 +350,8 @@ an older archive, a local `overrides.postgres_dir` build, `database.external`,
 and always on Windows (whose archive has no pg_keyspace), it uses a Valkey
 sidecar container bound to 127.0.0.1. Each project starts its own sidecar on
 the first free port from 6379; a Valkey already running is used only when
-`SUPATYPE_VALKEY_ADDR` names it.
+`SUPATYPE_VALKEY_ADDR` names it. A named Valkey logs in with `SUPATYPE_VALKEY_PASSWORD`
+(and `SUPATYPE_VALKEY_USERNAME`), with none when unset, never the keyspace password.
 
 ### What survives a restart, and what does not
 

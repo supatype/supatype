@@ -24,6 +24,7 @@ import {
   isFieldKind,
   scalar,
   type BlockDefinitionAst,
+  type ExtractedChannelAst,
   type ExtractedSchemaAstV2,
   type ExtractedStorageBucketAst,
   type FieldAnnotations,
@@ -32,6 +33,15 @@ import {
   type IdentityAst,
   type ParsedField,
 } from "./schema-ast-v2.js"
+import {
+  assertChannelsDoNotOverlap,
+  channelWarnings,
+  collectChannels,
+  parseEventRule,
+  parseParamOperand,
+  parsePayloadRule,
+  refuseChannelOnlyNodes,
+} from "./channel-extractor.js"
 import { jsonTypeArgText } from "./json-type-text.js"
 import { callerOwnedIds } from "./owner-default.js"
 import { compileBounds, measureFormFor, type DeclaredBounds } from "./field-bounds.js"
@@ -40,6 +50,31 @@ export type { ExtractedSchemaAstV2 as ExtractedSchemaAst, ExtractedStorageBucket
 
 interface FieldParseContext {
   autoLocalize?: boolean
+  /** The model being read, so a warning can name the field in full. */
+  modelName?: string
+  /** Where a field the extractor could only store as jsonb is reported. */
+  warnings?: string[]
+}
+
+/**
+ * Say that a field's TypeScript type has no column type of its own, so it is stored as jsonb.
+ *
+ * Changing the mapping would change the column of every existing schema, so it is reported
+ * instead: a single string literal such as "outbid" lands here and is easy to take for text.
+ */
+function noteJsonFallback(
+  typeNode: ts.TypeNode,
+  sourceFile: ts.SourceFile,
+  context: FieldParseContext,
+  fieldName: string,
+): void {
+  if (context.warnings === undefined) return
+  const where = context.modelName === undefined ? fieldName : `${context.modelName}.${fieldName}`
+  context.warnings.push(
+    `Field "${where}" has the TypeScript type ${typeNode.getText(sourceFile)}, which has no column type, ` +
+      "so it is stored as jsonb. Use string for text, a union of string literals for an enum, " +
+      "or JSON if jsonb is what you mean.",
+  )
 }
 
 export function extractSchemaAstFromTypes(
@@ -80,6 +115,7 @@ export function extractSchemaAstFromTypes(
   }
 
   const models: ExtractedSchemaAstV2["models"] = []
+  const warnings: string[] = []
 
   for (const sourceFile of sourceFiles) {
     for (const stmt of sourceFile.statements) {
@@ -97,6 +133,8 @@ export function extractSchemaAstFromTypes(
       const metaHints = parseMetaLiteral(metaArg, sourceFile, resolveCtx, stmt.name.text)
       const fieldContext: FieldParseContext = {
         autoLocalize: modelTypeName === "LocalizedModel" || metaHints.autoLocalize === true,
+        modelName: stmt.name.text,
+        warnings,
       }
 
       const fields: Record<string, FieldAstV2> = {}
@@ -157,6 +195,9 @@ export function extractSchemaAstFromTypes(
 
   if (models.length === 0) return null
 
+  const channels = extractChannels(sourceFiles, resolveCtx)
+  refuseChannelOnlyRules(models, bucketsById)
+
   const storageBuckets =
     bucketsById.size > 0 ? [...bucketsById.values()].sort((a, b) => a.id.localeCompare(b.id)) : undefined
 
@@ -174,11 +215,36 @@ export function extractSchemaAstFromTypes(
 
   return emitSchema(models, {
     ...(storageBuckets !== undefined && storageBuckets.length > 0 && { storageBuckets }),
+    channels,
+    warnings: [...warnings, ...channelWarnings(channels)],
     ...(localeConfig !== undefined && {
       locales: localeConfig.locales,
       defaultLocale: localeConfig.defaultLocale,
     }),
   })
+}
+
+/** Every `Channel<>` in the schema, refused if two can match one topic. */
+function extractChannels(
+  sourceFiles: readonly ts.SourceFile[],
+  resolveCtx: ResolveContext,
+): ExtractedChannelAst[] {
+  const channels = sourceFiles.flatMap((sourceFile) =>
+    collectChannels(sourceFile, (node) => parseAccessRule(node, sourceFile, resolveCtx)),
+  )
+  assertChannelsDoNotOverlap(channels)
+  return channels
+}
+
+/** `Param<>`, `Event<>` and `Payload<>` mean something only in a channel's rules. */
+function refuseChannelOnlyRules(
+  models: ExtractedSchemaAstV2["models"],
+  bucketsById: Map<string, ExtractedStorageBucketAst>,
+): void {
+  for (const model of models) {
+    refuseChannelOnlyNodes(`model "${model.name}"`, [model.annotations.platform.access, model.annotations.db.constraints])
+  }
+  for (const [id, bucket] of bucketsById) refuseChannelOnlyNodes(`bucket "${id}"`, bucket.access)
 }
 
 /**
@@ -1280,6 +1346,7 @@ function parseScalarType(
     case ts.SyntaxKind.BooleanKeyword:
       return scalar("boolean")
     default:
+      noteJsonFallback(typeNode, sourceFile, context, fieldName)
       return scalar("json")
   }
 }
@@ -1575,7 +1642,7 @@ function parsePartialBucketAccess(
       )
     }
     const bucketRule = parseAccessRule(member.type, sourceFile, resolveCtx)
-    assertAccessRuleIsRenderable(bucketRule, bucketId, key)
+    assertAccessRuleIsRenderable(bucketRule, bucketId, key, "bucket")
     access[key] = bucketRule
   }
   return access
@@ -2691,14 +2758,28 @@ function resolveIndexFieldName(fieldName: string, fields: Record<string, FieldAs
  */
 const CONSTRAINT_ONLY_NODES = new Set(["length", "itemCount", "matches"])
 
-function assertAccessRuleIsRenderable(node: unknown, model: string, operation: string): void {
+/** Where an access rule is attached: a model's table, or a bucket's `storage.objects`. */
+type AccessRuleScope = "model" | "bucket"
+
+function assertAccessRuleIsRenderable(
+  node: unknown,
+  model: string,
+  operation: string,
+  scope: AccessRuleScope = "model",
+): void {
   if (Array.isArray(node)) {
-    for (const item of node) assertAccessRuleIsRenderable(item, model, operation)
+    for (const item of node) assertAccessRuleIsRenderable(item, model, operation, scope)
     return
   }
   if (!isJsonObject(node)) return
 
   const record = node
+  if (scope === "model" && record["kind"] === "folder") {
+    throw new Error(
+      `Model "${model}": \`Folder<>\` is not supported in an \`access\` rule (\`${operation}\`). ` +
+        "It names a folder of an object's path, so it belongs in a bucket's rules.",
+    )
+  }
   // Operands are tagged `kind`, rules `type`, so both are checked: `Matches` is a rule.
   const tag = [record["kind"], record["type"]].find(
     (value) => typeof value === "string" && CONSTRAINT_ONLY_NODES.has(value),
@@ -2711,7 +2792,7 @@ function assertAccessRuleIsRenderable(node: unknown, model: string, operation: s
     )
   }
   for (const value of Object.values(record)) {
-    assertAccessRuleIsRenderable(value, model, operation)
+    assertAccessRuleIsRenderable(value, model, operation, scope)
   }
 }
 
@@ -3014,6 +3095,8 @@ const ACCESS_RULE_FORMS = {
   BucketLoggedIn: "BucketLoggedIn",
   BucketOwner: "BucketOwner",
   BucketRole: 'BucketRole<"name">',
+  Event: 'Event<"name">',
+  Payload: 'Payload<"field", { kind: ... }>',
 } as const
 
 type AccessRuleName = keyof typeof ACCESS_RULE_FORMS
@@ -3022,12 +3105,21 @@ function isAccessRuleName(ref: string): ref is AccessRuleName {
   return Object.hasOwn(ACCESS_RULE_FORMS, ref)
 }
 
+/** Which declaration a rule belongs to: models take most, buckets and channels each their own. */
+function ruleGroup(name: string): "model" | "bucket" | "channel" {
+  if (name.startsWith("Bucket")) return "bucket"
+  return name === "Event" || name === "Payload" ? "channel" : "model"
+}
+
 /** The error for a rule the parser does not know, listing every rule it does. */
 function unknownAccessRuleMessage(ref: string): string {
   const forms = Object.entries(ACCESS_RULE_FORMS)
-  const listed = (bucket: boolean): string =>
-    forms.filter(([name]) => name.startsWith("Bucket") === bucket).map(([, form]) => form).join(", ")
-  return `Unknown access rule "${ref}". Supported: ${listed(false)} (buckets also accept ${listed(true)}).`
+  const listed = (group: string): string =>
+    forms.filter(([name]) => ruleGroup(name) === group).map(([, form]) => form).join(", ")
+  return (
+    `Unknown access rule "${ref}". Supported: ${listed("model")} ` +
+    `(buckets also accept ${listed("bucket")}; a channel's send rule also accepts ${listed("channel")}).`
+  )
 }
 
 /** A name that is not a built-in rule: a named alias standing for one, or an error naming it. */
@@ -3163,6 +3255,10 @@ function parseAccessRule(
         ),
       }
     }
+    case "Event":
+      return parseEventRule(typeNode.typeArguments ?? [])
+    case "Payload":
+      return parsePayloadRule(typeNode.typeArguments ?? [])
     case "Not": {
       const inner = typeNode.typeArguments?.[0]
       if (!inner) {
@@ -3570,6 +3666,18 @@ function stringLiteralArg(
   return value
 }
 
+/** `Folder<N>`'s N: a whole number from 1, as Postgres arrays count. */
+function folderIndexArg(arg: ts.TypeNode | undefined): number {
+  if (arg !== undefined && ts.isLiteralTypeNode(arg) && ts.isNumericLiteral(arg.literal)) {
+    const index = Number(arg.literal.text)
+    if (Number.isSafeInteger(index) && index >= 1) return index
+  }
+  throw new Error(
+    "`Folder<>` takes the folder's position as a whole number from 1, as in `Folder<1>` for the " +
+      "first folder of the object's path.",
+  )
+}
+
 /**
  * One side of a comparison.
  *
@@ -3619,6 +3727,10 @@ function parseAccessOperand(
         }
         return { kind: ref === "Length" ? "length" : "itemCount", column }
       }
+      case "Folder":
+        return { kind: "folder", index: folderIndexArg(operandArgs[0]) }
+      case "Param":
+        return parseParamOperand(operandArgs)
       case "AuthUid":
         return { kind: "authUid" }
       case "AuthRole":
@@ -3674,7 +3786,7 @@ function parseAccessOperand(
 
   throw new Error(
     `\`${ownerText(typeNode, sourceFile)}\` is not a valid operand. Use a column name ` +
-      `("author_id"), AuthUid, AuthRole, Claim<"path"> or Literal<value>.`,
+      `("author_id"), AuthUid, AuthRole, Claim<"path">, Folder<N> or Literal<value>.`,
   )
 }
 

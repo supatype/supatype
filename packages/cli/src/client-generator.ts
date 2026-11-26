@@ -23,11 +23,15 @@
  * generated has no file here to import, so the build fails rather than the app running with a
  * client that knows nothing about its schema.
  */
-import { generateClientAugmentation, resolveTableName } from "./augmentation-generator.js"
+import { exactArrayKindOfField, generateClientAugmentation, resolveTableName } from "./augmentation-generator.js"
 import { astModels, objectAt } from "./ast-read.js"
 import { keepsDrafts } from "./model-versioning.js"
 
-/** The kinds whose values no binary float holds, keyed by the schema kind that produces them. */
+/**
+ * The kinds whose values no binary float holds, keyed by the schema kind that produces them. An
+ * array of one is `bigint[]` or `numeric[]`, decided from its element type. An older client
+ * ignores a kind it does not know, so the format stays at version 1.
+ */
 const EXACT_KIND_BY_FIELD_KIND: Readonly<Record<string, "bigint" | "numeric">> = {
   bigInt: "bigint",
   bigSerial: "bigint",
@@ -97,7 +101,10 @@ function fieldKindsDocument(ast: unknown): { version: number; tables: Record<str
     const exact: Record<string, string> = {}
     for (const [column, meta] of Object.entries(objectAt(model, "fields") ?? {})) {
       const kind = objectAt(meta)?.["kind"]
-      const exactKind = typeof kind === "string" ? EXACT_KIND_BY_FIELD_KIND[kind] : undefined
+      const exactKind =
+        typeof kind === "string"
+          ? (EXACT_KIND_BY_FIELD_KIND[kind] ?? exactArrayKindOfField(objectAt(meta) ?? {}))
+          : undefined
       if (exactKind !== undefined) exact[column] = exactKind
     }
     if (Object.keys(exact).length > 0) {

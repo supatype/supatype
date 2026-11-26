@@ -220,6 +220,25 @@ describe("functions routes", () => {
       for (const left of ["gone-file.ts", "gone-both.ts", "gone-both"]) assert.equal(existsSync(join(fns(), left)), false, left)
     })
 
+    // A function's own secrets live beside the shared .env.local, and a new function of the same name
+    // must not inherit the deleted one's.
+    test("delete removes the function's own env file, and only its own", async () => {
+      writeFileSync(join(fns(), "with-secrets.ts"), "export default 0\n")
+      writeFileSync(join(fns(), ".env.with-secrets.local"), "API_KEY=old\n")
+      writeFileSync(join(fns(), ".env.other.local"), "API_KEY=other\n")
+      writeFileSync(join(fns(), ".env.local"), "SHARED=1\n")
+      assert.equal((await request(baseUrl, "DELETE", `/projects/${PROJECT}/functions/with-secrets`)).status, 200)
+      assert.equal(existsSync(join(fns(), "with-secrets.ts")), false)
+      assert.equal(existsSync(join(fns(), ".env.with-secrets.local")), false)
+      for (const kept of [".env.other.local", ".env.local"]) assert.equal(existsSync(join(fns(), kept)), true, kept)
+    })
+
+    test("delete of a function with no env file still succeeds", async () => {
+      writeFileSync(join(fns(), "no-secrets.ts"), "export default 0\n")
+      assert.equal((await request(baseUrl, "DELETE", `/projects/${PROJECT}/functions/no-secrets`)).status, 200)
+      assert.equal(existsSync(join(fns(), "no-secrets.ts")), false)
+    })
+
     // Review r8 A9: the list named every directory (_shared, .git, one with no index.ts) and missed
     // the functions kept as <name>.ts. It names what the worker serves.
     test("list names exactly the functions the worker serves", async () => {

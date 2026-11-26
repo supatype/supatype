@@ -238,6 +238,11 @@ All<[
 ]>
 ```
 
+> **`Exists<Rows<...>>` in a write rule does not look at the row being written.** The `where` inside
+> `Rows<>` is evaluated against the other table's rows, so the rule gives the same answer for every row
+> of a `create`, `update` or `delete`. To tie the rule to the row, use `In<"column", Rows<...>>`.
+> `supatype push` warns when a write rule contains one.
+
 A note on type-checking: the named rules stay bound to your model's fields, so
 `Owner<"athor_id">` is still a typo your editor catches. Column names *inside* a
 composition are checked by Postgres when the policy is created, not by the editor:
@@ -298,12 +303,18 @@ Their policies follow from the two rows each link joins:
 
 - a link is readable when the caller can read **both** of the rows it joins;
 - a link can be added, changed or removed by a caller who can read both rows and
-  may update **at least one** of them.
+  may update the model that **owns** the link.
+
+The owner is the model whose own `ManyToMany` field names the junction. If only `Lot`
+declares `tags: ManyToMany<Tag>`, the link belongs to `Lot`: whoever may update a lot may
+tag it with any tag they can see, and the right to update a tag does not let anyone attach
+it to a lot. If both models declare the field (`Lot.tags` and `Tag.lots`), either one
+owns it, so the right to update either row, plus read on the other, writes the link.
+Declare the field on one side only when the other model's editors should not be able to
+attach rows to it.
 
 Each end is checked by reading its row as the caller, so that model's own policies
-decide. Tagging a post is an edit of the post: whoever may edit a post may tag it with
-any tag they can see, without needing the right to edit the tag. If neither model
-declares an `update` rule, nobody can write the links.
+decide. If no owning model declares an `update` rule, nobody can write the links.
 
 One case falls back to a stricter derivation. When a parent's `read` rule uses the
 junction itself as a membership source (`Rows<>` naming the junction table), checking

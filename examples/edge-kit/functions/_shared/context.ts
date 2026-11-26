@@ -23,7 +23,7 @@ export interface FunctionContext {
   readonly functionName: string
   /**
    * The project's API base URL, reachable from inside the function: for calling the API. Under
-   * Docker it is an in-stack name (http://kong:8000) that a browser cannot open.
+   * Docker it is an in-stack name (http://kong:8100) that a browser cannot open.
    */
   readonly url: string
   /**
@@ -38,9 +38,11 @@ export interface FunctionContext {
   /**
    * A raw Postgres connection URL. Off by default: present only when the operator sets
    * SUPATYPE_FUNCTIONS_DB_URL in .env. It connects as whatever role that URL names and is not a
-   * request through the API, so row rules and field masking do not apply to it. Set it to a
-   * least-privilege role granted only what the functions need, never the admin URL, and treat it
-   * as a credential: never return it or log it.
+   * request through the API, so model hooks do not run. Row rules and field masking apply for
+   * the role the URL names: a superuser or BYPASSRLS role (the admin role, service_role) skips
+   * both, any other role is held to them. Set it to a least-privilege login role that is
+   * neither, granted only what the functions need, never the admin URL, and treat it as a
+   * credential: never return it or log it.
    */
   readonly dbUrl?: string
   readonly region: string

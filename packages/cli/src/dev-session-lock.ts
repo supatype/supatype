@@ -48,6 +48,11 @@ export interface DevSessionLock {
    */
   runEnv?: Record<string, string>
   startedAt: string
+  /**
+   * The Valkey sidecar container native dev started, so the next dev can remove it when this one
+   * is gone without cleaning up. Absent when dev started none, and for Docker dev.
+   */
+  valkeyContainer?: string
   /** The `supatype dev` process holding the session. Absent in a lock written before it was kept. */
   pid?: number
 }
@@ -63,6 +68,7 @@ const isDevSessionLock: Guard<DevSessionLock> = isShape({
   dbPort: optional(isNumber),
   runEnv: optional(isRecordOf(isString)),
   startedAt: isString,
+  valkeyContainer: optional(isString),
   pid: optional(isNumber),
 })
 
@@ -239,7 +245,7 @@ export function isDockerSession(lock: DevSessionLock): boolean {
  */
 export function devSessionLockFor(
   config: SupatypeProjectConfig,
-  stack: Pick<DevSessionLock, "provider" | "composeProject" | "composePath" | "kongPort" | "dbPort" | "runEnv">,
+  stack: Pick<DevSessionLock, "provider" | "composeProject" | "composePath" | "kongPort" | "dbPort" | "runEnv" | "valkeyContainer">,
   startedAt: Date = new Date(),
 ): Omit<DevSessionLock, "version" | "pid"> {
   return { ...stack, projectRef: projectNameInFile(config), startedAt: startedAt.toISOString() }

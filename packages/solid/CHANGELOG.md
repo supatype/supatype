@@ -1,6 +1,33 @@
 # Changelog
 
-## Unreleased
+## 0.9.3
+
+### Features
+
+* **createChannel:** the channel name is a `ChannelName`: a topic the schema declares autocompletes (`lot:${string}`), and any other string is still accepted, since an `open` server admits it.
+* **createChannel:** `createChannel(name, setup)` joins one channel and hands it to `setup` to add any number of
+  row, presence and broadcast listeners, which `createSubscription` (one table, one listener) cannot. It returns
+  `status` and `error` as `createSubscription` does, and `isConnected` and `connectionState`. `name` is a string or
+  an accessor: when it changes the old channel is left, its listeners go with it, and `setup` runs on the
+  new one. The channel is left on teardown.
+* **createRealtimeConnection:** `isConnected` and `connectionState` for the realtime socket itself.
+* **createChannel:** takes `{ private: true }` as a third argument, passed to the channel join (see the
+  client changelog). A refused or withdrawn private join is status "error" with `error` a
+  `RealtimeChannelError` whose `reason` says why.
+* **createChannel:** returns `refusal`, the latest broadcast, presence track or payload the server refused on the
+  channel (`{ channel, code, message }`, `code` one of `send_denied`, `track_denied`,
+  `payload_refused`), or null. The channel stays joined: `status` does not change for it.
+
+### Bug Fixes
+
+* **createSubscription:** `data` is the table's rows. It is read once the subscription has joined and again after
+  each re-join, so rows that existed before subscribing are held and changes made while the socket was
+  down are not lost. Each change is then an upsert by key (`id`, or the new `key` option, a column or
+  an array of them): a row seen twice is listed once, an update to a row not held adds it, and a delete
+  of a key not held does nothing. A `filter` narrows the read too. Before this `data` started empty,
+  so an update or delete of a pre-existing row was dropped and a repeated insert was listed twice.
+
+## 0.9.1 (2026-11-09)
 
 ### Breaking Changes
 
@@ -25,3 +52,15 @@
 * **createQuery:** only the newest read is shown. A refetch while a read was in flight let the older
   read finish last and replace the newer rows with its own rows, its error or its throw, and end
   loading while the newer read was still out. A throw from a replaced read is still logged.
+
+## 0.9.0 (2026-11-04)
+
+### Breaking Changes
+
+* **createMutation:** `mutate` returns no rows unless asked: `data` is `null` after an insert, update,
+  upsert or delete, as with the client's own writes. Pass `{ select: true }` for every column or
+  `{ select: "id,title" }` for some, as `.select()` takes them. Returning a row needs the right
+  to read it, so a table whose rules let a caller create but not read refused every insert made
+  through `createMutation`. A delete returns `null` rather than `[]`, and its rows with `select`.
+
+

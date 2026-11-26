@@ -1,0 +1,282 @@
+{
+  "astVersion": 2,
+  "channels": [
+    {
+      "name": "LotChannel",
+      "pattern": "lot:{id}",
+      "params": [
+        {
+          "name": "id",
+          "type": "uuid"
+        }
+      ],
+      "access": {
+        "join": {
+          "type": "any",
+          "rules": [
+            {
+              "type": "in",
+              "column": "id",
+              "source": {
+                "kind": "rows",
+                "table": "lot_watchers",
+                "column": "lot_id",
+                "where": {
+                  "type": "compare",
+                  "left": {
+                    "kind": "column",
+                    "name": "user_id"
+                  },
+                  "op": "eq",
+                  "right": {
+                    "kind": "authUid"
+                  }
+                }
+              }
+            },
+            {
+              "type": "role",
+              "roles": [
+                "auctioneer"
+              ]
+            }
+          ]
+        },
+        "send": {
+          "type": "all",
+          "rules": [
+            {
+              "type": "any",
+              "rules": [
+                {
+                  "type": "exists",
+                  "source": {
+                    "kind": "rows",
+                    "table": "lots",
+                    "column": "id",
+                    "where": {
+                      "type": "all",
+                      "rules": [
+                        {
+                          "type": "compare",
+                          "left": {
+                            "kind": "column",
+                            "name": "id"
+                          },
+                          "op": "eq",
+                          "right": {
+                            "kind": "param",
+                            "name": "id"
+                          }
+                        },
+                        {
+                          "type": "compare",
+                          "left": {
+                            "kind": "column",
+                            "name": "seller_id"
+                          },
+                          "op": "eq",
+                          "right": {
+                            "kind": "authUid"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "type": "role",
+                  "roles": [
+                    "auctioneer"
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "event",
+              "name": "bid"
+            },
+            {
+              "type": "payload",
+              "field": "amount",
+              "check": {
+                "kind": "number",
+                "min": 1
+              }
+            }
+          ]
+        },
+        "track": {
+          "type": "all",
+          "rules": [
+            {
+              "type": "authenticated"
+            },
+            {
+              "type": "in",
+              "column": "id",
+              "source": {
+                "kind": "rows",
+                "table": "lot_watchers",
+                "column": "lot_id",
+                "where": {
+                  "type": "compare",
+                  "left": {
+                    "kind": "column",
+                    "name": "user_id"
+                  },
+                  "op": "eq",
+                  "right": {
+                    "kind": "authUid"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Lobby",
+      "pattern": "lobby",
+      "params": [],
+      "access": {
+        "join": {
+          "type": "authenticated"
+        },
+        "send": {
+          "type": "authenticated"
+        },
+        "track": {
+          "type": "authenticated"
+        }
+      }
+    },
+    {
+      "name": "Announcements",
+      "pattern": "announce",
+      "params": [],
+      "access": {
+        "join": {
+          "type": "authenticated"
+        },
+        "send": null,
+        "track": null
+      }
+    }
+  ],
+  "realtime": {
+    "channels": "declared"
+  },
+  "models": [
+    {
+      "name": "Lot",
+      "fields": {
+        "id": {
+          "kind": "uuid",
+          "required": true,
+          "annotations": {
+            "db": {
+              "pgType": "UUID",
+              "unique": false,
+              "index": false
+            }
+          },
+          "primaryKey": true,
+          "default": {
+            "kind": "genRandomUuid"
+          }
+        },
+        "seller_id": {
+          "kind": "uuid",
+          "required": true,
+          "annotations": {
+            "db": {
+              "pgType": "UUID",
+              "unique": false,
+              "index": false
+            }
+          }
+        }
+      },
+      "options": {},
+      "annotations": {
+        "db": {
+          "tableName": "lots",
+          "indexes": []
+        },
+        "platform": {
+          "access": {
+            "read": {
+              "type": "public"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "LotWatcher",
+      "fields": {
+        "id": {
+          "kind": "uuid",
+          "required": true,
+          "annotations": {
+            "db": {
+              "pgType": "UUID",
+              "unique": false,
+              "index": false
+            }
+          },
+          "primaryKey": true,
+          "default": {
+            "kind": "genRandomUuid"
+          }
+        },
+        "lot_id": {
+          "kind": "uuid",
+          "required": true,
+          "annotations": {
+            "db": {
+              "pgType": "UUID",
+              "unique": false,
+              "index": false
+            }
+          }
+        },
+        "user_id": {
+          "kind": "uuid",
+          "required": true,
+          "annotations": {
+            "db": {
+              "pgType": "UUID",
+              "unique": false,
+              "index": false
+            }
+          }
+        }
+      },
+      "options": {},
+      "annotations": {
+        "db": {
+          "tableName": "lot_watchers",
+          "indexes": []
+        },
+        "platform": {
+          "access": {
+            "read": {
+              "type": "compare",
+              "left": {
+                "kind": "column",
+                "name": "user_id"
+              },
+              "op": "eq",
+              "right": {
+                "kind": "authUid"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

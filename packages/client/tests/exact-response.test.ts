@@ -93,3 +93,104 @@ describe("parseRowsExactly", () => {
     expect(out.ok).toBe(true)
   })
 })
+
+describe("parseRowsExactly with array columns", () => {
+  const arrays = {
+    version: 1 as const,
+    tables: { ledger: { ids: "bigint[]" as const, rates: "numeric[]" as const, grid: "bigint[]" as const } },
+  }
+
+  it("keeps a bigint[] past 2^53 in a list response", () => {
+    registerFieldKinds(arrays)
+    const out = parseRowsExactly('[{"ids":[9007199254740993,1,-9007199254740995]}]', "ledger")
+
+    expect(out.ok).toBe(true)
+    expect(out.ok && out.value).toEqual([{ ids: [9007199254740993n, 1n, -9007199254740995n] }])
+  })
+
+  it("keeps a bigint[] past 2^53 in a single-object response", () => {
+    registerFieldKinds(arrays)
+    const out = parseRowsExactly('{"ids":[9007199254740993]}', "ledger")
+
+    expect(out.ok).toBe(true)
+    expect(out.ok && out.value).toEqual({ ids: [9007199254740993n] })
+  })
+
+  it("keeps trailing zeros in a numeric[] as exact strings", () => {
+    registerFieldKinds(arrays)
+    const out = parseRowsExactly('[{"rates":[1.10,2.500,12345678901234567890.1234]}]', "ledger")
+
+    expect(out.ok).toBe(true)
+    expect(out.ok && out.value).toEqual([{ rates: ["1.10", "2.500", "12345678901234567890.1234"] }])
+  })
+
+  it("keeps a numeric[] in a single-object response", () => {
+    registerFieldKinds(arrays)
+    const out = parseRowsExactly('{"rates":[1.10]}', "ledger")
+
+    expect(out.ok && out.value).toEqual({ rates: ["1.10"] })
+  })
+
+  it("leaves nulls inside and around the array as null", () => {
+    registerFieldKinds(arrays)
+    const out = parseRowsExactly('[{"ids":[9007199254740993,null]},{"ids":null},{"ids":[]}]', "ledger")
+
+    expect(out.ok && out.value).toEqual([{ ids: [9007199254740993n, null] }, { ids: null }, { ids: [] }])
+  })
+
+  it("keeps a multi-dimensional bigint[]", () => {
+    registerFieldKinds(arrays)
+    const out = parseRowsExactly('[{"grid":[[9007199254740993,2],[3,null]]}]', "ledger")
+
+    expect(out.ok && out.value).toEqual([{ grid: [[9007199254740993n, 2n], [3n, null]] }])
+  })
+
+  it("leaves arrays in columns that are not registered exact kinds alone", () => {
+    registerFieldKinds(arrays)
+    const out = parseRowsExactly('[{"tags":[1,2],"ids":[1]}]', "ledger")
+
+    expect(out.ok && out.value).toEqual([{ tags: [1, 2], ids: [1n] }])
+  })
+
+  it("still reads a document with only the single kinds", () => {
+    registerFieldKinds({ version: 1, tables: { ledger: { views: "bigint" } } })
+    const out = parseRowsExactly('[{"views":9007199254740993,"ids":[1,2]}]', "ledger")
+
+    expect(out.ok && out.value).toEqual([{ views: 9007199254740993n, ids: [1, 2] }])
+  })
+})
+
+describe("parseRowsExactly with arrays", () => {
+  it("refuses an unregistered column whose array holds a lossy number, naming the column", () => {
+    registerFieldKinds({ version: 1, tables: { job_post: { views: "bigint" } } })
+    const out = parseRowsExactly('[{"tags":[9007199254740993]}]', "job_post")
+
+    expect(out.ok).toBe(false)
+    expect(!out.ok && out.columns).toEqual(["tags"])
+    expect(!out.ok && out.message).toContain("tags")
+  })
+
+  it("passes an unregistered array that is safe", () => {
+    registerFieldKinds({ version: 1, tables: { job_post: { views: "bigint" } } })
+    const out = parseRowsExactly('[{"tags":[1,2,3]}]', "job_post")
+
+    expect(out.ok).toBe(true)
+    expect(out.ok && out.value).toEqual([{ tags: [1, 2, 3] }])
+  })
+
+  it("still protects a registered bigint[] column rather than refusing it", () => {
+    registerFieldKinds({ version: 1, tables: { job_post: { ids: "bigint[]" } } })
+    const out = parseRowsExactly('[{"ids":[9007199254740993,2]}]', "job_post")
+
+    expect(out.ok).toBe(true)
+    expect(out.ok && out.value).toEqual([{ ids: [9007199254740993n, 2n] }])
+  })
+
+  it("still protects a registered numeric[] column rather than refusing it", () => {
+    registerFieldKinds({ version: 1, tables: { job_post: { rates: "numeric[]" } } })
+    const out = parseRowsExactly('[{"rates":[12345678901234567890.1234]}]', "job_post")
+
+    expect(out.ok).toBe(true)
+    expect(out.ok && out.value).toEqual([{ rates: ["12345678901234567890.1234"] }])
+  })
+})

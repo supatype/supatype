@@ -32,7 +32,8 @@ export interface ClackPasswordOptions {
 
 export interface ClackSpinner {
   start(message: string): void
-  stop(message: string): void
+  /** `ok: false` ends the spinner on an error line, not the success tick. */
+  stop(message: string, ok?: boolean): void
 }
 
 export interface ClackApi {
@@ -74,11 +75,11 @@ class SpinnerLog {
   }
 
   /** The done line, unless it is the spinner's own line, already shown above the work's. */
-  stop(message: string): void {
+  stop(message: string, ok = true): void {
     const shown = this.spinning?.shown === true && this.spinning.message === message
     this.spinning = null
     this.controller.setSpinner(null)
-    if (!shown) this.controller.appendLog("success", message)
+    if (!shown || !ok) this.controller.appendLog(ok ? "success" : "error", message)
   }
 
   private showSpinnerLine(): void {
@@ -140,7 +141,7 @@ export function createClackApi(controller: FlowController): ClackApi {
     spinner() {
       return {
         start: (message: string) => log.start(message),
-        stop: (message: string) => log.stop(message),
+        stop: (message: string, ok?: boolean) => log.stop(message, ok),
       }
     },
     log: {

@@ -211,6 +211,17 @@ describe("AuthClient.signInWithPassword()", () => {
     expect(url).toBe(`${SUPATYPE_URL}/token?grant_type=password`)
   })
 
+  it("sends the captcha token the way the auth server reads it, and sends nothing when there is none", async () => {
+    const fetch = mockFetch(TOKEN_RESPONSE)
+    vi.stubGlobal("fetch", fetch)
+
+    await freshClient().signInWithPassword({ email: "a@b.com", password: "pass", options: { captchaToken: "captcha-123" } })
+    expect(jsonBody(fetchCall(fetch).init)["supatype_meta_security"]).toEqual({ captcha_token: "captcha-123" })
+
+    await freshClient().signInWithPassword({ email: "a@b.com", password: "pass" })
+    expect(jsonBody(fetchCall(fetch, 1).init)).not.toHaveProperty("supatype_meta_security")
+  })
+
   it("returns error on invalid credentials", async () => {
     vi.stubGlobal("fetch", mockFetch({ error_description: "Invalid login credentials" }, false, 400))
 

@@ -1,6 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.9.3
+
+### Features
+
+* **useChannel:** the channel name is a `ChannelName`: a topic the schema declares autocompletes (`lot:${string}`), and any other string is still accepted, since an `open` server admits it.
+* **useChannel:** `useChannel(name, setup, deps)` joins one channel and hands it to `setup` to add any
+  number of row, presence and broadcast listeners, which `useSubscription` (one row listener) cannot.
+  It unsubscribes on unmount and when `name` or `deps` change, and returns `status`, `error`,
+  `isConnected` and `connectionState`.
+* **useRealtimeConnection:** `isConnected` and `connectionState` for the realtime socket itself.
+* **useChannel:** takes `{ private: true }` as a fourth argument, passed to the channel join (see the
+  client changelog). A refused or withdrawn private join is `CHANNEL_ERROR` with `error` a
+  `RealtimeChannelError` whose `reason` says why.
+* **useChannel:** returns `refusal`, the latest broadcast, presence track or payload the server refused
+  on the channel (`{ channel, code, message }`, `code` one of `send_denied`, `track_denied`,
+  `payload_refused`), or null. The channel stays joined: `status` does not change for it.
+
+## 0.9.1 (2026-11-09)
 
 ### Breaking Changes
 
@@ -28,3 +45,16 @@
 * **useQuery:** only the latest request is shown. When the options changed while a read was in
   flight, the older read could finish last and replace the newer rows with its own rows, its error
   or its throw. A throw from a replaced read is still logged.
+
+## 0.9.0 (2026-11-04)
+
+### Breaking Changes
+
+* **useMutation:** `mutate` returns no rows unless asked: `data` is `null` after an insert, update,
+  upsert or delete, as with the client's own writes. Pass `{ select: true }` for every column or
+  `{ select: "id,title" }` for some, as `.select()` takes them. Returning a row needs the right
+  to read it, so a table whose rules let a caller create but not read refused every insert made
+  through `useMutation`. A delete returns `null` rather than `[]`, and its rows with `select`.
+  `filter` and `publish` keep their meaning.
+
+

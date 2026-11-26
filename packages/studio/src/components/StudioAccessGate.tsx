@@ -110,8 +110,8 @@ function StudioSignInPage({ connection, signIn }: { connection: GateConnection; 
         initialError: external.redirectError,
         withProvider: external.signInWithProvider,
         withSSO: external.signInWithSSO,
-        withPassword: async (email, password) => {
-          const { error } = await signIn(email, password)
+        withPassword: async (email, password, captchaToken) => {
+          const { error } = await signIn(email, password, captchaToken)
           return { error: error?.message ?? null }
         },
       }}

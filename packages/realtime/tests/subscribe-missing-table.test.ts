@@ -4,7 +4,8 @@ import { ReplicationListener } from "../src/replication.js"
 import { RlsFilter, type DeliveryVerdict } from "../src/rls.js"
 import type { JwtClaims } from "../src/auth.js"
 import type { ServerMessage, WalChange } from "../src/types.js"
-import { connect, freePort, isSystem, serviceToken, settle, testEnv, userToken, type Peer } from "./fixtures/socket.js"
+import { connect, isSystem, serviceToken, settle, ANY_PORT, testEnv, userToken, type Peer } from "./fixtures/socket.js"
+import { undeclaredChannels } from "./fixtures/fake-channel-db.js"
 
 /**
  * A join for a table that does not exist is refused, naming the table.
@@ -85,10 +86,10 @@ describe("a join for a table that does not exist", () => {
   beforeAll(async () => {
     // The check needs the database, and replication being up is how the server knows it has one.
     vi.spyOn(ReplicationListener.prototype, "isConnected").mockReturnValue(true)
-    port = await freePort()
     filter = new FakeCatalogFilter()
-    server = new RealtimeServer(testEnv(port), { rlsFilter: filter })
+    server = new RealtimeServer(testEnv(ANY_PORT), { rlsFilter: filter, channelDb: undeclaredChannels() })
     await server.start()
+    port = server.port
   })
 
   afterAll(async () => {
@@ -141,6 +142,35 @@ describe("a join for a table that does not exist", () => {
     }
     sender.send({ type: "broadcast", channel: "room:probe", event: "ping", payload: { n: 1 } })
     await listener.next((m) => m.type === "broadcast" && m.channel === "room:probe")
+  })
+
+  // D-38 B (FF-21): `@supatype/client@0.7.0` sends no `changes` flag and no `ref`, so its row joins
+  // skipped the table check and an anon join on a table it could not read reported SUBSCRIBED.
+  // Clients from 0.8.0 to 0.9.1 also send no `changes`, but every join of theirs carries a `ref`,
+  // and their broadcast and presence joins name the table their channel name reads as (R2-RB2).
+  it("refuses the 0.7.0 frame (a table, no changes, no ref) as a row join", async () => {
+    const peer = await open()
+    peer.send({ type: "subscribe", channel: "ghost", table: "notes", event: "*" })
+    const reply = await peer.next(isRefusalOf("ghost"))
+    expect(reply.type === "system" && reply.message).toMatch(/notes/)
+  })
+
+  it("refuses the 0.7.0 frame for a table the subscriber's role cannot read", async () => {
+    const peer = await open()
+    peer.send({ type: "subscribe", channel: "users", schema: "auth", table: "users", event: "*" })
+    await peer.next(isRefusalOf("users"))
+  })
+
+  it("still acknowledges the 0.8.0 to 0.9.1 frame (a table, no changes, a ref) for a channel not named after a table", async () => {
+    const peer = await open()
+    peer.send({ type: "subscribe", channel: "lobby:lobby", schema: "lobby", table: "lobby", event: "*", ref: "1" })
+    await peer.next(isSystem("ok", "subscribed to lobby:lobby"))
+  })
+
+  it("acknowledges a frame with no table, no changes and no ref as before", async () => {
+    const peer = await open()
+    peer.send({ type: "subscribe", channel: "legacy-bare" })
+    await peer.next(isSystem("ok", "subscribed to legacy-bare"))
   })
 
   // Round 2 (R2-S8): a join for auth.users reported SUBSCRIBED and nothing ever came, because every

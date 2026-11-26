@@ -1,20 +1,25 @@
 import type { Command } from "commander"
 import { loadConfig } from "../config.js"
+import { pickApiUrl, trimApiUrl } from "../api-url.js"
 import { envAccessToken, loadCloudCredentials } from "../cloud-credentials.js"
 import { readEnvFile } from "../env-file.js"
 import {
+  assertLinkCompatible,
   createCloudLink,
   createSelfHostLink,
+  describeLink,
+  LinkConflictError,
   loadProjectLink,
   resolveEnvironmentName,
   saveProjectLink,
+  unlinkProject,
   type ProjectLink,
 } from "../link.js"
 import { ensureSupatypeGitignore, warnIfLinkNotGitignored } from "../gitignore.js"
 import { targetFetch } from "../target-client.js"
 import { localLinkLabel } from "../local-gateway.js"
 import { resolveProjectApiUrl } from "../resolve-api-url.js"
-import { isArrayOf, isShape, isString } from "@supatype/shared"
+import { isArrayOf, isShape, isString, optional } from "@supatype/shared"
 import { error, info, plain, warn } from "../ui/messages.js"
 import { projectConfigIfAny } from "../local-stack-guard.js"
 import { configEnvironment } from "../resolve-target.js"
@@ -57,6 +62,20 @@ function nonBlank(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined
 }
 
+/**
+ * The project the self-host server at `apiUrl` serves. It answers requests addressed to that ref
+ * only, and a second folder is not called what the server's project is, so this folder's own name
+ * is the fallback only for a server too old to say (`GET /project`).
+ */
+async function serverProjectRef(apiUrl: string, token: string, fallback: string): Promise<string> {
+  try {
+    const answer = await targetFetch(apiUrl, "/platform/v1", { method: "GET", path: "/project", token }, isShape({ ref: isString }))
+    return answer.ref === "" ? fallback : answer.ref
+  } catch {
+    return fallback
+  }
+}
+
 async function probeSelfHostLink(apiUrl: string, projectRef: string, token: string): Promise<void> {
   await targetFetch(apiUrl, "/platform/v1", {
     method: "GET",
@@ -72,6 +91,22 @@ const CREATABLE_CLOUD_ENVIRONMENTS = ["staging", "preview"] as const
 function configDefaultEnvironment(cwd: string): string | undefined {
   const config = projectConfigIfAny(cwd)
   return config === undefined ? undefined : configEnvironment(cwd, config)
+}
+
+/** Removes the folder's link, so another project or host can be linked, and says what it removed. */
+export function registerUnlink(program: Command): void {
+  program
+    .command("unlink")
+    .description("Remove this folder's link (.supatype/link.json and any legacy cloud.json or linked.json)")
+    .action(() => {
+      const { link, removed } = unlinkProject(process.cwd())
+      if (removed.length === 0) {
+        info("Not linked: there is no link to remove.")
+        return
+      }
+      const was = link === null ? "the link" : `the link to the ${describeLink(link)}`
+      info(`Removed ${was}: ${removed.join(", ")}`)
+    })
 }
 
 export function registerEnvs(program: Command): void {
@@ -190,21 +225,34 @@ export function registerLinkOptions(linkCmd: Command): void {
   linkCmd
     .option("--project <slug>", "Cloud project slug")
     .option("--url <url>", "Self-host or local Kong URL")
-    .option("--api-url <url>", "Cloud control plane API URL", "https://api.supatype.com")
+    .option("--api-url <url>", "Cloud control plane API URL (default: SUPATYPE_API_URL, then the one you logged in to)")
     .option("--token <token>", "Access token (cloud PAT or self-host SERVICE_ROLE_KEY)")
     .option("--service-role-key <key>", "Deprecated alias for --token on self-host")
     .option("--env <name>", "Environment name (default: production)", "production")
     .option("--fix-gitignore", "Add .env, .supatype/ and Supatype's other local files to .gitignore where missing")
+    .option("--force", "Replace the folder's link when it is to another project or host (a folder holds one link)")
+}
+
+/** Runs a link step, turning a LinkConflictError into the refusal message and exit code 1. */
+function refuseOnConflict<T>(step: () => T): T {
+  try {
+    return step()
+  } catch (err) {
+    if (!(err instanceof LinkConflictError)) throw err
+    error(err.message)
+    process.exit(1)
+  }
 }
 
 export async function runLinkAction(opts: {
   project?: string
   url?: string
-  apiUrl: string
+  apiUrl?: string
   token?: string
   serviceRoleKey?: string
   env?: string
   fixGitignore?: boolean
+  force?: boolean
 }): Promise<void> {
   const cwd = process.cwd()
   const config = loadConfig(cwd)
@@ -220,7 +268,7 @@ export async function runLinkAction(opts: {
         await p.select<"cloud" | "self-host">({
           message: "Link target",
           options: [
-            { value: "cloud", label: "Supatype Cloud", hint: "managed project on supatype.com" },
+            { value: "cloud", label: "Supatype Cloud", hint: "managed, closed beta: request access at supatype.com" },
             { value: "self-host", label: "Self-host", hint: "your Kong gateway URL" },
           ],
         }),
@@ -259,14 +307,17 @@ export async function runLinkAction(opts: {
       error("Authentication required: the stack's service-role key. Pass --token $SERVICE_ROLE_KEY, or set SERVICE_ROLE_KEY in .env")
       process.exit(1)
     }
-    const apiUrl = url.replace(/\/$/, "")
-    await probeSelfHostLink(apiUrl, projectRef, token)
+    const apiUrl = trimApiUrl(url)
+    const serverRef = await serverProjectRef(apiUrl, token, projectRef)
+    refuseOnConflict(() => assertLinkCompatible(existing, { kind: "self-host", projectRef: serverRef }, opts.force))
+    await probeSelfHostLink(apiUrl, serverRef, token)
     const link = createSelfHostLink({
-      projectRef,
+      projectRef: serverRef,
       apiUrl,
       token,
       envName,
       existing,
+      ...(opts.force !== undefined && { force: opts.force }),
     })
     saveProjectLink(cwd, link)
     info(`Linked to self-host environment "${envName}" at ${apiUrl}`)
@@ -283,18 +334,22 @@ export async function runLinkAction(opts: {
     process.exit(1)
   }
 
-  const cloudApiUrl = opts.apiUrl.replace(/\/$/, "")
   const creds = loadCloudCredentials()
-  const refreshToken =
-    (creds?.apiUrl.replace(/\/$/, "") === cloudApiUrl ? creds.refreshToken : undefined) ??
-    existing?.refreshToken
+  const cloudApiUrl = pickApiUrl(opts.apiUrl, process.env["SUPATYPE_API_URL"], creds?.apiUrl)
 
   if (project) {
+    const slug = project
+    refuseOnConflict(() => assertLinkCompatible(existing, { kind: "cloud", projectRef: slug }, opts.force))
+    // A forced link starts fresh, so it keeps nothing of the link it replaces, the refresh token included.
+    const kept = opts.force === true ? null : existing
+    const refreshToken =
+      (creds !== null && trimApiUrl(creds.apiUrl) === cloudApiUrl ? creds.refreshToken : undefined) ??
+      kept?.refreshToken
     const one = await targetFetch(
       cloudApiUrl,
       "/api/v1",
       { method: "GET", path: `/projects/${project}`, token },
-      isShape({ slug: isString, orgId: isString }),
+      isShape({ slug: isString, orgId: isString, ref: optional(isString) }),
     )
     let environments: Array<{ name: string; apiUrl: string }> = [
       { name: "production", apiUrl: cloudApiUrl },
@@ -319,11 +374,13 @@ export async function runLinkAction(opts: {
     }
     const link = createCloudLink({
       projectRef: project,
+      ...(one.ref !== undefined ? { ref: one.ref } : {}),
       cloudApiUrl,
       token,
       orgId: one.orgId,
       environments,
       existing,
+      ...(opts.force !== undefined && { force: opts.force }),
       ...(refreshToken !== undefined ? { refreshToken } : {}),
     })
     saveProjectLink(cwd, link)

@@ -76,11 +76,27 @@ describe.each([
     },
   )
 
+  it.each(["Hooks", "Attack Protection"])("lists %s as a built page, not coming soon", (label) => {
+    const html = panel("/authentication/users", platform)
+    const tag = entryTag(html, label)
+    expect(tag).toMatch(/^<button/)
+    expect(tag).not.toContain("aria-disabled")
+    expect(html).not.toContain("not built yet")
+  })
+
   it("lists SSO as a page of its own now that it is built", () => {
     const html = panel("/authentication/users", platform)
     const tag = entryTag(html, "SSO")
     expect(tag).toMatch(/^<button/)
     expect(tag).not.toContain("aria-disabled")
     expect(html).not.toContain("SSO is coming soon")
+  })
+
+  it("lists the database function browser as built, since its page is", () => {
+    const html = panel("/database/overview", platform)
+    const tag = entryTag(html, "Functions")
+    expect(tag).toMatch(/^<button/)
+    expect(tag).not.toContain("aria-disabled")
+    expect(html).not.toContain("Database function browser is not built yet")
   })
 })

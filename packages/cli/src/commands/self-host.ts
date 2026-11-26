@@ -18,6 +18,7 @@ import { requireUrlSafeComposePasswords } from "../url-safe-passwords.js"
 import {
   composeProjectVolumes,
   exitComposeFailed,
+  namesComposeDatabase,
   noteUnpinnedImages,
   runDockerCompose,
   runDockerComposeQuietly,
@@ -27,6 +28,8 @@ import {
 import { composeRenderOptions } from "../compose-render-mode.js"
 import { enterLocalStack, localStackComposeProject } from "../dev-session-lock.js"
 import { recordStackFolder } from "../stack-folder.js"
+import { dbContainerNetworks, functionsNetworkNote, restartRefusal } from "../stack-running.js"
+import { readEnvValue } from "../env-file.js"
 import { composeStackWatch, ESSENTIAL_SERVICES, printExitedService, watchForFailure } from "../stack-exit-watch.js"
 import { warnBucketsLeft } from "../storage-provision.js"
 import { syncConfigMailerEnv } from "../config-mailer-env.js"
@@ -35,7 +38,7 @@ import { isPortInUse, portCheckCommand } from "../postgres-ctl.js"
 import { retireCliMailerAutoconfirm } from "../mailer-autoconfirm.js"
 import { fatalError } from "../ui/fatal.js"
 import { warnIfHandWrittenUrlSilent } from "../database-url-owner.js"
-import { warnMissingStackSettings } from "../stack-setting-warnings.js"
+import { warnMissingStackSettings, warnSpaIndexMissing } from "../stack-setting-warnings.js"
 import { file, error, info, plain, warn } from "../ui/messages.js"
 import { confirm } from "../ui/confirm.js"
 import { isInteractive } from "../ui/interactive.js"
@@ -92,6 +95,7 @@ export function registerSelfHost(program: Command): void {
       syncConfigMailerEnv(cwd, config)
       // Before the spinner, so the warnings are not drawn over.
       warnMissingStackSettings(cwd, config)
+      warnSpaIndexMissing(cwd, config)
       noteUnpinnedImages(cwd)
       const renderOptions = composeRenderOptions(cwd, config.project.name)
       // DATABASE_URL in .env is not moved to this stack's port. That line is dev's, and moving it
@@ -134,12 +138,16 @@ export function registerSelfHost(program: Command): void {
     .command("restart <service>")
     .description("Recreate one service with the current config and .env, leaving the others running")
     .action(async (service: string) => {
+      const cwd = process.cwd()
+      const refusal = restartRefusal(service, enterLocalStack(cwd, loadConfig(cwd, { local: false }).project.name))
+      if (refusal !== null) fatalError(refusal)
       const status = renderAndRunCompose(["up", "-d", "--force-recreate", "--no-deps", service])
       if (status !== 0) {
         exitComposeFailed(status, `Could not restart ${service}.`, SELF_HOST_BRAND)
       }
       const project = localStackComposeProject(process.cwd(), loadConfig(process.cwd(), { local: false }).project.name)
       await refuseFailingServices(project, new Set([service]), RESTART_WATCH_MS)
+      warnFunctionsNetwork(cwd, project, service)
     })
 
   composeCmd
@@ -164,6 +172,13 @@ export function registerSelfHost(program: Command): void {
 }
 
 const SELF_HOST_BRAND = { intro: "Self-host deployment" }
+
+/** After restarting the worker: whether db can be reached on the functions network yet (stack-running.ts). */
+function warnFunctionsNetwork(cwd: string, project: string, service: string): void {
+  const wantsDb = namesComposeDatabase(readEnvValue(cwd, "SUPATYPE_FUNCTIONS_DB_URL", ""))
+  const note = functionsNetworkNote(service, project, wantsDb, wantsDb ? dbContainerNetworks(project) : null)
+  if (note !== null) warn(note)
+}
 
 /** How long `restart` watches the service it recreated. */
 const RESTART_WATCH_MS = 5000
@@ -197,7 +212,10 @@ async function provisionAfterUp(cwd: string, config: SupatypeProjectConfig, proj
     const gatewayPort = composeGatewayHostPort(config, devLocal ? "dev" : "standalone", composeKongHostPort(cwd))
     const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
     const stack = { composePath: selfHostComposePaths(cwd).composePath, project, gatewayPort }
-    warnBucketsLeft(await provisionStartedStack(cwd, config, stack, ast, devApiKeys(cwd).serviceRoleKey))
+    const keys = devApiKeys(cwd)
+    warnBucketsLeft(await provisionStartedStack(cwd, config, stack, ast, keys.serviceRoleKey))
+    const { noteRestAwaitsFirstPush } = await import("../rest-ready.js")
+    await noteRestAwaitsFirstPush(`http://localhost:${gatewayPort}`, keys.anonKey)
   } catch (err) {
     if (!(err instanceof StackNotServing)) {
       warn(`The stack is up, but its storage buckets or first admin user could not be created: ${errorMessage(err)}`)
@@ -310,6 +328,7 @@ function runCompose(args: string[], use: ComposeFileUse): number {
     requireUrlSafeComposePasswords(cwd, config)
     retireCliMailerAutoconfirm(cwd)
     syncConfigMailerEnv(cwd, config)
+    warnSpaIndexMissing(cwd, config)
   }
   const composePath =
     use === "on-disk"

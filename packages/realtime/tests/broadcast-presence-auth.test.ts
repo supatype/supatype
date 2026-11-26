@@ -5,14 +5,14 @@ import type { ServerMessage } from "../src/types.js"
 import {
   anonKey,
   connect,
-  freePort,
   isSystem,
   settle,
   subscribe as subscribeTo,
-  testEnv,
+  ANY_PORT, testEnv,
   userToken,
   type Peer,
 } from "./fixtures/socket.js"
+import { undeclaredChannels } from "./fixtures/fake-channel-db.js"
 
 /**
  * Broadcast and presence are only for a client that proved who it is and joined the channel.
@@ -43,9 +43,9 @@ describe.each([true, false])("broadcast and presence (secureChannels %s)", (secu
   }
 
   beforeAll(async () => {
-    port = await freePort()
-    server = new RealtimeServer(testEnv(port, { secureChannels }))
+    server = new RealtimeServer(testEnv(ANY_PORT, { secureChannels }), { channelDb: undeclaredChannels() })
     await server.start()
+    port = server.port
   })
 
   afterAll(async () => {
@@ -84,7 +84,7 @@ describe.each([true, false])("broadcast and presence (secureChannels %s)", (secu
   it.runIf(secureChannels)("refuses a subscribe before authenticating, naming the channel", async () => {
     const stranger = await open()
     stranger.send({ type: "subscribe", channel: CHANNEL })
-    expect(await stranger.next(isSystem("error", "authenticate before subscribing"))).toMatchObject({ channel: CHANNEL })
+    expect(await stranger.next(isSystem("error", "authenticate before subscribing"))).toMatchObject({ channel: CHANNEL, code: "refused" })
   })
 
   it("refuses a broadcast to a channel the sender has not joined", async () => {

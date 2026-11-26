@@ -22,14 +22,19 @@
  */
 import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
-import { manifestCache, type ManifestCacheEntry } from "./model-cache.js"
+import { manifestCache } from "./model-cache.js"
 import { readJsonObjectFile } from "./json-file.js"
 import { isJsonObject } from "@supatype/shared"
+import type { CacheReport } from "./engine-push-output.js"
+import { seedThroughStack, tableEntryFor } from "./api-config-stack.js"
+import { keyspaceConnected } from "./rest-cache-admin.js"
 
-/** One table's entry in the runtime allowlist. The shape the server stores. */
-interface TableCacheConfig {
-  enabled: boolean
-  allow_public: boolean
+/** The server's own default configuration (apiconfig.DefaultApiConfig), for a stack that has never written one. */
+function defaultApiConfig(): Record<string, unknown> {
+  return {
+    rest: { schema: "public", max_rows: 1000, cache_max_ttl: 0, cache_tables: {} },
+    graphql: { introspection: true, max_query_depth: 10, max_rows: 1000 },
+  }
 }
 
 export interface CacheSeedResult {
@@ -41,23 +46,30 @@ export interface CacheSeedResult {
   declared: string[]
 }
 
+/** The tables the schema declares a cache for, unless it declares it off, sorted. */
+function declaredCacheTables(ast: unknown): string[] {
+  const declared = manifestCache(ast)
+  return Object.keys(declared).filter((t) => declared[t]?.enabled !== false).sort()
+}
+
 /**
  * Bring the local allowlist in line with new declarations, and report what is still in the way.
  *
- * Returns null when there is no file to seed: a cloud-only project, or a stack that has never
- * been started. A missing file is not an error here: the file is the local server's, and `dev`
- * creates it.
+ * A missing file is created from the server's default shape, because nothing else ever creates it
+ * for a user project: the server answers defaults without one and writes it only when something
+ * PATCHes. Returns null only for a file this cannot safely edit (malformed, or no `rest` section),
+ * and when nothing is declared and there is no file, so a project without a cache gets no new file.
  */
 export function seedApiConfigCache(cwd: string, ast: unknown): CacheSeedResult | null {
   const declared = manifestCache(ast)
-  const declaredTables = Object.keys(declared).filter((t) => declared[t]?.enabled !== false).sort()
+  const declaredTables = declaredCacheTables(ast)
 
   const path = join(cwd, ".supatype", "api-config.json")
-  if (!existsSync(path)) return null
+  if (!existsSync(path) && declaredTables.length === 0) return null
 
   // Malformed: the server reports this far more clearly than a push can, and rewriting it here
   // would destroy whatever the author was in the middle of.
-  const parsed = readJsonObjectFile(path)
+  const parsed = existsSync(path) ? readJsonObjectFile(path) : defaultApiConfig()
   if (parsed === undefined) return null
 
   const rest = asRecord(parsed["rest"])
@@ -67,11 +79,11 @@ export function seedApiConfigCache(cwd: string, ast: unknown): CacheSeedResult |
   const seeded: string[] = []
   for (const table of declaredTables) {
     if (table in tables) continue
-    tables[table] = seedEntry(declared[table]!)
+    tables[table] = tableEntryFor(declared[table]!)
     seeded.push(table)
   }
 
-  if (seeded.length > 0) {
+  if (seeded.length > 0 || !existsSync(path)) {
     rest["cache_tables"] = tables
     parsed["rest"] = rest
     mkdirSync(dirname(path), { recursive: true })
@@ -98,6 +110,25 @@ export function seedApiConfigCache(cwd: string, ast: unknown): CacheSeedResult |
  * mean nothing until someone ticked a box that the schema had already justified.
  */
 /**
+ * What a push says when the schema declares a cache and the server it just pushed to has no
+ * keyspace to serve it from: a declaration that looks accepted and answers BYPASS on every read.
+ * The server is asked (`/admin/v1/cache`), so this holds for Valkey and pg_keyspace alike. Nothing
+ * is said when no table declares a cache, or when the server cannot say.
+ */
+export async function cacheKeyspaceNotes(
+  cwd: string,
+  ast: unknown,
+  connected: (cwd: string) => Promise<boolean | null> = keyspaceConnected,
+): Promise<string[]> {
+  const declared = declaredCacheTables(ast)
+  if (declared.length === 0 || (await connected(cwd)) !== false) return []
+  return [
+    `No keyspace is connected to the server, so the cache declared for ${declared.join(", ")} is never served: ` +
+      "every read bypasses it. `supatype dev` starts one; on a self-hosted stack, check the `db` or `valkey` service.",
+  ]
+}
+
+/**
  * What a push or a dev boot should say about cache seeding, as lines to print.
  *
  * Returns the text rather than printing it, because the two callers write to the console
@@ -108,27 +139,44 @@ export function seedApiConfigCache(cwd: string, ast: unknown): CacheSeedResult |
  *
  * Never an error, and never a rewrite of an entry that already exists. See `seedApiConfigCache`.
  */
-export function cacheSeedingNotes(cwd: string, ast: unknown): string[] {
-  const result = seedApiConfigCache(cwd, ast)
-  if (result === null) return []
+export async function cacheSeedingNotes(cwd: string, ast: unknown): Promise<string[]> {
+  const declared = manifestCache(ast)
+  const tables = Object.keys(declared).filter((t) => declared[t]?.enabled !== false).sort()
+  if (tables.length === 0) return []
 
-  const notes: string[] = []
-  if (result.seeded.length > 0) {
-    notes.push(`Server cache enabled for ${result.seeded.join(", ")} in .supatype/api-config.json`)
+  // Through the running stack first, because that is the writer every mode shares. The file is
+  // for a stack that is not answering yet.
+  const stack = await seedThroughStack(cwd, declared, tables)
+  if (stack.kind === "unavailable") return []
+  if (stack.kind === "seeded") {
+    return seedNotes(stack.seeded, tables.length, stack.cacheMaxTtl <= 0, "through the running stack")
   }
-  if (result.ttlIsOff) {
+  const result = seedApiConfigCache(cwd, ast)
+  if (result === null) {
+    return [`Could not enable the server cache for ${tables.join(", ")}: .supatype/api-config.json could not be updated and the stack did not answer (${stack.reason}).`]
+  }
+  return seedNotes(result.seeded, tables.length, result.ttlIsOff, "in .supatype/api-config.json")
+}
+
+/** Where a TTL of 0 is set: a Cloud project has no api-config.json to edit. */
+const CLOUD_TTL_PLACE = "under API > REST > Settings in Studio."
+const SELF_HOST_TTL_PLACE = "under API > REST > Settings or in .supatype/api-config.json."
+
+/** The lines for one seeding: what was switched on, and always the TTL note while the TTL is 0. */
+function seedNotes(seeded: string[], declaredCount: number, ttlIsOff: boolean, where: string, ttlPlace = SELF_HOST_TTL_PLACE): string[] {
+  const notes: string[] = []
+  if (seeded.length > 0) {
+    notes.push(`Server cache enabled for ${seeded.join(", ")} ${where}`)
+  }
+  if (ttlIsOff) {
     // A note rather than a fix. Zero is an off switch someone may have chosen, and a push that
     // turned caching on project-wide would be overriding a decision rather than filling in a blank.
     notes.push(
-      `${result.declared.length} table(s) declare a cache, but cache_max_ttl is 0, so nothing ` +
-        `is cached until it is set, under API > REST > Settings or in .supatype/api-config.json.`,
+      `${declaredCount} table(s) declare a cache, but cache_max_ttl is 0, so nothing ` +
+        `is cached until it is set, ${ttlPlace}`,
     )
   }
   return notes
-}
-
-function seedEntry(entry: ManifestCacheEntry): TableCacheConfig {
-  return { enabled: true, allow_public: entry.public === true }
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -148,7 +196,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
  * a correct declaration, not a mistake (the tier decides what runs, not what a schema may say),
  * and a push that failed over it would be punishing someone for writing down their intent.
  */
-export function freeTierCacheNote(report: { tables?: string[]; honoured?: boolean } | undefined): string | null {
+export function freeTierCacheNote(report: CacheReport | undefined): string | null {
   // Absent, rather than `honoured: false`, is a control plane too old to answer. Silence is the
   // only honest response to a question that was never asked.
   if (!report || report.honoured !== false) return null
@@ -159,6 +207,23 @@ export function freeTierCacheNote(report: { tables?: string[]; honoured?: boolea
     `${listed(tables)} declare a cache in your schema. On the free tier these are served from ` +
     `PostgREST on every request; the declaration is stored and takes effect on a paid plan.`
   )
+}
+
+/**
+ * The lines a Cloud push prints about the cache: the tables the server confirmed as switched on,
+ * in the words a self-host push uses, then the free-tier note when the tier does not honour it.
+ * A control plane that predates `enabled` sends none, so it prints the free-tier note alone. While the
+ * project-wide TTL it reports (`cacheMaxTtl`) is 0 it says nothing is cached, as a self-host push does,
+ * and never sets it.
+ */
+export function cloudCacheNotes(report: CacheReport | undefined): string[] {
+  const enabled = (report?.enabled ?? []).filter((t) => t.length > 0)
+  const declared = report?.tables?.length ?? 0
+  // Absent is a control plane that does not say, and silence is the honest answer to that.
+  const ttlIsOff = declared > 0 && report?.cacheMaxTtl !== undefined && report.cacheMaxTtl <= 0
+  const notes = seedNotes(enabled, declared, ttlIsOff, "on Supatype Cloud", CLOUD_TTL_PLACE)
+  const freeTier = freeTierCacheNote(report)
+  return freeTier === null ? notes : [...notes, freeTier]
 }
 
 /** "posts", "posts and profiles", "posts, profiles and tags". */

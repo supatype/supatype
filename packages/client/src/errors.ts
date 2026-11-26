@@ -195,6 +195,60 @@ export class RealtimeError extends SupatypeCodedError {
 }
 nameErrors(RealtimeError, "RealtimeError")
 
+/** Why a channel's join was refused, or its access taken away. */
+export type RealtimeChannelErrorReason =
+  /** The server does not announce private channel support, so a `private: true` join was never sent. */
+  | "unsupported_server"
+  /** A declaration matched the channel and its `join` rule denied this user. */
+  | "join_denied"
+  /** The join said `private: true` and no `Channel` declaration matches the name. */
+  | "not_declared"
+  /** A declaration matches, but the name's parameters do not fit it (`lot:abc` for `lot:{id}`). */
+  | "does_not_fit"
+  /** The server could not reach the database to check. Retrying may succeed. */
+  | "unavailable"
+  /** The server is a shared instance, where private channels are not available. */
+  | "shared_instance"
+  /** A channel the socket held was taken away: the token changed, a re-check ran, or a declaration went. */
+  | "withdrawn"
+  /** The server refused for a reason this client has no name for; `message` has it. */
+  | "refused"
+
+/**
+ * A channel the realtime server refused, or took back. Handed to a channel's status callback as the
+ * second argument with `CHANNEL_ERROR`: `subscribe((status, err) => ...)`.
+ *
+ * `reason` says which, so an app can tell a user who may not join from a typo in a channel name,
+ * and a withdrawal from either. `retryable` is true only for `unavailable`: every other reason
+ * is the server's answer and asking again gets the same one.
+ */
+export class RealtimeChannelError extends RealtimeError {
+  readonly channel: string
+  readonly reason: RealtimeChannelErrorReason
+
+  constructor(message: string, channel: string, reason: RealtimeChannelErrorReason) {
+    super(message, RealtimeErrorCodes.CHANNEL_ERROR)
+    this.channel = channel
+    this.reason = reason
+  }
+
+  /** Whether asking again can succeed: only when the server could not check. */
+  get retryable(): boolean {
+    return this.reason === "unavailable"
+  }
+}
+nameErrors(RealtimeChannelError, "RealtimeChannelError")
+
+/**
+ * Whether `value` is a `RealtimeChannelError`.
+ *
+ * By name rather than `instanceof`, so it holds across two copies of this package in one bundle,
+ * which a framework binding and an app can easily have.
+ */
+export function isRealtimeChannelError(value: unknown): value is RealtimeChannelError {
+  return value instanceof Error && value.name === "RealtimeChannelError" && "reason" in value && "channel" in value
+}
+
 /**
  * Network errors (connection failures, timeouts, DNS).
  */

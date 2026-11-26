@@ -76,6 +76,17 @@ POST /api/v1/projects/{slug}/environments/{name}/reset-db-password
 
 It answers `404` for an environment that does not exist.
 
+## Auth settings
+
+Auth settings belong to one environment. Changing them on staging leaves production alone.
+
+After a push or an edit in Studio, Studio may show **Written, not yet applied**. The settings are
+saved to the project's auth configuration, but the running auth server has not loaded them yet.
+Supatype Cloud asks the cluster to refresh the server's configuration right away, so the usual wait
+is a few seconds. It can take longer while the project's pods restart, and a changed rate limit
+restarts the auth server's pods, which takes a little longer. Studio shows **applied** once the
+server reports the new version.
+
 ## Isolation
 
 Auth users, schemas, and secrets are **not** shared with production. Owners and admins delete

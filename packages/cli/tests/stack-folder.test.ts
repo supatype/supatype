@@ -29,6 +29,7 @@ function answer(stdout: string): DockerAnswer {
 vi.mock("../src/docker-exec.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/docker-exec.js")>()),
   askDockerSync: (args: readonly string[]) => fakeDocker(args),
+  askDockerState: (args: readonly string[]) => fakeDocker(args),
 }))
 
 const { forgetStackFolders, otherFoldersStack, recordStackFolder } = await import("../src/stack-folder.js")

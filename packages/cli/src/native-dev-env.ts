@@ -12,7 +12,7 @@ import { readEnvFile, upsertEnvFile } from "./env-file.js"
 import { fieldMaskingTierFromProject } from "./field-masking-tier.js"
 import { splitPassword } from "./host-database.js"
 import { configEmailEnabled, configMailerAutoconfirm, EMAIL_ENABLED_ENV, MAILER_AUTOCONFIRM_ENV } from "./mailer-autoconfirm.js"
-import { mailerProviderEnv, mailerUrlPathsEnv, withoutBlankMailerOverrides } from "./mailer-env.js"
+import { mailerProviderEnv, mailerUrlPathsEnv, withoutBlankMailerOverrides, type MailerEnvironment } from "./mailer-env.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
 import { nativeRolesSql } from "./native-roles-sql.js"
 import { nativeGraphqlServerEnv, nativeMaskLibraryPresent } from "./postgres-ctl.js"
@@ -21,6 +21,9 @@ import { devServiceRoleKeyPath, writeServiceRoleKeyFileUntilExit } from "./servi
 import { KEYSPACE_PASSWORD_ENV } from "./local-secrets.js"
 import { KEYSPACE_PASSWORD_FILE_ENV } from "./keyspace-password-file.js"
 import type { RespCredentials, ValkeySidecarResult } from "./valkey-sidecar.js"
+
+/** The user a Valkey has before ACLs are configured, and the one `requirepass` gives a password to. */
+const DEFAULT_VALKEY_USERNAME = "default"
 
 /** Where native dev's REST cache is: the server's RESP address, and its login when it needs one. */
 export interface NativeCache {
@@ -35,13 +38,15 @@ export interface NativeCache {
  * Valkey sidecar, which has no password, the password is blanked, since one .env holds for a
  * Docker phase of the project would have the server's AUTH refused. The server reads only the
  * SUPATYPE_KEYSPACE_* spellings, so nothing else needs blanking. A Valkey that
- * SUPATYPE_VALKEY_ADDR names is the developer's, and so is whether .env gives it a password.
+ * SUPATYPE_VALKEY_ADDR names is the developer's: its password is SUPATYPE_VALKEY_PASSWORD, handed
+ * to the server as the keyspace password, and blank without one, since the password `init` wrote
+ * to .env belongs to the project's own keyspace and the named Valkey answers it WRONGPASS (FF-33).
  *
  * SUPATYPE_KEYSPACE_PASSWORD_FILE is blanked in both cases (R2-S16): with the keyspace, native dev
  * read the password from that file already, and the server refuses to start given both; beside the
  * sidecar, it would send a password the sidecar does not have.
  */
-export function nativeKeyspaceServerEnv(cache: NativeCache): Record<string, string> {
+export function nativeKeyspaceServerEnv(cache: NativeCache, env: Record<string, string | undefined> = {}): Record<string, string> {
   if (cache.login !== null) {
     return {
       SUPATYPE_KEYSPACE_USERNAME: cache.login.username,
@@ -49,7 +54,28 @@ export function nativeKeyspaceServerEnv(cache: NativeCache): Record<string, stri
       [KEYSPACE_PASSWORD_FILE_ENV]: "",
     }
   }
-  return cache.sidecar.started ? { [KEYSPACE_PASSWORD_ENV]: "", [KEYSPACE_PASSWORD_FILE_ENV]: "" } : {}
+  if (cache.sidecar.started) return { [KEYSPACE_PASSWORD_ENV]: "", [KEYSPACE_PASSWORD_FILE_ENV]: "" }
+  return cache.sidecar.addr === "" ? {} : namedValkeyLogin(env)
+}
+
+/**
+ * The login for a Valkey SUPATYPE_VALKEY_ADDR names: the developer's own, so SUPATYPE_VALKEY_PASSWORD
+ * (and SUPATYPE_VALKEY_USERNAME) from the shell or .env, never the keyspace's. init writes a keyspace
+ * password into every .env, and handing it on made a Valkey with no password refuse the server with
+ * WRONGPASS (owner, 2026-11-15).
+ *
+ * A password with no user is the `default` user's: a Valkey started with `requirepass` has no other.
+ * Left blank the server logs in as `supatype`, its own keyspace user, which that Valkey does not
+ * know, and answers WRONGPASS all the same (Y19, 2026-11-23 run).
+ */
+function namedValkeyLogin(env: Record<string, string | undefined>): Record<string, string> {
+  const password = env["SUPATYPE_VALKEY_PASSWORD"]?.trim() ?? ""
+  const username = env["SUPATYPE_VALKEY_USERNAME"]?.trim() || DEFAULT_VALKEY_USERNAME
+  return {
+    ...(password !== "" && { SUPATYPE_KEYSPACE_USERNAME: username }),
+    [KEYSPACE_PASSWORD_ENV]: password,
+    [KEYSPACE_PASSWORD_FILE_ENV]: "",
+  }
 }
 
 /** Inputs to the outer layer of supatype-server's environment on the native path. */
@@ -74,6 +100,34 @@ export interface NativeServerCoreInput {
  */
 export const DENO_ENV = { NO_COLOR: "1" } as const
 
+/** What the server, and the Deno it starts, need from this CLI's environment by exact name. */
+const SERVER_INHERITED_NAMES = new Set([
+  "PATH", "PATHEXT", "HOME", "USER", "USERNAME", "LOGNAME", "TMPDIR", "TEMP", "TMP", "TZ", "LANG",
+  "LC_ALL", "LC_CTYPE", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "NO_COLOR",
+  // Windows: the profile and cache directories, and what its networking and process APIs read.
+  "USERPROFILE", "APPDATA", "LOCALAPPDATA", "SYSTEMROOT", "WINDIR", "SYSTEMDRIVE", "COMSPEC",
+  "PROGRAMDATA", "HOMEDRIVE", "HOMEPATH",
+  // Outbound HTTP (OAuth, SMTP over TLS, npm: imports) through a proxy or a private CA.
+  "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "NPM_CONFIG_REGISTRY", "SSL_CERT_FILE", "SSL_CERT_DIR",
+])
+
+/**
+ * By prefix: the server's own settings (a SUPATYPE_* set in the shell still applies), Deno's, and the
+ * AWS SDK's default chain, which signs SES mail when the mailer is SES.
+ */
+const SERVER_INHERITED_PREFIXES = ["SUPATYPE_", "DENO_", "AWS_"]
+
+/**
+ * Whether native supatype-server starts with `name` from this CLI's environment (e2e 2026-11-21,
+ * RB-2). It used to get the whole shell, and passed it on to the Deno worker, so a token in the
+ * developer's shell was a `Deno.env.get` away for any function. What the server is told explicitly
+ * is unaffected. Case-insensitive, as Windows names `PATH` `Path`.
+ */
+export function nativeServerInheritsEnv(name: string): boolean {
+  const upper = name.toUpperCase()
+  return SERVER_INHERITED_NAMES.has(upper) || SERVER_INHERITED_PREFIXES.some((prefix) => upper.startsWith(prefix))
+}
+
 /**
  * supatype-server's outer layer: mode, cache, manifest paths, PostgREST and GraphQL, and the
  * database as this machine reaches it, without its password, for Studio's connection strings. The
@@ -91,6 +145,8 @@ export function nativeServerCoreEnv(input: NativeServerCoreInput): Record<string
     SUPATYPE_DB_PUBLIC_URL: splitPassword(input.databaseUrl).dsn,
     // A clear 501 on /graphql/v1 rather than "function not found" from PostgREST.
     ...nativeGraphqlServerEnv(input.pgBinDir),
+    // Natively the server runs in a terminal; this prints each function's console.log there.
+    SUPATYPE_FUNCTIONS_LOG_TO_STDOUT: "true",
   }
 }
 
@@ -137,11 +193,15 @@ function nativeSendEmailHookEnv(email: SupatypeProjectConfig["email"], serverPor
  * and the auth routes sit under `/auth/v1`. The verify paths are what make emailed links land
  * there: without them the server's default `/verify` resolved to the origin's root, a 404.
  */
-export function nativeAuthMailerEnv(email: SupatypeProjectConfig["email"], serverPort: string): Record<string, string> {
+export function nativeAuthMailerEnv(
+  email: SupatypeProjectConfig["email"],
+  serverPort: string,
+  environment?: MailerEnvironment,
+): Record<string, string> {
   return {
     SUPATYPE_API_EXTERNAL_URL: `http://localhost:${serverPort}/auth/v1`,
     ...mailerUrlPathsEnv(),
-    ...mailerProviderEnv(email),
+    ...mailerProviderEnv(email, environment),
     ...nativeSendEmailHookEnv(email, serverPort),
   }
 }
@@ -153,18 +213,24 @@ export interface NativeDotEnvLayerInput {
   config: SupatypeProjectConfig
   /** The Deno port dev checked was free. */
   denoPort: number
+  /** The shell and `.env`, for an `env("NAME")` mailer secret. Defaults to `dotEnv`. */
+  environment?: MailerEnvironment
 }
 
 /** The last layer of supatype-server's environment on the native path: `.env` and what follows it. */
-export function nativeServerDotEnvLayer({ dotEnv, config, denoPort }: NativeDotEnvLayerInput): Record<string, string> {
+export function nativeServerDotEnvLayer({ dotEnv, config, denoPort, environment }: NativeDotEnvLayerInput): Record<string, string> {
   return {
     // A blank mailer value init scaffolded into .env does not erase the config's.
-    ...withoutBlankMailerOverrides(dotEnv, mailerProviderEnv(config.email)),
+    ...withoutBlankMailerOverrides(dotEnv, mailerProviderEnv(config.email, environment ?? dotEnv)),
     // auth.email.enableConfirmations and auth.email.enabled unless .env or .env.local sets them,
     // blank counting as unset as `${NAME:-...}` does in the compose file, so native and docker dev
     // agree. A dev stack confirms sign-ups at once when the config does not say.
     [MAILER_AUTOCONFIRM_ENV]: dotEnv[MAILER_AUTOCONFIRM_ENV]?.trim() || configMailerAutoconfirm(config, "dev"),
     [EMAIL_ENABLED_ENV]: dotEnv[EMAIL_ENABLED_ENV]?.trim() || configEmailEnabled(config),
+    // `ctx.dbUrl`, as the compose file gives the worker image: SUPATYPE_FUNCTIONS_DB_URL or nothing.
+    // Deno inherits the server's environment, and a worker with no SUPATYPE_DB_URL falls back to
+    // DATABASE_URL, which here is the auth service's admin URL.
+    SUPATYPE_DB_URL: dotEnv["SUPATYPE_FUNCTIONS_DB_URL"]?.trim() ?? "",
     // Last, so the port dev checked is the port Deno gets: a value in .env or .env.local, blank
     // included, would otherwise replace it.
     [DENO_PORT_ENV]: String(denoPort),

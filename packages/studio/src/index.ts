@@ -4,6 +4,7 @@
 
 // Core component
 export { StudioCore } from "./StudioCore.js"
+export type { SizeFigure, SizeReadout, SizeSource } from "./lib/size-source.js"
 
 // Types
 export type {
@@ -19,7 +20,20 @@ export type {
   FieldConfig,
   WidgetType,
   SupatypeClient,
+  ProjectConnection,
 } from "./types.js"
+
+// The Static site group's host interface: what a host gives StudioCore as `staticSite`.
+export type {
+  StaticSiteHost,
+  StaticSiteOverview,
+  StaticSiteSettings,
+  StaticSiteMode,
+  StaticSiteSettingKey,
+  SiteHeader,
+  LiveSite,
+  HostRead,
+} from "./lib/static-site-host.js"
 
 export type {
   BlockTypeConfig,
@@ -64,7 +78,7 @@ export { SupatypeIcon, SupatypeWordmark } from "./components/SupatypeLogo.js"
 //
 // Removing them drops CardHeader/CardTitle/CardDescription/CardContent, which have no equivalent
 // here and no caller anywhere.
-export { Badge, Button, Card, Input } from "./components/ui.js"
+export { Badge, Button, Card, Input, Table, TableCard, Td, Th, tableRowClass } from "./components/ui.js"
 
 // Widgets
 export { FieldWidget } from "./widgets/FieldWidget.js"

@@ -25,7 +25,7 @@ Install the CLI, scaffold a project, and run the full stack on your machine. Sup
 $ npm install -g @supatype/cli
 ```
 
-The CLI needs Node.js 18 or later. Vite 8, which `supatype init` sets up for a Vite app, needs Node.js 20.19 or later. For a machine without Node, the [CLI](/docs/cli.html#usage) page has a standalone binary. The first run downloads the binaries it needs into `~/.supatype/cache/`.
+The CLI needs Node.js 18 or later. Vite 8, which `supatype init` sets up for a Vite app, needs Node.js 20.19 or later, or 22.12 or later on Node 22. For a machine without Node, the [CLI](/docs/cli.html#usage) page has a standalone binary. The first run downloads the binaries it needs into `~/.supatype/cache/`.
 
 On Linux and macOS you can also use the install script or Homebrew. On Windows, use npm.
 
@@ -146,7 +146,7 @@ Run the whole platform on a server you own with Docker Compose. The project layo
 
 ### 1. Prepare the server
 
-Ubuntu 22.04 or similar, Docker with Compose v2, Node.js (18 or later for the CLI, 20.19 or later to build a Vite 8 app), and the CLI:
+Ubuntu 22.04 or similar, Docker with Compose v2, Node.js (18 or later for the CLI, 20.19 or later, or 22.12 or later on Node 22, to build a Vite 8 app), and the CLI:
 
 ```sh
 $ npm install -g @supatype/cli
@@ -190,9 +190,9 @@ Images come from Docker Hub, and each CLI release runs the exact images it was t
 
 To run on a Postgres you already have, such as RDS or Cloud SQL, set `database: { external: { url: process.env.DATABASE_URL! } }` in `supatype.config.ts`. The stack then starts no `db` service, and every service connects there. It needs Postgres 17 or later. Field-level access rules are enforced through generated views instead of the planner rewrite in `supatype/postgres`. Realtime needs `wal_level = logical`, a free replication slot, the `wal2json` plugin and a role with `REPLICATION`. `supatype db check --connection "$DATABASE_URL"` reports what a database lacks, and `--emit` prints the SQL that fixes what it can.
 
-Every function is handed two addresses. `ctx.url` is for calling the API from inside the function. Under Docker it is `http://kong:8000`, which no browser can open. `ctx.publicUrl` is the project's public address, `API_EXTERNAL_URL` in `.env`, for links you give to people.
+Every function is handed two addresses. `ctx.url` is for calling the API from inside the function. Under Docker it is `http://kong:8100`, which no browser can open. `ctx.publicUrl` is the project's public address, `API_EXTERNAL_URL` in `.env`, for links you give to people.
 
-Functions get no database connection by default. Setting `SUPATYPE_FUNCTIONS_DB_URL` in `.env` hands every function that URL as `ctx.dbUrl`: a raw Postgres connection as whichever role it names, which bypasses row rules and field masking. Point it at a least-privilege role granted only what your functions need, never the admin URL, for example `postgresql://functions_reader:<password>@db:5432/my-app`.
+Functions get no database connection by default. Setting `SUPATYPE_FUNCTIONS_DB_URL` in `.env` hands every function that URL as `ctx.dbUrl`: a raw Postgres connection as whichever role it names. Row rules and field masking apply for that role exactly as they would for a request: a superuser or a role with `BYPASSRLS` (the admin role, `service_role`) skips both, any other role is held to them. Point it at a least-privilege login role that is neither, granted only what your functions need, never the admin URL, for example `postgresql://functions_reader:<password>@db:5432/<POSTGRES_DB>`. The database is the value of `POSTGRES_DB` in your `.env` (`supatype init` sets it to the project name; the stack default is `supatype`).
 
 ### 4. Serve a static app
 
@@ -220,7 +220,7 @@ Set `API_EXTERNAL_URL` and `SITE_URL` in `.env` to `https://example.com`: values
 `supatype dev` never turns HTTPS on, so the same committed config still runs on `http://localhost`.
 
 :::note[Rather not run it yourself?]
-Supatype Cloud runs the same stack for you, and it is coming soon. [Join the waiting list](/#cloud), or [book a call](/#contact) about self-hosting with support.
+Supatype Cloud runs the same stack for you, and it is in closed beta. [Request access](/#cloud), or [book a call](/#contact) about self-hosting with support.
 :::
 
 <h2 id="deploy-changes">Deploy changes</h2>

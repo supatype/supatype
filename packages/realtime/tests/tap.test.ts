@@ -6,7 +6,8 @@ import type { JwtClaims } from "../src/auth.js"
 import type { WalChange } from "../src/types.js"
 import { isNumber, isShape } from "../src/json.js"
 import { expectJson } from "./fixtures/expect-json.js"
-import { connect, freePort, subscribe, testEnv, userToken, type Peer } from "./fixtures/socket.js"
+import { connect, subscribe, ANY_PORT, testEnv, userToken, type Peer } from "./fixtures/socket.js"
+import { undeclaredChannels } from "./fixtures/fake-channel-db.js"
 
 /**
  * The message tap: off unless an inspector is open, bounded when one is, and never on the delivery
@@ -142,10 +143,10 @@ describe("the tap on the delivery path", () => {
   let subscriber: Peer
 
   beforeAll(async () => {
-    port = await freePort()
     tap = new Tap()
-    server = new RealtimeServer(testEnv(port), { rlsFilter: new PassThroughFilter(), tap })
+    server = new RealtimeServer(testEnv(ANY_PORT), { rlsFilter: new PassThroughFilter(), tap, channelDb: undeclaredChannels() })
     await server.start()
+    port = server.port
     subscriber = await connect(port, userToken("watcher"))
     await subscribe(subscriber, "posts", { table: "posts" })
   })

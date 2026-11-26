@@ -5,6 +5,7 @@ import { loadConfig, loadSchemaAst } from "../config.js"
 import { resolveRuntimeProvider, schemaPathFromProject, type SupatypeProjectConfig } from "../project-config.js"
 import { printDiffOperations, printDiffWarnings } from "../diff-output.js"
 import { printRoleAccess } from "../diff-access.js"
+import { printChannelChanges } from "../diff-channels.js"
 import type { DiffResult } from "../engine-client.js"
 import { resolveTarget, targetSchemaDiff, schemaPgSchema, type DeployTarget } from "../resolve-target.js"
 import { loadProjectLink } from "../link.js"
@@ -19,7 +20,7 @@ interface DiffOptions {
 export function registerDiff(program: Command): void {
   program
     .command("diff")
-    .description("Show planned schema changes without applying them (dry run)")
+    .description("Show planned schema changes (operations, not SQL) without applying them; `migrate` prints the SQL")
     .option("--connection <url>", "Database connection URL (overrides config)")
     .option("--env <name>", "Target environment when linked")
     .option("--direct", "Use local engine subprocess")
@@ -39,6 +40,7 @@ export function printDiff(diff: DiffResult): void {
   printDiffWarnings(diff)
   printDiffOperations(diff)
   printRoleAccess(diff)
+  printChannelChanges(diff)
 }
 
 /**

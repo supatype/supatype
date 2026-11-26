@@ -4,13 +4,20 @@ import { join, resolve } from "node:path"
 import { readComposeEnvInt, readDotEnvFiles, shellEnvInt } from "./env-file.js"
 import { DEV_DB_PORT_ENV } from "./db-port.js"
 import type { ComponentVersions } from "./components.js"
+import type { RealtimeChannelMode } from "./schema-ast-v2.js"
 import { validateAuthProviders, type AuthProvidersConfig } from "./auth-providers.js"
 import { validateAuthSso, type AuthSsoConfig } from "./saml-config.js"
 import { validateAuthEmail } from "./mailer-autoconfirm.js"
+import { validateAuthConfigFields } from "./auth-config-validate.js"
 import { validateStudioAuth, type StudioConfig } from "./studio-auth-config.js"
 import { STUDIO_ROLES, type StudioRole } from "./studio-roles.js"
 import { isJsonObject, isString } from "@supatype/shared"
+import type { PublicEnvDeclaration } from "@supatype/types"
+import type { AuthGroupSettings } from "@supatype/types"
 import { objectAt } from "./ast-read.js"
+import { validateBuildPublicEnv } from "./build-public-env.js"
+import { validatePlatformSettings, type ServicesConfig, type StorageS3Config } from "./platform-settings.js"
+import { warn } from "./ui/messages.js"
 
 // ---------------------------------------------------------------------------
 // Config schema (single canonical shape; loaded from supatype.config.ts)
@@ -243,7 +250,7 @@ export interface SupatypeProjectConfig {
      * "console" = log to stdout (default for dev)
      * "smtp"    = SMTP (set `smtp` below and/or SUPATYPE_SMTP_* in `.env`)
      * "resend"  = Resend API (requires SUPATYPE_RESEND_API_KEY, SUPATYPE_RESEND_FROM)
-     * "ses"     = AWS SES v2 (ambient credentials, requires SUPATYPE_SES_FROM)
+     * "ses"     = AWS SES v2 (requires SUPATYPE_SES_FROM; the ambient AWS credentials, or ses_access_key_id and ses_secret_access_key, which Cloud requires)
      */
     provider: "console" | "smtp" | "resend" | "ses"
     /**
@@ -264,6 +271,12 @@ export interface SupatypeProjectConfig {
     resend_from?: string
     /** From address for SES (provider=ses, or set SUPATYPE_SES_FROM in `.env`). */
     ses_from?: string
+    /** The project's own SES access key, `env("NAME")` (or SUPATYPE_SES_ACCESS_KEY_ID in `.env`). Required on Cloud. */
+    ses_access_key_id?: string
+    /** `env("NAME")` (or SUPATYPE_SES_SECRET_ACCESS_KEY in `.env`). Required on Cloud. */
+    ses_secret_access_key?: string
+    /** The SES region, e.g. `eu-west-2` (or SUPATYPE_SES_REGION in `.env`). */
+    ses_region?: string
     /**
      * When true, `supatype dev` enables the send-email HTTP hook pointing at this
      * server's POST `/internal/v0hooks/send-email` (signed delivery, dev-only secret).
@@ -281,8 +294,15 @@ export interface SupatypeProjectConfig {
      */
     send_email_hook_secrets?: string
   }
-  /** The auth server's sign-in options. Email delivery itself is `email` above. */
-  auth?: {
+  /**
+   * The auth server's sign-in options. Email delivery itself is `email` above.
+   *
+   * `hooks`, `captcha`, `password`, `sessions`, `security`, `mfa`, `anonymous`, `phone` and
+   * `rateLimits` are the shared auth settings from `@supatype/types`, the same shape Cloud takes. On
+   * self-host they render as the `SUPATYPE_*` variables the server reads; a secret is `env("NAME")`,
+   * and a value in `.env` wins over the config. `sso` is declared below, with the self-host-only URL.
+   */
+  auth?: Omit<AuthGroupSettings, "sso"> & {
     email?: {
       /**
        * Email-and-password sign-up and sign-in. Default true. `false` turns them off at the auth
@@ -315,6 +335,18 @@ export interface SupatypeProjectConfig {
      * register that URL with the provider. A `SUPATYPE_EXTERNAL_*` value in `.env` wins over this.
      */
     providers?: AuthProvidersConfig
+    /**
+     * Where emailed links and OAuth land when no `redirectTo` is given. On self-host it is the
+     * fallback for `SITE_URL` in `.env`, which still wins; on Cloud it is pushed with `supatype push`.
+     */
+    siteUrl?: string
+    /**
+     * Which `redirectTo` values the server accepts, as globs. On self-host rendered as
+     * `SUPATYPE_URI_ALLOW_LIST`, which a value in `.env` wins over.
+     */
+    redirectUrls?: string[]
+    /** Turn new sign-ups off. On self-host a `DISABLE_SIGNUP` in `.env` wins over this. */
+    disableSignup?: boolean
     /**
      * Single sign-on with enterprise identity providers. SAML is switched on here, once for every
      * identity provider; the providers themselves are registered at runtime with `supatype sso add`:
@@ -349,6 +381,14 @@ export interface SupatypeProjectConfig {
      * `self-host compose up` stops when S3_BUCKET is blank. The Docker dev stack keeps SeaweedFS either way.
      */
     production?: "local" | "s3"
+    /**
+     * Where a Supatype Cloud project keeps its files when `production` is "s3": its own bucket,
+     * its keys as `env("NAME")`. Sent by `supatype push` and `deploy` to a Cloud target (owners and
+     * admins only), stored encrypted and write-only. Switching buckets does NOT move files already
+     * stored: new files go to the new bucket, the old ones stay where they were. Self-host reads
+     * its bucket from S3_* in .env and ignores this.
+     */
+    s3?: StorageS3Config
   }
   schema?: {
     /** Path (or glob) to the schema entry point. Defaults to "schema/index.ts". */
@@ -447,18 +487,33 @@ export interface SupatypeProjectConfig {
   build?: {
     /** Framework name. Auto-detected from package.json when omitted. */
     framework?: "nextjs" | "astro" | "vite" | "remix-spa" | "sveltekit" | "nuxt" | "static"
-    /** Path to the app directory. Defaults to cwd. */
+    /** Path to the app directory, relative to the project root. Defaults to cwd. */
     directory?: string
     /** Build command. Inferred from framework when omitted. */
     buildCommand?: string
-    /** Build output directory. Inferred from framework when omitted. */
+    /**
+     * Build output directory, relative to `directory` (not the project root): with `directory: "web"`,
+     * write `"dist"`, not `"web/dist"`. Inferred from framework when omitted.
+     */
     outputDirectory?: string
-    /** Enable SPA fallback routing. */
+    /**
+     * Serve index.html for a missing page, on Supatype Cloud and on a self-hosted stack alike. Default,
+     * the same on both: on for a plain static site, Vite and Remix SPA; off for the other frameworks.
+     */
     spa?: boolean
     /** Environment variables injected at build time. */
     env?: Record<string, string>
     /** Custom response headers for the deployed static site. */
     headers?: Record<string, string>
+    /**
+     * Public, non-secret values the site reads, set per environment: one string for every
+     * environment, or a map of environment name to string. `supatype push` sends them to the
+     * environment it targets, and the site reads them at page load from `/supatype-env.js` with
+     * `publicEnv("NAME")`. `supatype build` and `deploy` also pass each under every framework's
+     * prefix (`VITE_`, `NEXT_PUBLIC_`, ...). Every visitor can read them: a value that looks secret
+     * is refused. A name set here shows read-only in Studio.
+     */
+    publicEnv?: PublicEnvDeclaration
   }
   /**
    * Persistent environment defaults for `resolveTarget()` when `--env` is omitted.
@@ -518,11 +573,42 @@ export interface SupatypeProjectConfig {
    * ```
    */
   studio?: StudioConfig
+  /**
+   * Realtime channel access. A `Channel<>` declared in the schema is enforced at once, whatever this
+   * says; this decides what happens to a topic no declaration matches:
+   *
+   * - `"open"` (the default when the key is absent): broadcast and presence work as they did, so an
+   *   existing project is unchanged.
+   * - `"declared"`: broadcast and presence on a topic no declaration matches are refused. Joining
+   *   one to listen for row changes still works. `supatype init` writes this for a new project.
+   *
+   * Carried to the database by push, so Cloud and self-host need nothing else. The realtime
+   * service's `REALTIME_CHANNELS=declared` can tighten it but never loosen it.
+   *
+   * `recheckSeconds` sets `REALTIME_CHANNEL_RECHECK_S`: how often every held channel is judged again.
+   * Self-host renders both as the realtime service's defaults; a push to Cloud sets them on the
+   * project's realtime pod.
+   */
+  realtime?: RealtimeConfig
+  /**
+   * Switch a service off: `services: { storage: false }` answers `/storage/v1` with 503,
+   * `graphql: false` answers `/graphql/v1` with 501. Absent leaves it on. Self-host renders
+   * `SUPATYPE_STORAGE_DISABLED` / `SUPATYPE_GRAPHQL_DISABLED` into the server; a push to Cloud sets
+   * the same switch on the project's tenant config.
+   */
+  services?: ServicesConfig
 }
 
 // ---------------------------------------------------------------------------
 // Merge + validate
 // ---------------------------------------------------------------------------
+
+/** `realtime` in the project config. */
+export interface RealtimeConfig {
+  channels?: RealtimeChannelMode
+  /** Seconds between re-checks of every held channel (`REALTIME_CHANNEL_RECHECK_S`), 1 to 86400. Default 300. */
+  recheckSeconds?: number
+}
 
 type ConfigKey = keyof SupatypeProjectConfig
 
@@ -608,6 +694,8 @@ const MERGE_RULES: { [K in ConfigKey]: MergeFn } = {
   connection: replace,
   admin: shallow,
   studio: nested("auth"),
+  realtime: shallow,
+  services: shallow,
 }
 
 /**
@@ -675,9 +763,14 @@ export function validateProjectConfig(raw: unknown, filename: string): SupatypeP
   validateAuthProviders(cfg, filename)
   validateAuthSso(cfg, filename)
   validateAuthEmail(cfg, filename)
+  validateAuthConfigFields(cfg, filename)
   validateCorsOrigins(cfg, filename)
   validateStudioAuth(cfg, filename)
   validatePublicEnv(cfg, filename)
+  validateBuildPublicEnv(cfg, filename)
+  validateRealtime(cfg, filename)
+  validatePlatformSettings(cfg, filename)
+  warnUnknownServerKeys(cfg)
 
   if (!isProjectConfig(cfg)) throw new Error(`${filename}: not a project config`)
   return cfg
@@ -690,6 +783,53 @@ export function validateProjectConfig(raw: unknown, filename: string): SupatypeP
  */
 export function publicEnvServerEnv(cfg: SupatypeProjectConfig): Record<string, string> {
   return cfg.server.public_env === false ? { SUPATYPE_PUBLIC_ENV: "false" } : {}
+}
+
+/**
+ * `realtime.channels`, when set, is one of the two modes. A typo such as `"strict"` would otherwise
+ * read as "not declared" and leave every undeclared channel open while the config looked locked.
+ */
+function validateRealtime(cfg: Readonly<Record<string, unknown>>, filename: string): void {
+  const section = cfg["realtime"]
+  if (section === undefined) return
+  if (!isJsonObject(section)) throw new Error(`${filename}: realtime must be an object, as in { channels: "declared" }`)
+  const mode = section["channels"]
+  if (mode === undefined || mode === "open" || mode === "declared") return
+  throw new Error(`${filename}: realtime.channels must be "open" or "declared", got ${JSON.stringify(mode)}`)
+}
+
+/**
+ * Every key `server` defines. Typed over the section, so a key added to it does not compile until it
+ * is listed here and stops being called unknown.
+ */
+const SERVER_KEYS: { [K in keyof SupatypeProjectConfig["server"]]-?: true } = {
+  mode: true,
+  port: true,
+  postgrestPort: true,
+  realtimePort: true,
+  public_env: true,
+  domain: true,
+  tls: true,
+}
+
+/** Warned once: a command reads the config more than once. */
+const warnedServerKeys = new Set<string>()
+
+/**
+ * A key under `server` the config does not define was dropped without a word, so a typo or another
+ * product's setting did nothing and nobody was told. Name each one; the next release refuses them.
+ */
+function warnUnknownServerKeys(cfg: Readonly<Record<string, unknown>>): void {
+  const server = objectAt(cfg, "server")
+  if (server === undefined) return
+  const unknown = Object.keys(server).filter((key) => !Object.hasOwn(SERVER_KEYS, key))
+  const named = unknown.map((key) => `server.${key}`).join(", ")
+  if (unknown.length === 0 || warnedServerKeys.has(named)) return
+  warnedServerKeys.add(named)
+  warn(
+    `${named} ${unknown.length === 1 ? "is not a setting" : "are not settings"} the config defines, so ${unknown.length === 1 ? "it does" : "they do"} nothing. ` +
+      "Check the spelling against the server section of the config reference. The next release refuses an unknown server key.",
+  )
 }
 
 /** `server.public_env`, when set, is a boolean: a string "false" would read as on. */

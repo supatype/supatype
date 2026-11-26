@@ -103,6 +103,7 @@
     </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html">CLI</a></li>
+      <li><a href="/docs/versions.html">Versions</a></li>
     </ul></div>
     <div><span class="label">MORE</span><ul>
       <li><a href="/licensing.html">Licensing</a></li>
@@ -156,7 +157,7 @@ psql &quot;$DATABASE_URL&quot; -c &quot;SELECT * FROM supacache.pg_stat_keyspace
         <tr><td>Backups</td><td>A separate artefact on a separate schedule with a separate restore.</td><td>Persisted keys are Postgres tables, so base backups and point-in-time recovery include them.</td></tr>
         <tr><td>Monitoring</td><td>A Redis exporter to deploy and wire up.</td><td>pg_stat_keyspace views, granted to pg_monitor. Existing Postgres collectors read them.</td></tr>
         <tr><td>Command and type surface</td><td>Wider. Adds streams, scripting, HyperLogLog and geo.</td><td>Strings, hashes, lists, sets, sorted sets, bitmaps, Bloom and Cuckoo filters, pub/sub and transactions.</td></tr>
-        <tr><td>Maturity</td><td>Mature and battle-tested, with a large ecosystem.</td><td>New, with a focused feature set.</td></tr>
+        <tr><td>Maturity</td><td>Mature, with a large ecosystem.</td><td>New, with a focused feature set.</td></tr>
       </tbody>
     </table></div>
     <h2 id="limits">What it does not do</h2>

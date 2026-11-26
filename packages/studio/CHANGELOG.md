@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.9.3
+
+### Features
+
+* **sql editor:** a `DELETE` or `UPDATE` with no `WHERE` now shows, under the error, that the database
+  refuses it in every session (`pg_safeupdate`) and that `WHERE true` means every row.
+
+## 0.9.1 (2026-11-09)
 
 ### Features
 
@@ -40,6 +47,11 @@
 * **auth:** the Configuration page says SAML SSO is set by `auth.sso.saml.enabled` in
   supatype.config.ts or `SUPATYPE_SAML_ENABLED` in `.env`. It said the variable could only be set in
   the auth server's environment, which was true while the compose file did not pass it.
+
+## 0.8.0 (2026-11-02)
+
+### Bug Fixes
+
 * **logs:** the API logs page says request logging is coming soon, as the other unbuilt log pages
   do. It mounted a log table with search and filters over a list that never filled, which read as a
   project nobody had called.

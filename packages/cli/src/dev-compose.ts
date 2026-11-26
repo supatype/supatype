@@ -6,6 +6,7 @@ import { setTimeout as sleep } from "node:timers/promises"
 import { projectOutputPaths, writeAstDerivedOutputs, writeSeedBuilder } from "./type-generation.js"
 import { errorMessage } from "./error-message.js"
 import { printRoleAccess } from "./diff-access.js"
+import { printChannelChanges } from "./diff-channels.js"
 import { postApplyFailed } from "./post-apply.js"
 import { FRONTEND_URL_KEYS, frontendEnv, writeFrontendEnv } from "./frontend-env.js"
 import { withPublishing } from "./model-versioning.js"
@@ -71,6 +72,7 @@ import {
   writeSelfHostCompose,
   composeFieldMaskingTier,
   selfHostComposePaths,
+  COMPOSE_UP_DETACHED,
   type SelfHostComposePaths,
 } from "./self-host-compose.js"
 import { composeServiceIsRunning } from "./compose-kong.js"
@@ -78,7 +80,7 @@ import { requireStackDatabase } from "./local-stack-guard.js"
 import type { ComposeStack } from "./compose-db-psql.js"
 import type { ProcessManager } from "./process-manager.js"
 import type { DockerBrandOptions } from "./docker-runtime.js"
-import { hasEngineOverride } from "./binary-cache.js"
+import { hasEngineOverride, pinnedVersion } from "./binary-cache.js"
 import { STUDIO_DEV_PORT, startStudioViteDevServer } from "./studio-dev-server.js"
 import {
   ensureLocalServerDockerImage,
@@ -94,7 +96,7 @@ import {
   isGenerateAnswer,
 } from "./engine-answers.js"
 import { writeSchemaSourcePushArtifacts, type SchemaSourcePushArtifacts } from "./schema-sources.js"
-import { readEnvFile, readEnvValue, upsertEnvFile } from "./env-file.js"
+import { readEnvFile, readEnvValue, upsertEnvFile, warnHandEditedValues } from "./env-file.js"
 import { warnMissingStackSettings } from "./stack-setting-warnings.js"
 import {
   devDatabaseIdentity,
@@ -123,7 +125,7 @@ import {
   adoptKeysNeed,
   assertSupported,
   engineCapabilities,
-  identityColumnsNeed,
+  schemaFeatureNeeds,
   OVERWRITE_DRIFT_NEED,
   checkedCapabilities,
   type Capabilities,
@@ -154,7 +156,7 @@ import { configMailerEnv } from "./config-mailer-env.js"
 import { retireCliMailerAutoconfirm } from "./mailer-autoconfirm.js"
 import { fetchWithin } from "./fetch-within.js"
 import { composeStackWatch, exitedServiceFailure, type StackWatch, type WatchedStack } from "./stack-exit-watch.js"
-import { assertEngineVersionSupported, engineImageVersion } from "./engine-floor.js"
+import { assertEngineSupportsSchema, assertEngineVersionSupported, engineImageVersion } from "./engine-floor.js"
 
 /**
  * The image pins config asks for, once the engine's is known not to be older than this CLI needs.
@@ -177,6 +179,7 @@ export function syncComposeImagePins(cwd: string, config: SupatypeProjectConfig)
   upsertEnvFile(cwd, imagePins, {
     removeManaged: removeImageKeys,
     managed: COMPOSE_PINNED_IMAGE_ENV_KEYS,
+    onHandEdited: warnHandEditedValues,
   })
 }
 
@@ -415,6 +418,7 @@ export function upsertDevComposeEnv(
     removeManaged: [...removeImageKeys, ...mailer.removeManaged],
     managed: [...managedImageKeys, ...mailer.managed],
     remove: [...retiredKeys, ...staleLocalServerImage(dotEnv["SUPATYPE_SERVER_IMAGE"], wantsLocalServer, imagePins)],
+    onHandEdited: warnHandEditedValues,
   })
   // The front end's copies go where a development build reads them, not .env, which a production
   // build reads (frontend-env.ts). The URL only when it is the project's port, not the shell's.
@@ -723,7 +727,7 @@ async function refreshSchemaArtifacts(
   config: SupatypeProjectConfig,
   ast: unknown,
 ): Promise<void> {
-  writeAstDerivedArtifacts(cwd, config, ast)
+  await writeAstDerivedArtifacts(cwd, config, ast)
   // The client and augmentation need no engine, so no engine problem keeps them from being written.
   writeDevAstOutputs(cwd, ast, config, "")
   let choice: EngineChoice
@@ -739,7 +743,7 @@ async function refreshSchemaArtifacts(
 }
 
 /** The files read straight off the applied AST, written whatever happens with the generator afterwards. */
-function writeAstDerivedArtifacts(cwd: string, config: SupatypeProjectConfig, ast: unknown): void {
+async function writeAstDerivedArtifacts(cwd: string, config: SupatypeProjectConfig, ast: unknown): Promise<void> {
   // Before the generator: these are read straight off the AST, so an applied push whose engine
   // cannot generate still leaves the server the right maps. The server watches this file, so a
   // hook or validator added to the schema takes effect without restarting the stack.
@@ -763,7 +767,7 @@ function writeAstDerivedArtifacts(cwd: string, config: SupatypeProjectConfig, as
   // `cache` block declared and nothing switched on: `.cache({ server: true })` answered BYPASS,
   // and the only way to find out why was to open Studio and tick a box the schema had already
   // justified.
-  for (const note of cacheSeedingNotes(cwd, ast)) console.log(`[supatype] ${note}`)
+  for (const note of await cacheSeedingNotes(cwd, ast)) console.log(`[supatype] ${note}`)
 }
 
 /**
@@ -924,9 +928,9 @@ export async function runComposeSchemaPush(
     console.log("[supatype] Schema unchanged since the last push, nothing to apply.")
     return
   }
-  // Identity and generated columns only to an engine that reads them (the override's binary is
-  // asked by `engineRequest`).
-  if (!hasEngineOverride(config)) await requireDockerFeatures(cwd, config, identityColumnsNeed(ast))
+  // Identity and generated columns, and realtime channels, only to an engine that reads them (the
+  // override's binary is asked by `engineRequest`).
+  if (!hasEngineOverride(config)) await requireDockerFeatures(cwd, config, schemaFeatureNeeds(ast))
   if (opts.access === "plan") await printPlannedAccess(cwd, config)
   try {
     if (hasEngineOverride(config)) await applyViaHostEngine(cwd, config, ast, opts)
@@ -948,7 +952,9 @@ export async function runComposeSchemaPush(
 async function printPlannedAccess(cwd: string, config: SupatypeProjectConfig): Promise<void> {
   try {
     const diff = await dockerDiff(cwd, config)
-    if (diff !== undefined) printRoleAccess(diff)
+    if (diff === undefined) return
+    printRoleAccess(diff)
+    printChannelChanges(diff)
   } catch (err) {
     console.log(`[supatype] Could not read each role's access before the push: ${errorMessage(err)}`)
   }
@@ -966,6 +972,8 @@ function readSchemaToPush(
   config: SupatypeProjectConfig,
 ): { ast: ExtractedSchemaAstV2; astJson: string } {
   const ast = withPublishing(loadSchemaAst(schemaPath, cwd), config)
+  // The check `supatype push` makes: a pinned engine too old to read part of the schema drops it silently.
+  assertEngineSupportsSchema(ast, pinnedVersion("engine", config))
   return { ast, astJson: JSON.stringify(ast) }
 }
 
@@ -1391,7 +1399,7 @@ export async function adoptSchemaDocker(
   await requireDockerFeatures(
     cwd,
     config,
-    identityColumnsNeed(withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)),
+    schemaFeatureNeeds(withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)),
   )
   const paths = writeSelfHostCompose(cwd, config, composeRenderOptions(cwd, config.project.name))
   const command = adoptCommand(yes, keys)
@@ -1448,7 +1456,7 @@ async function diffWithComposeEngine(
   project: string,
 ): Promise<DiffResult> {
   const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
-  await requireDockerFeatures(cwd, config, identityColumnsNeed(ast))
+  await requireDockerFeatures(cwd, config, schemaFeatureNeeds(ast))
 
   const supatypeDir = join(cwd, ".supatype")
   mkdirSync(supatypeDir, { recursive: true })
@@ -1608,7 +1616,7 @@ async function bringPushedStackUp(
   keys: { anonKey: string; serviceRoleKey: string },
 ): Promise<string | null> {
   const { paths, project, gatewayPort, brand } = stack
-  const upGateway = runDockerCompose(paths.composePath, ["up", "-d"], cwd, project, { quiet: true, brand })
+  const upGateway = runDockerCompose(paths.composePath, [...COMPOSE_UP_DETACHED], cwd, project, { quiet: true, brand })
   // Thrown, not exited: the schema is applied by now (bringUpAfterApply).
   if (upGateway !== 0) throw new Error(`docker compose up exited with status ${upGateway}`)
   const left = await provisionStartedStack(cwd, config, { composePath: paths.composePath, project, gatewayPort }, ast, keys.serviceRoleKey)
@@ -1807,7 +1815,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
 
   console.log("[supatype] Bringing up Docker Compose services...")
   await showDevStep("Starting services (the first start downloads their images)")
-  const upStatus = await runDockerComposeQuietly(paths.composePath, ["up", "-d"], cwd, project, devBrand)
+  const upStatus = await runDockerComposeQuietly(paths.composePath, [...COMPOSE_UP_DETACHED], cwd, project, devBrand)
   if (upStatus !== 0) {
     endDevSession()
     exitComposeFailed(upStatus, "Could not start the local Compose stack.", devBrand)
@@ -1980,7 +1988,7 @@ export async function runDevCompose(cwd: string, config: SupatypeProjectConfig, 
       },
     })
     // The worker imports its handlers once; without this an edited function kept its old code.
-    const worker = { composePath: paths.composePath, cwd, project }
+    const worker = { composePath: paths.composePath, cwd, project, baseUrl: loopbackBase(kongPort), anonKey }
     shutdownState.functionsWatcher = watchFunctionSources(cwd, () => restartComposeFunctionsWorker(worker))
   }
 

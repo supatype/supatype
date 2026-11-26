@@ -103,6 +103,7 @@
     </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html">CLI</a></li>
+      <li><a href="/docs/versions.html">Versions</a></li>
     </ul></div>
     <div><span class="label">MORE</span><ul>
       <li><a href="/licensing.html">Licensing</a></li>
@@ -157,6 +158,7 @@
     <div class="callout warn">
       <span class="callout-label">SQL EDITOR</span>
       <p>The SQL editor signs in as <code>supatype_sql_editor</code>. It is not a superuser, but it is a member of the database owner. Row level security does not apply there, and masked columns show in full. Every query is recorded.</p>
+      <p>After each statement, everything the editor created is handed to the project owner. A table, view or function you make there ends up owned by the owner, not by <code>supatype_sql_editor</code>. A <code>SECURITY DEFINER</code> function written in the editor therefore runs with the owner's rights, and the owner is not a superuser.</p>
     </div>
     <div class="callout">
       <span class="callout-label">BUCKET RULES</span>

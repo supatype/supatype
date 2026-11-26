@@ -1,4 +1,5 @@
 import { NOT_OAUTH, normaliseAuthSettings, type AuthSettings } from "../hooks/useAuthSettings.js"
+import type { CaptchaSettings } from "./captcha.js"
 import { studioGatewayHeaders } from "./studio-gateway-headers.js"
 
 /** How a provider's name is written where it is not just capitalised. */
@@ -39,10 +40,12 @@ export interface StudioSignInMethods {
   password: boolean
   /** SAML single sign-on, found by the work email's domain. */
   sso: boolean
+  /** The captcha the server checks on password and SSO sign-in, or null when it checks none. */
+  captcha: CaptchaSettings | null
 }
 
 /** What a page offers before the settings arrive, or when they cannot be read: email and password. */
-export const PASSWORD_ONLY: StudioSignInMethods = { providers: [], password: true, sso: false }
+export const PASSWORD_ONLY: StudioSignInMethods = { providers: [], password: true, sso: false, captcha: null }
 
 /**
  * 0.9.2 release test (N-FF3): an SSO-only project turns email sign-in off, and the first SSO link
@@ -54,6 +57,7 @@ export function studioSignInMethods(settings: AuthSettings, narrowedTo: readonly
     providers: studioSignInProviders(settings, narrowedTo),
     password: settings.external["email"] !== false,
     sso: settings.saml_enabled,
+    captcha: settings.captcha,
   }
 }
 

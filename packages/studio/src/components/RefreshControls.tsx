@@ -19,7 +19,7 @@ export function RefreshControls({ freshness, busy = false }: { freshness: ListFr
       </Button>
       <Select
         aria-label="Auto-refresh"
-        className="w-[96px] py-1 text-xs"
+        className="py-1 text-xs"
         value={autoRefreshMs === null ? OFF : String(autoRefreshMs)}
         onChange={(e) => { setAutoRefreshMs(e.target.value === OFF ? null : Number(e.target.value)) }}
       >

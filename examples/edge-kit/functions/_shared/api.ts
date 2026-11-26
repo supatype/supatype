@@ -16,7 +16,7 @@ export function apiBaseUrl(): string {
   try {
     const url = new URL(raw)
     if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
-      return "http://kong:8000"
+      return "http://kong:8100"
     }
   } catch {
     // fall through

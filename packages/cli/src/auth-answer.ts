@@ -1,5 +1,5 @@
 /**
- * What the control plane's `/auth/login` and `/auth/refresh` answer: the session's tokens on
+ * What the control plane's `/auth/refresh` answers (it renews a session an older CLI stored): the session's tokens on
  * success, `{ error, message }` on failure. Each field is read with a check, so a body that is not
  * JSON, or lacks a field, reads as that field being absent.
  */

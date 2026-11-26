@@ -64,6 +64,10 @@ export type {
   TableUpdate,
   SupatypeModels,
   SupatypeBuckets,
+  SupatypeChannels,
+  DeclaredTopic,
+  DeclaredTopics,
+  ChannelName,
   SupatypeFunctions,
   AugmentedDatabase,
   DraftUpdateOptions,
@@ -99,11 +103,13 @@ export { QueryCache, defaultQueryCache } from "./query-cache.js"
 export { StorageClient, BucketClient } from "./storage.js"
 export type { StorageObject, StorageFolder, StorageListEntry, ListOptions, RemovedObject, StorageReference, TransformOptions } from "./storage.js"
 export { RealtimeClient } from "./realtime.js"
-export type { RealtimeEvent, RealtimePayload, ChannelStatus, ChannelStatusCallback, PresenceEntry } from "./realtime.js"
+export type { RealtimeEvent, RealtimePayload, ChannelStatus, ChannelStatusCallback, ChannelOptions, ChannelSubscription, PresenceEntry, RealtimeConnectionState, RealtimeConnectionListener } from "./realtime.js"
+export type { ChannelActionRefusal, ChannelActionRefusalCode } from "./realtime-refusals.js"
 // The bindings' shared subscription helpers are on `@supatype/client/bindings`, not here.
 export type { TableSubscribeOptions, TableSubscription } from "./table-subscription.js"
 export * from "./errors.js"
 export { MissingClientValuesError, type ClientValue } from "./setup-fault.js"
+export { publicEnv } from "./public-env.js"
 
 // Called by the generated `supatype/generated/client.ts`, which is how a project tells the client which
 // columns hold values a JSON parser would destroy. Exported because generated code imports it;
@@ -567,6 +573,8 @@ class FunctionsClient {
 
 export interface SupatypeClient<TDatabase extends AnyDatabase = AugmentedDatabase> {
   url: string
+  /** The public anon key: as given, else as the page has set it; empty while neither has one. */
+  readonly anonKey: string
   /** Service role key, if provided at construction time. Used by developer tools for admin API calls. */
   serviceRoleKey: string | undefined
   from<TTable extends keyof TDatabase["public"]["Tables"] & string>(
@@ -774,6 +782,10 @@ export function createClient<TDatabase extends AnyDatabase = AugmentedDatabase>(
     /** The API address: as given, else as the page has set it; empty while neither has one. */
     get url(): string {
       return target.currentUrl()
+    },
+    /** The anon key: as given, else as the page has set it; empty while neither has one. */
+    get anonKey(): string {
+      return target.currentAnonKey()
     },
     serviceRoleKey: config.serviceRoleKey,
 

@@ -84,8 +84,8 @@ describe("shared primitives", () => {
 
   it("allow a raw anchor only as an asChild menu item's link", () => {
     expect(scanStudio().asChild).toEqual([
-      "components/TopBar.tsx:149  <a",
-      "components/TopBar.tsx:150  <a",
+      "components/TopBar.tsx:178  <a",
+      "components/TopBar.tsx:179  <a",
       "components/UserAccountMenu.tsx:145  <a",
     ])
   })

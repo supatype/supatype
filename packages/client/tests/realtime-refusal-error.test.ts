@@ -12,6 +12,7 @@ import { describe, it, expect, afterEach } from "vitest"
 import type { ChannelStatus } from "../src/realtime.js"
 import { subscriptionViewOf, watchTable, type SubscriptionView } from "../src/table-subscription.js"
 import { simulateServerMessage, subscribedChannels } from "./helpers/mock-websocket.js"
+import { fakeClient } from "./helpers/fake-client.js"
 import { createSocketSwapHarness, type SocketSwapHarness } from "./helpers/socket-swap.js"
 
 const REASON = "table public.notes does not exist: check the table name and schema"
@@ -59,7 +60,7 @@ describe("a refused join", () => {
   it("reaches the bindings' view as the error message", async () => {
     harness = createSocketSwapHarness()
     const views: SubscriptionView[] = []
-    const stop = watchTable(harness.realtime, "notes", undefined, {
+    const stop = watchTable(fakeClient(harness).client, "notes", undefined, {
       rows: () => undefined,
       status: (view) => views.push(view),
     })

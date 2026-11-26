@@ -28,14 +28,14 @@ import {
 } from "./project-config.js"
 import { hasStudioOverride, pinnedVersion, VERSION_PIN_LOCAL } from "./binary-cache.js"
 import { assertEngineVersionSupported, engineImageVersion } from "./engine-floor.js"
-import { buildKongDeclarative } from "./kong-config.js"
+import { buildKongDeclarative, WORKER_LISTEN_PORT } from "./kong-config.js"
 import { keyspaceInPostgres, keyspacePasswordRequired } from "./cache-provider.js"
 import {
   checkedKeyspacePasswordFile,
   KEYSPACE_PASSWORD_CONTAINER_PATH,
   KEYSPACE_PASSWORD_FILE_ENV,
 } from "./keyspace-password-file.js"
-import { postgresImageFor, runningPostgresImage } from "./postgres-image.js"
+import { configuredPostgresImage } from "./postgres-image.js"
 import { STUDIO_DEV_PORT } from "./studio-dev-server.js"
 import { readEnvFile, readEnvValue } from "./env-file.js"
 import { OWN_BUCKET_S3_SETTINGS } from "./local-storage.js"
@@ -43,10 +43,13 @@ import { composeDbPublish, DB_PUBLIC_HOST_ENV, SELF_HOST_BIND } from "./db-port.
 import { upKeepingKongCurrent, upKeepingKongCurrentAsync } from "./compose-kong.js"
 import { addressPoolExhaustionHint } from "./docker-address-pool.js"
 import { composeAuthProviderEnv } from "./auth-providers.js"
+import { composeAuthGroupsEnv } from "./auth-groups-env.js"
 import { composeSamlEnv, ensureSamlPrivateKey } from "./saml-config.js"
 import {
   BUNDLED_DB_USER,
   CONTROL_PLANE_SECRET_ENV,
+  FORWARDING_SECRET_ENV,
+  ensureForwardingSecret,
   ENV_FILE_OVER_SHELL,
   SQL_EDITOR_PASSWORD_ENV,
   ensureControlPlaneSecret,
@@ -65,8 +68,17 @@ import { POSTGREST_IMAGE } from "./postgrest-release.js"
 import { postgrestHookActorEnv } from "./hook-actor.js"
 import { IN_REPO_IMAGE_ENV, RELEASE_IMAGES, unpinnedImagesNote, type InRepoImage } from "./release-images.js"
 import { configEmailEnabled, configMailerAutoconfirm, EMAIL_ENABLED_ENV } from "./mailer-autoconfirm.js"
-import { MAILER_PASSTHROUGH_ENV, mailerUrlPathsEnv } from "./mailer-env.js"
+import { mailerUrlPathsEnv } from "./mailer-env.js"
+import { resolveSpaFallback } from "./app/framework.js"
+import {
+  composeAllowListLine,
+  composeDisableSignupFallback,
+  composeMailerPassthrough,
+  composeSiteUrlFallback,
+  composeSmtpPass,
+} from "./compose-auth-settings.js"
 import { studioRuntimeJson } from "./studio-auth-config.js"
+import { realtimeServiceDefaults, serviceSwitchServerEnv } from "./platform-settings.js"
 import { switchServices, type ServiceSwitches } from "./route-manifest.js"
 
 /**
@@ -77,6 +89,16 @@ import { switchServices, type ServiceSwitches } from "./route-manifest.js"
  */
 const CONTROL_PLANE_SECRET_REQUIRED =
   `${CONTROL_PLANE_SECRET_ENV}: \${${CONTROL_PLANE_SECRET_ENV}:?${CONTROL_PLANE_SECRET_ENV} is missing from .env}`
+
+/**
+ * The forwarding secret (D14 option 2b), required like the control plane secret: writeSelfHostCompose
+ * generates it first. The server believes a forwarded end-user address only on a request carrying it,
+ * Kong adds it to requests to the server, and the functions worker adds it to its calls to the stack.
+ * `name` is what the receiving service calls it: the server reads it under its own setting name.
+ */
+function forwardingSecretRequired(name: string = FORWARDING_SECRET_ENV): string {
+  return `${name}: \${${FORWARDING_SECRET_ENV}:?${FORWARDING_SECRET_ENV} is missing from .env}`
+}
 
 /**
  * The keyspace password as the db, the server and Kong receive it, when the keyspace requires one
@@ -109,8 +131,13 @@ function keyspacePasswordMount(config: SupatypeProjectConfig, passwordFile: stri
  * The server's keyspace lines. Besides the environment compose gives it, the server reads the
  * project's .env and .env.local, and refuses to start when it finds the password beside the file,
  * so with a file the password is set blank here, which no dotenv file overrides.
+ *
+ * Beside a Valkey sidecar both are set blank for the same reason: `init` still writes the password
+ * to `.env`, the server loads it, and it would send AUTH as `supatype` to a Valkey that has no
+ * password (WRONGPASS on every cache call).
  */
 function keyspaceServerEnv(config: SupatypeProjectConfig, passwordFile: string | undefined): string {
+  if (!keyspaceInPostgres(config)) return `      ${KEYSPACE_PASSWORD_ENV}: ""\n      ${KEYSPACE_PASSWORD_FILE_ENV}: ""\n`
   const lines = keyspacePasswordEnv(config, passwordFile)
   return lines !== "" && passwordFile !== undefined ? `${lines}      ${KEYSPACE_PASSWORD_ENV}: ""\n` : lines
 }
@@ -139,6 +166,15 @@ const SEAWEEDFS_IMAGE =
  * durable, and a response-cache key beside them did not.
  */
 const ACME_KEY_PREFIX = "kong_acme:"
+
+/**
+ * Anonymous sign-in from `.env`, off unless it turns it on (docs/auth/anonymous.mdx). Written only
+ * when the config does not set `auth.anonymous.enabled`: then the auth settings carry the key, with
+ * the config's value as its default, and a second line would be a duplicate key in the service.
+ */
+const ANONYMOUS_SIGN_IN_FROM_ENV =
+  "      # Anonymous sign-in, off unless .env turns it on (docs/auth/anonymous.mdx).\n" +
+  "      SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED: ${SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED:-false}\n"
 
 /**
  * The project's object store login as compose reads it from `.env` (issue 71: every stack used to
@@ -187,6 +223,13 @@ ${OPTIONAL_OWN_BUCKET_SETTINGS.map((name) => `      ${name}: "\${${name}:-}"`).j
  */
 export const DB_VOLUME_KEY = "db-data"
 
+/**
+ * Bring the whole stack up, detached. `--remove-orphans` takes away the container of a service the
+ * compose file no longer has, as the valkey one is after `cache.provider` moves to pg_keyspace: it
+ * was left running beside the stack that replaced it (S-36). Its volume is data and is kept.
+ */
+export const COMPOSE_UP_DETACHED: readonly string[] = ["up", "-d", "--remove-orphans"]
+
 type DockerPinComponent = "engine" | "server"
 
 /**
@@ -210,7 +253,7 @@ export function dockerImageRef(component: DockerPinComponent, version: string): 
  */
 export function composeDockerImageEnv(config: SupatypeProjectConfig): Record<string, string> {
   const env: Record<string, string> = {}
-  const postgres = postgresImageFor(config).ref
+  const postgres = configuredPostgresImage(config).ref
   if (postgres) env.SUPATYPE_POSTGRES_IMAGE = postgres
   const versions = config.versions
   if (!versions) return env
@@ -372,8 +415,18 @@ function bindMount(source: string, target: string, readOnly: boolean): string {
   ].join("\n")
 }
 
+/**
+ * The server's writable bind for the functions directory, or undefined when that directory is the
+ * project root. The auth server's admin env routes write `.env.local` and `.env.<name>.local` there.
+ */
+function functionsMount(root: string, functionsHostDir: string): string | undefined {
+  const rel = relative(root, functionsHostDir)
+  if (rel === "") return undefined
+  return bindMount(functionsHostDir, `/project/${rel.split(sep).join("/")}`, false)
+}
+
 /** The bind mounts the generated stack uses, each naming its host path absolutely. */
-function projectMounts(cwd: string) {
+function projectMounts(cwd: string, functionsHostDir: string) {
   const root = resolve(cwd)
   const paths = selfHostComposePaths(cwd)
   return {
@@ -381,6 +434,9 @@ function projectMounts(cwd: string) {
     projectWritable: bindMount(root, "/project", false),
     engineProject: bindMount(root, ENGINE_SERVICE.projectDir, false),
     projectState: bindMount(join(root, ".supatype"), "/project/.supatype", false),
+    // Undefined when the functions are the project root itself: a writable bind there would make the
+    // whole project writable, which the read-only mount exists to prevent.
+    functionsDir: functionsMount(root, functionsHostDir),
     kong: bindMount(paths.kongPath, "/etc/kong/kong.yml", true),
     seaweed: bindMount(paths.s3ConfigPath, "/etc/seaweedfs/s3.json", true),
   }
@@ -582,12 +638,26 @@ function publicEnvForCompose(config: SupatypeProjectConfig): string {
   return `      # server.public_env: no /supatype-env.json or /supatype-env.js.\n      SUPATYPE_PUBLIC_ENV: "${value}"\n`
 }
 
-function serverAppEnvForCompose(config: SupatypeProjectConfig, devLocal: boolean): string {
+/**
+ * The server's `SUPATYPE_STORAGE_DISABLED` and `SUPATYPE_GRAPHQL_DISABLED` lines, each ending in a
+ * newline, for a service `services` switches off; empty otherwise, leaving the server's default.
+ */
+function serviceSwitchesForCompose(config: SupatypeProjectConfig): string {
+  return Object.entries(serviceSwitchServerEnv(config))
+    .map(([name, value]) => `      # services in supatype.config.ts switches this service off.\n      ${name}: "${value}"\n`)
+    .join("")
+}
+
+function serverAppEnvForCompose(config: SupatypeProjectConfig, devLocal: boolean, cwd: string): string {
   const mode = config.app.mode ?? "none"
   const lines = [`      SUPATYPE_APP_MODE: ${mode}`]
   if (mode === "static") {
     const dir = appStaticDir(config)
     lines.push(`      SUPATYPE_APP_STATIC_DIR: /project/${dir.replace(/^\.\//, "")}`)
+    // Always the resolved value (`build.spa`, else the framework's default), the one `supatype deploy` sends to
+    // Cloud, so the gateway and Cloud agree. The second line lets Studio say the config set it.
+    lines.push(`      SUPATYPE_APP_SPA_FALLBACK: "${resolveSpaFallback(config.build, cwd)}"`)
+    if (config.build?.spa !== undefined) lines.push('      SUPATYPE_APP_SPA_FALLBACK_FROM_CONFIG: "true"')
   } else if (mode === "proxy" && config.app.upstream?.trim()) {
     lines.push(`      SUPATYPE_APP_UPSTREAM: ${proxyUpstreamForCompose(config.app.upstream, devLocal)}`)
   }
@@ -707,7 +777,17 @@ export function renderSelfHostCompose(
   cwd: string = process.cwd(),
   options?: SelfHostComposeOptions,
 ): string {
-  const mounts = projectMounts(cwd)
+  const mounts = projectMounts(cwd, preferredFunctionsPathFromProject(config, cwd))
+  // The server alone gets the functions directory writable (see functionsMount); the worker keeps
+  // the read-only project.
+  const functionsBind =
+    mounts.functionsDir === undefined
+      ? ""
+      : `      # The functions directory is writable too: setting a function secret makes the auth server write
+      # .env.local and .env.<name>.local into it, which failed with "read-only file system" under the
+      # project mount above.
+${mounts.functionsDir}
+`
   const external = usesExternalDatabase(config)
   // Both halves come from the caller because both need the schema loaded, which this renderer does
   // not do. See `SelfHostComposeOptions`. One call, so the exposed schemas and the search path
@@ -743,8 +823,10 @@ export function renderSelfHostCompose(
   const authProviderEnv = composeAuthProviderEnv(config, publicApiUrl)
   // SAML's service provider sits under the same public URL, at /auth/v1 like the OAuth callback.
   const samlEnv = composeSamlEnv(config, publicApiUrl)
+  // Hooks, captcha, password, session, MFA, phone and rate limit settings: only what the config states.
+  const authGroupsEnv = composeAuthGroupsEnv(config)
   const studioHostDev = devLocal && hasStudioOverride(config)
-  const appEnv = serverAppEnvForCompose(config, devLocal)
+  const appEnv = serverAppEnvForCompose(config, devLocal, cwd)
   const staticDir = appStaticDir(config)
   // functions.path and the project root, as the containers see them. These were hardcoded to
   // /project/functions and /project/hooks, so a project keeping its functions anywhere else had every
@@ -840,9 +922,11 @@ ${seaweedPorts}`
   const keyspacePasswordFile = options?.keyspacePasswordFile
   const keyspaceAuthEnv = keyspacePasswordEnv(config, keyspacePasswordFile)
   const keyspaceMount = keyspacePasswordMount(config, keyspacePasswordFile)
+  // The second listener is the functions worker's (kong-config.ts, WORKER_LISTEN_PORT). It is in
+  // KONG_PROXY_LISTEN so the worker's forwarding headers survive, and in no `ports:` mapping below.
+  const kongListen = ["0.0.0.0:8000", `0.0.0.0:${WORKER_LISTEN_PORT}`, ...(tlsEnabled ? ["0.0.0.0:8443 ssl"] : [])].join(", ")
   const kongTlsEnv = tlsEnabled
-    ? `      KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8443 ssl"
-      KONG_LUA_SSL_TRUSTED_CERTIFICATE: system
+    ? `      KONG_LUA_SSL_TRUSTED_CERTIFICATE: system
       KONG_LUA_SSL_VERIFY_DEPTH: "2"
 ${keyspaceAuthEnv}`
     : ""
@@ -916,6 +1000,8 @@ ${dbDependencyClause}      seaweedfs:
   // container that can only report that. The server then has no realtime URL, which is what makes
   // subscription requests fail with a clear route error instead of hanging against a dead upstream.
   const realtime = realtimeEnabled(config)
+  // realtime.channels and realtime.recheckSeconds in the config, as the defaults a .env value overrides.
+  const realtimeDefaults = realtimeServiceDefaults(config)
   const realtimeBlock = realtime
     ? `  realtime:
     image: ${inRepoImage("realtime")}
@@ -938,6 +1024,10 @@ ${SERVICE_DEFAULTS}
       # debug also logs each change a subscriber's access rules withheld; info logs only the
       # changes realtime could not judge. Set REALTIME_LOG_LEVEL in .env to change it.
       REALTIME_LOG_LEVEL: \${REALTIME_LOG_LEVEL:-info}
+      # docs/realtime.md: declared can only tighten realtime.channels; the re-check interval in
+      # seconds. Empty, the service's own defaults apply.
+      REALTIME_CHANNELS: \${REALTIME_CHANNELS:-${realtimeDefaults.REALTIME_CHANNELS ?? ""}}
+      REALTIME_CHANNEL_RECHECK_S: \${REALTIME_CHANNEL_RECHECK_S:-${realtimeDefaults.REALTIME_CHANNEL_RECHECK_S ?? ""}}
 ${dbDependency}`
     : `  # No \`realtime\` service: database.external.realtime is false. Subscriptions are
   # unavailable; REST, storage, auth and functions are unaffected.
@@ -1040,7 +1130,11 @@ ${keyspaceAuthEnv}`
   # database still needs (roles, extensions, wal_level for realtime).
 `
     : `  db:
-    image: \${SUPATYPE_POSTGRES_IMAGE:-${runningPostgresImage(config)}}
+    image: \${SUPATYPE_POSTGRES_IMAGE:-${configuredPostgresImage(config).ref ?? RELEASE_IMAGES.postgres}}
+    # Docker's tini as PID 1, so postgres is not. PID 1 adopts every orphan in the container, and
+    # Postgres 17 restarts the whole server when an adopted child it never forked exits non-0/1,
+    # which is what a health check killed on timeout leaves behind (an orphaned pg_isready, exit 2).
+    init: true
 ${SERVICE_DEFAULTS}
 ${functionsDb ? networksClause(["default", FUNCTIONS_DB_NETWORK]) : ""}    environment:
       POSTGRES_USER: \${POSTGRES_USER:-supatype_admin}
@@ -1059,7 +1153,9 @@ ${keyspaceMount}    healthcheck:
       # service that connects over the network died with ECONNREFUSED on first boot. PostgREST
       # survived only because it retries. Observed on a clean stack: server, storage and
       # realtime all exited 1 while db said "healthy".
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \${POSTGRES_USER:-supatype_admin} -d \${POSTGRES_DB:-supatype}"]
+      # Exec form, with pg_isready's own -t 2 under the 5s timeout below: shell form forks it under
+      # sh, and when compose times a check out it kills the sh and orphans pg_isready.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "\${POSTGRES_USER:-supatype_admin}", "-d", "\${POSTGRES_DB:-supatype}", "-t", "2"]
       interval: 5s
       timeout: 5s
       # First boot runs initdb plus every bootstrap migration. Failures inside the start period
@@ -1151,8 +1247,10 @@ ${mounts.projectReadOnly}
       SUPATYPE_PROJECT_REF: ${JSON.stringify(config.project.name)}
       PORT: "8001"
       # In-compose loopback to Kong (not API_EXTERNAL_URL / localhost, unreachable from this container).
-      SUPATYPE_URL: http://kong:8000
-      SUPATYPE_INTERNAL_URL: http://kong:8000
+      # Kong's worker listener, never published: it keeps the St-Forwarded-For and St-Forwarding-Secret
+      # this worker adds, where port 8000 removes them (kong-config.ts, D14).
+      SUPATYPE_URL: http://kong:${WORKER_LISTEN_PORT}
+      SUPATYPE_INTERNAL_URL: http://kong:${WORKER_LISTEN_PORT}
       # ctx.publicUrl: the address a browser or an app uses, for links a function gives to people.
       # The same value the server is told is its own, never a name only this stack resolves.
       SUPATYPE_PUBLIC_URL: ${publicApiUrl}
@@ -1184,6 +1282,9 @@ ${mounts.projectReadOnly}
       STRIPE_SECRET_KEY: \${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: \${STRIPE_WEBHOOK_SECRET:-}
       SITE_URL: \${SITE_URL:-${publicApiUrl}}
+      # Added to this worker's calls to the stack's own address, so the auth server believes the end
+      # user's address they pass on. Withheld from function code by the worker.
+      ${forwardingSecretRequired()}
 ${dbDependency}
 ${realtimeBlock}
   control-plane:
@@ -1241,7 +1342,7 @@ ${mounts.projectReadOnly}
       # declared and never actually switched on. A narrower bind than making the whole project
       # writable, because the rest of the tree keeps the guarantee.
 ${mounts.projectState}
-${keyspaceMount}    working_dir: /project
+${functionsBind}${keyspaceMount}    working_dir: /project
     environment:
       SUPATYPE_MODE: ${devLocal ? "dev" : "standalone"}
       SUPATYPE_MANIFEST_PATH: .supatype/manifest.json
@@ -1252,7 +1353,7 @@ ${keyspaceMount}    working_dir: /project
       SUPATYPE_STORAGE_URL: http://storage:5000
       SUPATYPE_URL: ${publicApiUrl}
       SUPATYPE_ANON_KEY: \${ANON_KEY:-}
-${publicEnvForCompose(config)}      SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
+${publicEnvForCompose(config)}${serviceSwitchesForCompose(config)}      SUPATYPE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY:-}
       SUPATYPE_SQL_DATABASE_URL: "${ownerUrl}"
       # The SQL editor's own login, not a superuser. The owner URL above stays: the server falls
       # back to it and uses it for role membership.
@@ -1268,12 +1369,19 @@ ${keyspaceServerEnv(config, keyspacePasswordFile)}${appEnv}
       SUPATYPE_API_HOST: 0.0.0.0
       SUPATYPE_API_PORT: 9999
       SUPATYPE_API_EXTERNAL_URL: ${publicApiUrl}
+      # The client address the per-client limits (verify, OTP, sign-up, recover, token refresh)
+      # count against. Kong writes X-Real-IP from the connection and replaces any the client sent;
+      # X-Forwarded-For would keep the client's own text at the front. Unset, no request through
+      # Kong was ever counted. Behind another proxy, set the header that proxy writes in .env.
+      SUPATYPE_RATE_LIMIT_HEADER: "\${SUPATYPE_RATE_LIMIT_HEADER:-X-Real-IP}"
+      # Believed only on a request carrying it: Kong adds it, a client cannot (D14).
+      ${forwardingSecretRequired("SUPATYPE_SECURITY_FORWARDING_SECRET")}
       # Browser origins allowed besides the site URL: api.corsOrigins, then whatever .env adds.
       # A list saved in Studio replaces both until it is reset. Dev mode allows every origin.
       SUPATYPE_CORS_ALLOW_ORIGINS: "${corsOriginsEnv(config)}"
       SUPATYPE_DB_DRIVER: postgres
       SUPATYPE_DB_DATABASE_URL: "${authUrl}${authSearchPathSeparator}search_path=auth"
-      SUPATYPE_SITE_URL: \${SITE_URL:-${siteUrlFallback}}
+      SUPATYPE_SITE_URL: \${SITE_URL:-${composeSiteUrlFallback(config, siteUrlFallback)}}
       SUPATYPE_JWT_SECRET: \${JWT_SECRET:?JWT_SECRET is missing from .env}
       SUPATYPE_JWT_EXP: 3600
       SUPATYPE_JWT_AUD: authenticated
@@ -1300,14 +1408,14 @@ ${composeEnvLines(mailerUrlPathsEnv())}
       # leaving it unset now behaves exactly as it would with no value at all.
       SUPATYPE_SMTP_PORT: \${SUPATYPE_SMTP_PORT:-587}
       SUPATYPE_SMTP_USER: \${SUPATYPE_SMTP_USER:-}
-      SUPATYPE_SMTP_PASS: \${SUPATYPE_SMTP_PASS:-}
+      SUPATYPE_SMTP_PASS: ${composeSmtpPass(config)}
       SUPATYPE_SMTP_ADMIN_EMAIL: \${SUPATYPE_SMTP_ADMIN_EMAIL:-}
       SUPATYPE_SMTP_SENDER_NAME: \${SUPATYPE_SMTP_SENDER_NAME:-}
       # Resend's key and sender, and SES's sender, from .env. Without these the server had no way
       # to get them and a resend or ses provider fell back to the noop mailer.
-${composeEnvLines(Object.fromEntries(MAILER_PASSTHROUGH_ENV.map((name) => [name, `\${${name}:-}`])))}
-      SUPATYPE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-false}
-${authProviderEnv}${samlEnv}
+${composeEnvLines(composeMailerPassthrough(config))}
+      SUPATYPE_DISABLE_SIGNUP: \${DISABLE_SIGNUP:-${composeDisableSignupFallback(config)}}
+${config.auth?.anonymous?.enabled === undefined ? ANONYMOUS_SIGN_IN_FROM_ENV : ""}${composeAllowListLine(config)}${authProviderEnv}${authGroupsEnv}${samlEnv}
     depends_on:
 ${dbDependencyClause}${keyspaceInPg ? "" : "      valkey:\n        condition: service_started\n"}      postgrest:
         condition: service_started
@@ -1363,6 +1471,9 @@ ${gatewayNetworks}    # host.docker.internal is a Docker Desktop name. On Linux 
       # realtime subscribe often took that long. A records still come from the hosts file first, so
       # host.docker.internal above resolves as before.
       KONG_DNS_ORDER: "LAST,A,CNAME"
+      # Read through Kong's env vault by the pre-function on every route to the server (kong-config.ts).
+      ${forwardingSecretRequired()}
+      KONG_PROXY_LISTEN: "${kongListen}"
 ${kongTlsEnv}    volumes:
 ${mounts.kong}
     ports:
@@ -1639,17 +1750,24 @@ export function writeSelfHostCompose(
   mkdirSync(paths.dir, { recursive: true })
   // Before the file that requires it is written, so no stack is ever rendered without one.
   ensureControlPlaneSecret(cwd)
+  ensureForwardingSecret(cwd)
   // The keyspace password the same way, where the keyspace requires one (N-RB2) and the project
   // keeps it in .env. An existing project gets one on its next dev or up, and compose recreates db
   // and server with it.
   if (keyspacePasswordRequired(config) && keyspacePasswordFile === undefined) ensureKeyspacePassword(cwd)
   // The SAML signing key too, once SAML is on: the file requires it, and it must never change.
   ensureSamlPrivateKey(cwd, config)
-  // No functions/ or hooks/ here: the worker mounts the whole project and treats a missing root as
-  // nothing to serve, while an empty functions/ made `dev` scaffold function types into projects
-  // that have no functions. `functions new` and `init` create it when there is one.
+  // No hooks/ here: the worker mounts the whole project and treats a missing root as nothing to
+  // serve. The functions directory is made below, for the server's bind; it stays empty, and an
+  // empty one is not scaffolded into (refreshFunctionsContext), so a project with no functions
+  // still gets no function types.
   ensureComposeManifest(cwd, config)
-  writeFileSync(paths.composePath, renderSelfHostCompose(config, cwd, resolved), "utf8")
+  const rendered = renderSelfHostCompose(config, cwd, resolved)
+  // The server binds the functions directory writable, and a bind whose host path is missing is
+  // refused when the stack starts. Created only after the render, which refuses a path outside the
+  // project; and not when the directory is the project root, which is there already.
+  mkdirSync(preferredFunctionsPathFromProject(config, cwd), { recursive: true })
+  writeFileSync(paths.composePath, rendered, "utf8")
   // The object store's login, from the same `.env` values the compose file reads, generated first
   // when the project has none.
   // Not for a stack on the project's own bucket, which runs no object store.

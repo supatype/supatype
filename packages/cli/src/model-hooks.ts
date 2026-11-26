@@ -234,12 +234,16 @@ export interface DeclaredValidator {
   model: string
   field: string
   function: string
+  /** The table the model's writes land in, which the validator is typed by; undefined when unnamed. */
+  table: string | undefined
 }
 
 /** Every per-field validator declared across the schema, in a stable order for reporting. */
 export function declaredValidators(ast: unknown): DeclaredValidator[] {
   return modelFunctions(ast, "validate")
-    .flatMap(({ model, entries }) => entries.map((entry) => ({ model, field: entry.key, function: entry.function })))
+    .flatMap(({ model, table, entries }) =>
+      entries.map((entry) => ({ model, field: entry.key, function: entry.function, table: typeof table === "string" ? table : undefined })),
+    )
     .sort((a, b) => `${a.model}.${a.field}`.localeCompare(`${b.model}.${b.field}`))
 }
 

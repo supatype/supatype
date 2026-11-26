@@ -2,14 +2,13 @@ import React, { useCallback, useEffect, useState } from "react"
 import { useStudioClient } from "../StudioCore.js"
 import { studioAuthHeaders } from "../lib/studio-auth-headers.js"
 import { useApiQuery } from "../hooks/useApiQuery.js"
-import { useServerRestCacheOffered } from "../hooks/useServerRestCacheOffered.js"
 import { useInterval } from "../hooks/useTabActivity.js"
-import { Badge, Button, Card, Checkbox, ConfirmButton, Input, LoadingRows, TableCard, Td, Th, type DestructiveQuestion } from "../components/ui.js"
+import { Badge, Button, Card, Checkbox, ConfirmButton, Input, LoadingRows, SavedNotice, TableCard, Td, Th, type DestructiveQuestion } from "../components/ui.js"
 import { EmptyState } from "../components/EmptyState.js"
 import { ErrorBanner } from "../components/ErrorBanner.js"
 import { SlidePanel } from "../components/SlidePanel.js"
 import { useRoleRefusalText } from "../components/RoleGate.js"
-import { proxyFailure, unlessRoleRefused } from "../lib/role-refusal.js"
+import { proxyFailure } from "../lib/role-refusal.js"
 import { CacheHealthPanels } from "./CacheHealthPanels.js"
 import { useCacheHealth } from "../hooks/useCacheHealth.js"
 import { describeStaleness, reconcileNoteFor } from "../lib/cache-health.js"
@@ -21,6 +20,7 @@ import {
   type Guard,
   isArrayOf,
   isBoolean,
+  isJsonObject,
   isNumber,
   isRecordOf,
   isShape,
@@ -108,6 +108,23 @@ const isRestConfigSaved = isShape({
   row_cache: optional(isRowCacheReconcile),
   adjusted: optional(isArrayOf(isShape({ table: isString, reason: isString }))),
 })
+
+/** What the gateway says when the cache has no keyspace behind it, as its own sentence. */
+const NO_KEYSPACE =
+  "The response cache has nowhere to store entries on this project yet, so nothing is cached. " +
+  "Cached reads go straight to the database until it is available."
+
+/**
+ * The error for a refused cache request: the server's own reason, except for the one refusal with
+ * a known meaning, a gateway with no keyspace configured, which is said in plain words.
+ */
+async function cacheFailure(res: Response, refused: string): Promise<Error> {
+  if (res.status === 503) {
+    const body: unknown = await res.clone().json().catch(() => null)
+    if (isJsonObject(body) && body["error"] === "keyspace not configured") return new Error(NO_KEYSPACE)
+  }
+  return proxyFailure(res, refused)
+}
 
 function encodeCacheKey(key: string): string {
   const bytes = new TextEncoder().encode(key)
@@ -199,7 +216,6 @@ export function RestCacheBrowser({
   showTableSettings = false,
 }: RestCacheBrowserProps): React.ReactElement {
   const client = useStudioClient()
-  const serverCacheOffered = useServerRestCacheOffered()
   const refused = useRoleRefusalText()
   // Paged rather than appended: the list refreshes on a timer, and only the page on screen can.
   const pages = useCursorPages(tableFilter ?? "")
@@ -212,6 +228,7 @@ export function RestCacheBrowser({
   const [tableCfg, setTableCfg] = useState<RestTableCacheConfig>({ enabled: false, allow_public: false })
   const [cacheMaxTTL, setCacheMaxTTL] = useState(0)
   const [settingsSaving, setSettingsSaving] = useState(false)
+  const [settingsSavedAt, setSettingsSavedAt] = useState<number | null>(null)
   const [rowCacheNote, setRowCacheNote] = useState<ReconcileNote | null>(null)
   // What the schema permits, which is what decides whether each control below may be moved at
   // all. Undefined until the first read: a screen that assumed "everything" would offer controls
@@ -233,7 +250,7 @@ export function RestCacheBrowser({
   const { data, loading, error, refetch } = useApiQuery(
     () =>
       fetch(listUrl, { headers: studioAuthHeaders(client), credentials: "include" }).then(async (r) => {
-        if (!r.ok) throw await proxyFailure(r, refused)
+        if (!r.ok) throw await cacheFailure(r, refused)
         return readJson(r, isCacheListing)
       }),
     [client, listUrl, refused],
@@ -257,7 +274,7 @@ export function RestCacheBrowser({
       headers: studioAuthHeaders(client),
       credentials: "include",
     })
-    if (!(await unlessRoleRefused(r, refused)).ok) return
+    if (!r.ok) throw await cacheFailure(r, refused)
     const json = await readJson(r, isRestConfig)
     setCacheMaxTTL(json.cache_max_ttl ?? 0)
     setDeclared(json.declared ?? {})
@@ -279,7 +296,7 @@ export function RestCacheBrowser({
         headers: studioAuthHeaders(client),
         credentials: "include",
       })
-      if (!r.ok) throw await proxyFailure(r, refused)
+      if (!r.ok) throw await cacheFailure(r, refused)
       setDetail(await readJson(r, isRestCacheDetail))
     } catch (e) {
       setDetailError(e instanceof Error ? e.message : "Failed to load entry")
@@ -296,7 +313,7 @@ export function RestCacheBrowser({
         headers: studioAuthHeaders(client),
         credentials: "include",
       })
-      if (!r.ok) throw await proxyFailure(r, refused)
+      if (!r.ok) throw await cacheFailure(r, refused)
       setSelectedKey(null)
       setDetail(null)
       refetch()
@@ -314,7 +331,7 @@ export function RestCacheBrowser({
         headers: studioAuthHeaders(client),
         credentials: "include",
       })
-      if (!r.ok) throw await proxyFailure(r, refused)
+      if (!r.ok) throw await cacheFailure(r, refused)
       refetch()
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Flush failed")
@@ -325,12 +342,13 @@ export function RestCacheBrowser({
     if (!tableFilter) return
     setSettingsSaving(true)
     setActionError(null)
+    setSettingsSavedAt(null)
     try {
       const cfgRes = await fetch(`${client.url}/admin/v1/config/rest`, {
         headers: studioAuthHeaders(client),
         credentials: "include",
       })
-      if (!cfgRes.ok) throw await proxyFailure(cfgRes, refused)
+      if (!cfgRes.ok) throw await cacheFailure(cfgRes, refused)
       const current = await readJson(cfgRes, isRestConfig)
       const cache_tables = { ...(current.cache_tables ?? {}) }
       cache_tables[tableFilter] = { ...tableCfg }
@@ -343,7 +361,7 @@ export function RestCacheBrowser({
           cache_max_ttl: cacheMaxTTL > 0 ? cacheMaxTTL : current.cache_max_ttl,
         }),
       })
-      if (!r.ok) throw await proxyFailure(r, refused)
+      if (!r.ok) throw await cacheFailure(r, refused)
       // The save succeeded; what the row cache made of it comes back in the
       // same body and is a note, never an error. The response cache is already
       // live either way.
@@ -352,6 +370,7 @@ export function RestCacheBrowser({
       setRowCacheNote(reconcileNoteFor(tableFilter, saved.row_cache))
       setAdjustments((saved.adjusted ?? []).filter((a) => a.table === tableFilter || a.table === "*"))
       await loadSettings()
+      setSettingsSavedAt(Date.now())
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Save failed")
     } finally {
@@ -371,39 +390,6 @@ export function RestCacheBrowser({
     describeStaleness,
     tableHealth.error,
   )
-
-  if (!serverCacheOffered) {
-    return (
-      <div className="space-y-4">
-        <div>
-          <h1 className="text-xl font-semibold text-foreground">{title}</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Server-side REST caching is not available on the Cloud free tier.
-          </p>
-        </div>
-        <Card className="border-amber-500/30 bg-amber-500/5">
-          <div className="px-4 py-6 space-y-3">
-            <h2 className="text-sm font-semibold">No server-side cache on Free</h2>
-            <p className="text-sm text-muted-foreground">
-              Free projects do <strong className="font-medium text-foreground">not</strong> get server-side
-              caching. Every API request is proxied to PostgREST,
-              even when the client sends <code className="text-xs font-mono">.cache(&#123; server: true &#125;)</code>{" "}
-              (the server responds with <code className="text-xs font-mono">X-Supatype-Cache-Status: BYPASS</code>).
-            </p>
-            <p className="text-sm text-muted-foreground">
-              Your app can still use <strong className="font-medium text-foreground">client-only</strong> caching in
-              the browser or Node process:{" "}
-              <code className="text-xs font-mono">.cache(&#123; ttl &#125;)</code> without{" "}
-              <code className="text-xs font-mono">server: true</code>.
-            </p>
-            <p className="text-sm text-muted-foreground">
-              Upgrade to Pro for a shared server-side cache, per-table allowlists, and cache management in Studio.
-            </p>
-          </div>
-        </Card>
-      </div>
-    )
-  }
 
   return (
     <div className="space-y-4">
@@ -477,9 +463,12 @@ export function RestCacheBrowser({
               />
             </div>
             {controls.reason.ttl && <p className="text-xs text-muted-foreground">{controls.reason.ttl}</p>}
-            <Button size="xs" variant="primary" disabled={settingsSaving} onClick={() => void saveTableSettings()}>
-              {settingsSaving ? "Saving…" : "Save cache settings"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button size="xs" variant="primary" disabled={settingsSaving} onClick={() => void saveTableSettings()}>
+                {settingsSaving ? "Saving…" : "Save cache settings"}
+              </Button>
+              <SavedNotice at={settingsSavedAt} />
+            </div>
             {/*
               One switch, two caches. A table with no primary key gets the response cache and not
               the row cache, and this is the only place that difference is ever visible. Silence

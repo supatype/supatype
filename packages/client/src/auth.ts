@@ -142,17 +142,41 @@ function eitherKey<T>(
   return guard(b) ? b : undefined
 }
 
-/** A stored user with its camelCase keys copied to the snake_case ones `_parseUser` reads. */
-function snakeCaseUser(user: Record<string, unknown>): Record<string, unknown> {
-  const aliases = [
-    ["app_metadata", "appMetadata"],
-    ["user_metadata", "userMetadata"],
-    ["created_at", "createdAt"],
-    ["updated_at", "updatedAt"],
-  ] as const
-  const normalized = { ...user }
-  for (const [snake, camel] of aliases) {
-    if (user[snake] === undefined && user[camel] !== undefined) normalized[snake] = user[camel]
+/** `appMetadata` as `app_metadata`: the key `_parseUser` and its helpers read. */
+function snakeCaseKey(key: string): string {
+  return key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)
+}
+
+/** A stored object with each camelCase key also under its snake_case name, unless that is set. Shallow. */
+function withSnakeKeys(stored: Record<string, unknown>): Record<string, unknown> {
+  const normalized = { ...stored }
+  for (const [key, value] of Object.entries(stored)) {
+    const snake = snakeCaseKey(key)
+    if (snake !== key && stored[snake] === undefined) normalized[snake] = value
+  }
+  return normalized
+}
+
+/** The `is_anonymous` claim of an access token, or undefined when it has none. */
+function anonymousClaim(accessToken: string): boolean | undefined {
+  const claim = decodeJwtPayload(accessToken.split(".")[1] ?? "")?.["is_anonymous"]
+  return typeof claim === "boolean" ? claim : undefined
+}
+
+/**
+ * A stored user with its camelCase keys copied to the snake_case ones `_parseUser` reads, so a user
+ * this client wrote (`isAnonymous`, `identities[].userId`, ...) survives a restore. A user stored
+ * without the anonymous flag takes it from the token's claim.
+ */
+function snakeCaseUser(user: Record<string, unknown>, accessToken: string): Record<string, unknown> {
+  const normalized = withSnakeKeys(user)
+  for (const list of ["identities", "factors"] as const) {
+    const items = user[list]
+    if (Array.isArray(items)) normalized[list] = items.map((i) => (isJsonObject(i) ? withSnakeKeys(i) : i))
+  }
+  if (normalized["is_anonymous"] === undefined) {
+    const claim = anonymousClaim(accessToken)
+    if (claim !== undefined) normalized["is_anonymous"] = claim
   }
   return normalized
 }
@@ -440,16 +464,20 @@ export class AuthClient {
   async signInWithPassword(credentials: {
     email: string
     password: string
+    /** `captchaToken` is the provider widget's answer, which a project with captcha on requires. */
+    options?: { captchaToken?: string | undefined } | undefined
   }): Promise<{
     data: { session: Session | null; user: User | null }
     error: SupatypeError | null
   }> {
+    const captchaToken = credentials.options?.captchaToken
     const res = await this.send(`${this.url}/token?grant_type=password`, {
       method: "POST",
       headers: this.baseHeaders,
       body: JSON.stringify({
         email: credentials.email,
         password: credentials.password,
+        ...(captchaToken !== undefined && { supatype_meta_security: { captcha_token: captchaToken } }),
       }),
     })
     return this._parseAuthResponse(res)
@@ -1413,7 +1441,7 @@ export class AuthClient {
       refreshToken: eitherKey(raw, "refreshToken", "refresh_token", isString) ?? "",
       tokenType: eitherKey(raw, "tokenType", "token_type", isString) ?? "bearer",
       expiresIn: eitherKey(raw, "expiresIn", "expires_in", isNumber) ?? 3600,
-      user: this._parseUser(snakeCaseUser(user)),
+      user: this._parseUser(snakeCaseUser(user, accessToken)),
       ...(expiresAt !== undefined && { expiresAt }),
     }
   }

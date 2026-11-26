@@ -40,7 +40,8 @@ function writeFunction(dir: string): void {
   writeFileSync(join(dir, "functions", "hello", "index.ts"), "export default () => new Response('hi')\n")
 }
 
-function linkToCloud(dir: string): void {
+/** A Cloud link; `projectUrl` is the environment's own API address, as `supatype link` records it. */
+function linkToCloud(dir: string, projectUrl = "https://acme-ref.supatype.dev"): void {
   mkdirSync(join(dir, ".supatype"), { recursive: true })
   const link = {
     version: 1,
@@ -48,7 +49,7 @@ function linkToCloud(dir: string): void {
     projectRef: "acme-ref",
     defaultEnvironment: "production",
     cloudApiUrl: "https://api.example.test",
-    environments: { production: { name: "production", apiUrl: "https://api.example.test", linkedAt: "2026-01-01T00:00:00Z" } },
+    environments: { production: { name: "production", apiUrl: projectUrl, linkedAt: "2026-01-01T00:00:00Z" } },
   }
   writeFileSync(join(dir, ".supatype", "link.json"), JSON.stringify(link))
 }
@@ -320,31 +321,48 @@ describe("functions deploy to Cloud when a function fails", () => {
 // Review of round 5: invoke ended with "Run: supatype login" on a Cloud link with no session,
 // though invoking a public function needs none, and it used to work.
 describe("functions invoke on a Cloud link with no session", () => {
-  function invokedWith(): { url: string; auth: string | null }[] {
-    const seen: { url: string; auth: string | null }[] = []
+  function invokedWith(): { url: string; auth: string | null; apikey: string | null }[] {
+    const seen: { url: string; auth: string | null; apikey: string | null }[] = []
     vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
-      seen.push({ url: String(url), auth: new Headers(init?.headers).get("Authorization") })
+      // The environment publishes its anon key, which is how a call with no session gets one.
+      if (String(url).endsWith("/supatype-env.json")) return new Response(JSON.stringify({ anonKey: "anon-jwt" }), { status: 200 })
+      const headers = new Headers(init?.headers)
+      seen.push({ url: String(url), auth: headers.get("Authorization"), apikey: headers.get("apikey") })
       return new Response("{}", { status: 200 })
     })
     return seen
   }
 
-  it("calls the function without a token", async () => {
+  it("calls the function with the project's anon key and no token", async () => {
     writeConfig(project.dir)
     linkToCloud(project.dir)
     const seen = invokedWith()
     const run = await runCommand(registerFunctions, ["functions", "invoke", "hello"], project.dir)
     expect(run.exitCode).toBeUndefined()
-    expect(seen).toEqual([{ url: "https://acme-ref.supatype.dev/functions/v1/hello", auth: null }])
+    expect(seen).toEqual([{ url: "https://acme-ref.supatype.dev/functions/v1/hello", auth: null, apikey: "anon-jwt" }])
   })
 
-  it("asks for a login when --auth wants a token, sending nothing", async () => {
+  it("refuses a link that holds no API address, saying to link again, sending nothing", async () => {
+    writeConfig(project.dir)
+    linkToCloud(project.dir, "https://api.example.test")
+    const seen = invokedWith()
+    const refusal = await runCommand(registerFunctions, ["functions", "invoke", "hello"], project.dir).then(
+      () => "",
+      (err: unknown) => (err instanceof Error ? err.message : String(err)),
+    )
+    expect(refusal).toContain("predates")
+    expect(refusal).toContain("supatype link")
+    expect(refusal).not.toContain("supatype.dev")
+    expect(seen).toEqual([])
+  })
+
+  it("refuses --auth on a Cloud link, logged in or not, sending nothing", async () => {
     writeConfig(project.dir)
     linkToCloud(project.dir)
     const seen = invokedWith()
     const run = await runCommand(registerFunctions, ["functions", "invoke", "hello", "--auth"], project.dir)
     expect(run.exitCode).toBe(1)
-    expect(run.output).toContain("supatype login")
+    expect(run.output).toContain("--auth is not available on a Cloud link")
     expect(seen).toEqual([])
   })
 })

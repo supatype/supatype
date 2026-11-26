@@ -133,9 +133,7 @@ export default defineConfig({
 
 `supatype push` refuses a name that matches no function, so a typo cannot silently grant nothing. `supatype doctor` lists the current grants.
 
-:::caution[Local dev]
-The local router does not apply this list. Under `supatype dev` every function receives `ctx.serviceRoleKey`, and under `supatype functions serve` every function does when `SUPATYPE_SERVICE_ROLE_KEY` is set in your shell. Test that a function works without the key on a self-hosted stack.
-:::
+Local dev applies the same list, so a function that relies on the key without being named fails there first. Under `supatype functions serve` no function receives the key unless `SUPATYPE_SERVICE_ROLE_KEY` is set in your shell, and then only the functions the list names.
 
 <h2 id="env">Environment and secrets</h2>
 
@@ -148,6 +146,8 @@ Read them from `ctx.env`. The files are read on each call, so a changed value ta
 
 Every value set with `supatype functions env set`, in `.env.local` or in `.env.<name>.local` arrives in `ctx.env` on each call, never in `Deno.env`: `Deno.env` is the worker's one process environment, shared by every call running at the same time, so a value put there for one function would reach every other. `Deno.env.get("RESEND_API_KEY")` finds nothing.
 
+`Deno.env` holds only the worker's own settings (such as `SUPATYPE_URL`, `SUPATYPE_PUBLIC_URL` and `SUPATYPE_ANON_KEY`, which also arrive as `ctx` fields), Deno's `DENO_*` variables and what the operating system needs, such as `PATH` and the temporary directory. Before any function is imported the worker deletes everything else, so the stack's secrets and the variables in your shell never reach function code, under `supatype dev` and `supatype functions serve` as on a deployed stack. A self-hosted worker also keeps `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` and `SITE_URL` when Compose passes them.
+
 ```sh
 $ npx supatype functions env set RESEND_API_KEY=re_123
 $ npx supatype functions env list
@@ -155,6 +155,16 @@ $ npx supatype functions env unset RESEND_API_KEY
 ```
 
 On a project that is not linked, these commands edit `functions/.env.local`. `list` masks the values.
+
+Add `--function <name>` to `list`, `set` or `unset` to work on one function's own values: on a linked project they go to that function, and on a project that is not linked they edit `functions/.env.<name>.local`. A function's own value overrides a shared one with the same name.
+
+```sh
+$ npx supatype functions env set RESEND_API_KEY=re_456 --function send-invite
+$ npx supatype functions env list --function send-invite
+$ npx supatype functions env unset RESEND_API_KEY --function send-invite
+```
+
+On Supatype Cloud the per-function routes need a control plane that serves `/projects/<ref>/functions/<name>/env`.
 
 ```ts title="functions/send-invite/index.ts"
 const apiKey = ctx.env["RESEND_API_KEY"]
@@ -175,6 +185,8 @@ const { data, error } = await supatype.functions.invoke("greet", { body: { name:
 
 `supatype dev` serves functions through the same gateway as the rest of the API when a functions directory exists. You do not run anything else.
 
+With the Native provider, Deno runs in the project folder, so a project with a `package.json` resolves `npm:` imports from its `node_modules`. Install what a function imports, such as `npm install postgres` for `npm:postgres`. Without it the call fails with `Could not find a matching package for 'npm:postgres' in the node_modules directory`. Do not turn on `nodeModulesDir: "auto"` in a `deno.json` there: Deno then rewrites `node_modules`, and `supatype.config.ts` stops loading.
+
 To run functions on their own, with Deno watching for changes:
 
 ```sh
@@ -182,7 +194,7 @@ $ npx supatype functions serve
 $ npx supatype functions invoke greet --local --data '{"name":"Alex"}'
 ```
 
-`serve` listens on port `18472` by default; change it with `--port`. It loads `functions/.env.local` unless you pass `--env-file`. `invoke` sends a POST, prints the status and the response, and gives up after 30 seconds. It exits 1 when the function answers with a status of 400 or above, so a script can tell a failed call (a 404 for a function that does not exist, say) from one that worked. `--auth` adds a test token to the request. With `--local`, or when no Cloud project is linked, `invoke` calls a running `serve` on `--port` (18472 by default) when one answers, and the project's dev API otherwise.
+`serve` listens on port `18472` by default; change it with `--port`. It loads `functions/.env.local` unless you pass `--env-file`. `invoke` sends a POST, prints the status and the response, and gives up after 30 seconds. It exits 1 when the function answers with a status of 400 or above, so a script can tell a failed call (a 404 for a function that does not exist, say) from one that worked. `--auth` adds a test token to the request, on this machine only: on a Cloud link it is refused, because it would send your Supatype Cloud session, which can manage your projects, to the function, and on a self-hosted link it is refused because there is no user token to send. Call a deployed function with a signed-in user's access token instead. With `--local`, or when no Cloud project is linked, `invoke` calls a running `serve` on `--port` (18472 by default) when one answers, and the project's dev API otherwise.
 
 <h2 id="self-host">Self-host</h2>
 
@@ -198,13 +210,17 @@ $ docker compose -p supatype-<project> -f .supatype/self-host/docker-compose.yml
 
 On an unlinked project with a self-host Compose file, `supatype functions deploy` uploads nothing. It lists the functions it found on disk and prints that restart command.
 
-The worker gets the anon and service-role keys from the stack. To give functions a database connection, set `SUPATYPE_FUNCTIONS_DB_URL`; it appears as `ctx.dbUrl`. It is off by default because a direct connection bypasses access rules, field masking and model hooks. Point it at a role you have restricted, or accept that.
+The worker gets the anon and service-role keys from the stack. To give functions a database connection, set `SUPATYPE_FUNCTIONS_DB_URL`; it appears as `ctx.dbUrl`. It is off by default because a direct connection is not a request through the API: model hooks do not run, and row rules and field masking apply only for the role the URL names. A superuser or `BYPASSRLS` role (the admin role, `service_role`) skips both, so point it at a login role that is neither, granted only what your functions need. The database name at the end of the URL is the value of `POSTGRES_DB` in your `.env`.
+
+The worker runs Deno 2.9.8. Postgres drivers verified against a live database on it: `npm:postgres` (latest), `npm:postgres@3.4.5` and `npm:pg`. `npm:postgres` 4.0 and later does not run on Deno before 2.8, where it fails with `Not implemented: LibuvStreamWrap.prototype.useUserBuffer` or `socket._handle.useUserBuffer is not a function`. Every 3.4 release runs there; a stack on an older worker image should pin `npm:postgres@3.4.5`.
 
 Function logs are JSON lines on the container's output, each with the call's `request_id`, status and duration:
 
 ```sh
 $ npx supatype self-host compose logs --service functions-worker
 ```
+
+Under `supatype dev` without Docker (native dev), functions run inside the server process, so there is no worker container to read. `supatype dev` sets `SUPATYPE_FUNCTIONS_LOG_TO_STDOUT`, and the server then prints each line a function writes to the terminal that runs `dev`, prefixed with the function name, for example `[hello] got a request`. Lines that name no function, such as Deno's own errors, are prefixed `[deno]`. The same lines stay in Studio's function logs. A server that does not have the variable set, such as Cloud or a Compose stack, prints nothing extra.
 
 :::note
 The Compose file mounts `functions/` at the project root. Keep the default path on a self-hosted stack.

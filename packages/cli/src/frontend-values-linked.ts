@@ -8,6 +8,7 @@
  * that is not local, so the key a build ships is the one the server it names actually holds.
  */
 
+import { trimApiUrl } from "./api-url.js"
 import { isShape, isString } from "@supatype/shared"
 import { bodyReason, errorMessage } from "./error-message.js"
 import { fetchWithin } from "./fetch-within.js"
@@ -83,7 +84,7 @@ function cloudEnvironmentUrl(link: ProjectLink, target: DeployTarget): FrontendF
 }
 
 /** The environment's anon key from the control plane's keys route, which an owner or admin may read. */
-async function cloudAnonKey(target: DeployTarget, deployment: string | undefined): Promise<FrontendFinding> {
+export async function cloudAnonKey(target: DeployTarget, deployment: string | undefined): Promise<FrontendFinding> {
   if (!target.token) return { note: "no Cloud session: run `supatype login`, or set SUPATYPE_ACCESS_TOKEN" }
   const subpath = `/environments/${encodeURIComponent(target.environment)}/keys`
   try {
@@ -102,7 +103,7 @@ async function cloudAnonKey(target: DeployTarget, deployment: string | undefined
  * server, or a Supatype Cloud environment's own address, which serves the same.
  */
 export async function publishedAnonKey(apiUrl: string, allowLocal: boolean): Promise<FrontendFinding> {
-  const url = `${apiUrl.replace(/\/$/, "")}${PUBLIC_ENV_PATH}`
+  const url = `${trimApiUrl(apiUrl)}${PUBLIC_ENV_PATH}`
   const local = isLocalUrl(apiUrl)
   if (local && !allowLocal) return { note: `not fetched from ${url}, a local address` }
   if (!local && !apiUrl.startsWith("https://")) {

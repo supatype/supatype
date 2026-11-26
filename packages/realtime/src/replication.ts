@@ -3,6 +3,7 @@ import type { WalChange, ChangeEvent } from "./types.js"
 import { isSchemaPushLockHeld } from "./schema-push-lock.js"
 import { isTransientConnectionError, withDatabaseRetry } from "./db-retry.js"
 import { exactColumnsOf, valueForColumn } from "./exact-columns.js"
+import { isoTimestamptz } from "./column-values.js"
 import { isArrayOf, isShape, isString, isUnknown, optional, type FromShape } from "./json.js"
 import {
   RealtimeUnsupportedError,
@@ -322,7 +323,8 @@ export function parseWal2json(data: string, commitLsn?: string | undefined): Wal
     if (!isWal2JsonOutput(parsed)) throw new Error("not wal2json output")
     if (!parsed.change) return []
     const commit = {
-      timestamp: parsed.timestamp ?? new Date().toISOString(),
+      // wal2json writes the commit time in Postgres's text form; subscribers get ISO 8601, as for columns.
+      timestamp: parsed.timestamp === undefined ? new Date().toISOString() : isoTimestamptz(parsed.timestamp),
       lsn: commitLsn === undefined ? null : lsnValue(commitLsn),
     }
     return parsed.change.filter(isWal2JsonChange).map((entry) => changeFromEntry(entry, commit))

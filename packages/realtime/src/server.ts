@@ -19,6 +19,15 @@ import { MessageOrder } from "./message-order.js"
 import { isArrayOf, isShape, isString, type FromShape } from "./json.js"
 import { RealtimeUnsupportedError } from "./capability.js"
 import { RlsFilter } from "./rls.js"
+import type { ChannelDatabase } from "./channel-db.js"
+import { ChannelCatalog } from "./channel-catalog.js"
+import { ChannelGuard } from "./channel-guard.js"
+import { ChannelEnforcer } from "./channel-enforcement.js"
+import { refusals, type ChannelGrant } from "./channel-access.js"
+import { refusal, type Refusal } from "./refusal-codes.js"
+import { sendChecksAdmit } from "./send-checks.js"
+import { isOutboxChange, outboxBroadcast } from "./outbox.js"
+import { DEFAULT_CHANNEL_RECHECK_SECONDS } from "./env.js"
 import { relationRefusal } from "./table-catalog.js"
 import { filterIsMaskSafe } from "./field-mask.js"
 import { matchesFilter, unreadableCondition } from "./filter-match.js"
@@ -40,8 +49,19 @@ import type {
 /** What a server can be given instead of building its own, for embedders and tests. */
 export interface RealtimeServerDeps {
   rlsFilter?: RlsFilter | undefined
+  /**
+   * Where channel rules are asked. Defaults to the rls filter's own pool; a test gives one that
+   * counts what it is asked and can be made to fail.
+   */
+  channelDb?: ChannelDatabase | undefined
   /** The inspector's message tap; one is created when not given. */
   tap?: Tap | undefined
+  /**
+   * Called once when startup fails in a way that retrying cannot fix (a wrong password, a missing
+   * privilege). Defaults to stopping the server and exiting with that code, so the orchestrator
+   * restarts it; a test gives one that records the call.
+   */
+  onFatal?: ((exitCode: number) => void) | undefined
 }
 
 /** One subscriber of one table, as the dispatch loop walks them. */
@@ -58,6 +78,9 @@ interface SubscriberEntry {
 function withRef(ref: string | undefined): { ref?: string } {
   return ref === undefined ? {} : { ref }
 }
+
+/** What this server announces on a socket's first frame. */
+const SERVER_FEATURES = ["private_channels"]
 
 /** What the database said about a join: why it is refused, and the WAL position it starts at. */
 interface JoinCheck {
@@ -77,6 +100,20 @@ function sameTableJoin(
 ): Subscription | undefined {
   if (previous === undefined || previous.withoutRows === true) return undefined
   return previous.schema === target.schema && previous.table === target.table ? previous : undefined
+}
+
+/**
+ * Whether a join is a row join whose table must be checked.
+ *
+ * `changes: true` says so. The exact `@supatype/client@0.7.0` frame says nothing: a `table`, no
+ * `changes` key and no `ref`, and it always meant row changes. Leaving it unchecked let an anon
+ * join on a table it could not read report SUBSCRIBED (FF-21). Clients from 0.8.0 to 0.9.1 send no
+ * `changes` either, but every join of theirs carries a `ref`, and a broadcast or presence join of
+ * theirs names the table its channel name reads as (R2-RB2), so a `ref` keeps them unchecked.
+ */
+function isCheckedRowJoin(msg: SubscribeMessage): boolean {
+  if (msg.changes !== undefined) return msg.changes === true
+  return msg.table !== undefined && msg.ref === undefined
 }
 
 /** Schemas whose changes a shared instance never forwards: platform and service internals. */
@@ -125,16 +162,24 @@ export class RealtimeServer {
   private replicationStartup: Promise<void> = Promise.resolve()
   /** Set by `stop()`, so a startup abandoned by the shutdown is not reported as a failure. */
   private stopping = false
+  /** Set when startup failed for good: liveness then fails so the orchestrator restarts the process. */
+  private fatal = false
+  private readonly onFatal: (exitCode: number) => void
 
   /** Cached project routes for multi-tenant JWT verification + tier limits. */
   private projectRoutes = new Map<string, ProjectRoute>()
   private routingCacheTimer: ReturnType<typeof setInterval> | null = null
   /** Closes each authenticated socket when its token expires. */
   private readonly tokenExpiry = new TokenExpiry()
+  /** Decides who may join, send on and track on a channel: see {@link ChannelGuard}. */
+  private readonly guard: ChannelGuard
+  /** Keeps what a socket holds in step with what it may hold: see {@link ChannelEnforcer}. */
+  private readonly enforcer: ChannelEnforcer
 
   constructor(env: RealtimeEnv, deps: RealtimeServerDeps = {}) {
     this.env = env
     this.tap = deps.tap ?? new Tap()
+    this.onFatal = deps.onFatal ?? ((code) => this.stopAndExit(code))
     this.channels = new ChannelManager()
     this.replication = new ReplicationListener({
       databaseUrl: env.databaseUrl,
@@ -143,6 +188,21 @@ export class RealtimeServer {
       pollInterval: env.replicationPollInterval,
     })
     this.rlsFilter = deps.rlsFilter ?? new RlsFilter(env.databaseUrl, env.logLevel)
+    const channelDb = deps.channelDb ?? this.rlsFilter
+    const catalog = new ChannelCatalog(channelDb, env.channels, (message) => console.error(`[realtime] ${message}`))
+    const log = (message: string): void => console.error(`[realtime] ${message}`)
+    this.guard = new ChannelGuard(channelDb, catalog, env.multiTenant, log)
+    this.enforcer = new ChannelEnforcer(
+      this.channels,
+      this.guard,
+      catalog,
+      {
+        refuse: (client, channel, why) => this.refuse(client, channel, why),
+        announceLeave: (client, channel, entry) => this.announcePresence(client, channel, { joins: [], leaves: [entry] }),
+      },
+      log,
+      env.channelRecheckSeconds ?? DEFAULT_CHANNEL_RECHECK_SECONDS,
+    )
   }
 
   async start(): Promise<void> {
@@ -154,8 +214,10 @@ export class RealtimeServer {
       // replication was up: so a database that was merely slow took the container down instead of
       // reporting itself as not ready yet.
       if (path === "/health" || path === "/health/live") {
-        res.writeHead(200, { "Content-Type": "application/json" })
-        res.end(JSON.stringify({ status: "ok" }))
+        // A process that failed startup for good must not report itself alive: it would never be
+        // restarted, and the project would never become ready.
+        res.writeHead(this.fatal ? 503 : 200, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ status: this.fatal ? "failed" : "ok" }))
         return
       }
       if (path === "/health/ready") {
@@ -201,7 +263,11 @@ export class RealtimeServer {
     // rather than up to a TTL later.
     this.replication.onSchemaChange(() => {
       this.rlsFilter.invalidateCatalogs()
+      // The same push can change a channel's rules or the project's mode, so what sockets already
+      // hold is judged again against the new ones.
+      if (!this.env.multiTenant) void this.enforcer.afterSchemaPush()
     })
+    this.startChannelEnforcement()
 
     // Listen first, then connect. The old order awaited replication before binding the port, so a
     // database that was not up yet meant no health endpoint to ask and, since the rejection reached
@@ -209,7 +275,7 @@ export class RealtimeServer {
     // and replication keeps retrying behind it.
     await new Promise<void>((resolve) => {
       this.httpServer!.listen(this.env.port, this.env.host, () => {
-        console.log(`[realtime] WebSocket server listening on port ${this.env.port}${this.env.multiTenant ? " (multi-tenant)" : ""}`)
+        console.log(`[realtime] WebSocket server listening on port ${this.port}${this.env.multiTenant ? " (multi-tenant)" : ""}`)
         resolve()
       })
     })
@@ -225,7 +291,31 @@ export class RealtimeServer {
       // Anything else non-transient is a broken process, not a missing feature.
       console.error("[realtime] replication failed to start:", err)
       process.exitCode = 1
+      this.fatal = true
+      this.onFatal(1)
     })
+  }
+
+  /** The default fatal handler: shut down cleanly, then exit non-zero whatever the shutdown did. */
+  private stopAndExit(code: number): void {
+    this.stop()
+      .catch((err: unknown) => console.error("[realtime] shutdown after fatal error failed:", err))
+      .finally(() => process.exit(code))
+  }
+
+  /**
+   * Channel rules are enforced for a single project. A shared instance serves many projects off one
+   * database, where the channel functions (one set per database) cannot answer for any one of them
+   * (P7): it says so at start, and refuses a join that asks for privacy.
+   */
+  private startChannelEnforcement(): void {
+    if (!this.env.multiTenant) {
+      this.enforcer.start()
+      return
+    }
+    console.warn(
+      "[realtime] channel rules are not enforced on a shared instance; a join opened as private is refused",
+    )
   }
 
   /** The admin listener, on its own port and only when one is configured. */
@@ -245,6 +335,20 @@ export class RealtimeServer {
     await this.admin.start(adminPort, this.env.host)
   }
 
+  /**
+   * The port the public listener is bound to, which is what `env.port` asked for unless that was 0
+   * (any free port), so a caller that let the OS pick can learn which one it got.
+   */
+  get port(): number {
+    const addr = this.httpServer?.address()
+    return typeof addr === "object" && addr !== null ? addr.port : this.env.port
+  }
+
+  /** The admin listener's bound port, or null when none is configured or it is not listening. */
+  get adminPort(): number | null {
+    return this.admin?.port ?? null
+  }
+
   /** Resolves when the initial replication connection has settled, tests await this. */
   async waitForReplicationStartup(): Promise<void> {
     await this.replicationStartup
@@ -257,6 +361,7 @@ export class RealtimeServer {
       this.routingCacheTimer = null
     }
     this.tokenExpiry.clear()
+    this.enforcer.stop()
     await this.admin?.stop()
     await this.replication.stop()
     await this.rlsFilter.shutdown()
@@ -323,11 +428,18 @@ export class RealtimeServer {
     // and one holding only the expired token connects unauthenticated and is not closed again.
     this.tokenExpiry.add(clientId, () => ws.close(TOKEN_EXPIRED_CLOSE, "token expired"))
 
+    // The first frame names what this server can do, so a client that needs private channels can
+    // tell this server from one that would ignore the flag and admit what it believes is guarded.
     if (claims) {
       this.tokenExpiry.watch(clientId, claims)
-      this.send(ws, { type: "system", status: "ok", message: "authenticated" })
+      this.send(ws, { type: "system", status: "ok", message: "authenticated", features: SERVER_FEATURES })
     } else {
-      this.send(ws, { type: "system", status: "ok", message: "connected, send auth message to authenticate" })
+      this.send(ws, {
+        type: "system",
+        status: "ok",
+        message: "connected, send auth message to authenticate",
+        features: SERVER_FEATURES,
+      })
     }
 
     // A join waits on the database, so frames are ordered per channel: see `MessageOrder`.
@@ -336,7 +448,7 @@ export class RealtimeServer {
       this.channels.noteMessage(clientId)
       const msg = parseClientMessage(String(data))
       if (msg === null) {
-        this.send(ws, { type: "system", status: "error", message: "invalid message format" })
+        this.send(ws, { type: "system", status: "error", code: "refused", message: "invalid message format" })
         return
       }
       order.run(msg.type === "auth" ? null : msg.channel, () => this.handleMessage(clientId, msg))
@@ -390,7 +502,7 @@ export class RealtimeServer {
 
     switch (msg.type) {
       case "auth":
-        this.handleAuth(clientId, client, msg.token)
+        await this.handleAuth(clientId, client, msg.token)
         break
       case "subscribe":
         await this.handleSubscribe(clientId, client, msg)
@@ -418,13 +530,13 @@ export class RealtimeServer {
     msg: Extract<ClientMessage, { type: ChannelAction }>,
   ): void {
     const admitted = admitChannelAction(client, msg.channel, msg.type)
-    if (typeof admitted === "string") {
-      this.refuse(client, msg.channel, admitted)
+    if ("refusal" in admitted) {
+      this.refuse(client, msg.channel, admitted.refusal)
       return
     }
     switch (msg.type) {
       case "presence_track":
-        this.handlePresenceTrack(clientId, client, admitted, msg)
+        this.handlePresenceTrack(clientId, client, admitted.claims, msg)
         break
       case "presence_untrack":
         this.handlePresenceUntrack(clientId, client, msg.channel)
@@ -440,8 +552,8 @@ export class RealtimeServer {
    * channel as about the whole socket, so a refusal without one put every healthy channel the
    * client had into CHANNEL_ERROR.
    */
-  private refuse(client: ConnectedClient, channel: string, message: string, ref?: string | undefined): void {
-    this.send(client.ws, { type: "system", status: "error", message, channel, ...withRef(ref) })
+  private refuse(client: ConnectedClient, channel: string, why: Refusal, ref?: string | undefined): void {
+    this.send(client.ws, { type: "system", status: "error", code: why.code, message: why.message, channel, ...withRef(ref) })
   }
 
   private handleUnsubscribe(clientId: string, client: ConnectedClient, channel: string): void {
@@ -450,15 +562,20 @@ export class RealtimeServer {
     this.send(client.ws, { type: "system", status: "ok", message: `unsubscribed from ${channel}` })
   }
 
-  private handleAuth(clientId: string, client: ConnectedClient, token: string): void {
+  private async handleAuth(clientId: string, client: ConnectedClient, token: string): Promise<void> {
     const secret = this.jwtSecretFor(client.projectRef)
     const claims = secret === null ? null : verifyToken(token, secret)
     if (claims) {
       this.channels.setClientClaims(clientId, claims)
       this.tokenExpiry.watch(clientId, claims)
       this.send(client.ws, { type: "system", status: "ok", message: "authenticated" })
+      // A new identity may be admitted to less than the old one was. Judged again before the next
+      // frame is handled (the `auth` frame is a barrier), and closed if the database cannot say.
+      // Every held channel, not only declared ones: a channel joined as the service role records no
+      // declaration, and skipping it would let a socket keep the service role's rights as a user.
+      await this.enforcer.recheckClient(clientId, client, { kind: "all" }, true)
     } else {
-      this.send(client.ws, { type: "system", status: "error", message: "invalid token" })
+      this.send(client.ws, { type: "system", status: "error", code: "refused", message: "invalid token" })
     }
   }
 
@@ -474,19 +591,19 @@ export class RealtimeServer {
     // new server behave exactly as they did.
     const target = ChannelManager.resolveTarget(msg)
     const rejoin = sameTableJoin(client.subscriptions.get(msg.channel), target)
-    const local = this.subscribeRefusal(client, msg.filter)
+    const epoch = this.enforcer.epoch
+    const grant = await this.authorizeJoin(clientId, client, msg)
+    if (grant === null) return
     const wantsRows = msg.changes !== false
-    const checked: JoinCheck = local !== null
-      ? { refusal: local }
-      : wantsRows
-        ? await this.checkJoin(target, {
-          wantPosition: rejoin === undefined,
-          checkTable: msg.changes === true,
-          role: client.claims ? (client.claims.role ?? "authenticated") : null,
-        })
-        : { refusal: null }
+    const checked: JoinCheck = wantsRows
+      ? await this.checkJoin(target, {
+        wantPosition: rejoin === undefined,
+        checkTable: isCheckedRowJoin(msg),
+        role: client.claims ? (client.claims.role ?? "authenticated") : null,
+      })
+      : { refusal: null }
     if (checked.refusal !== null) {
-      this.refuse(client, msg.channel, checked.refusal, msg.ref)
+      this.refuse(client, msg.channel, refusal("refused", checked.refusal), msg.ref)
       return
     }
 
@@ -498,11 +615,35 @@ export class RealtimeServer {
       filter: msg.filter ?? {},
       ...(startLsn !== undefined && { startLsn }),
       ...(!wantsRows && { withoutRows: true as const }),
+      access: grant,
     }
 
     this.channels.subscribe(clientId, subscription)
     this.send(client.ws, { type: "system", status: "ok", message: `subscribed to ${msg.channel}`, ...withRef(msg.ref) })
     this.sendPresenceState(client, msg.channel)
+    // A re-check that ran while this join was being decided did not see it. Judge it once more now
+    // rather than let a revocation that landed in that gap wait for the next backstop.
+    if (epoch !== this.enforcer.epoch) void this.enforcer.recheckClient(clientId, client, { kind: "declared" }, false)
+  }
+
+  /**
+   * What the caller may do on the channel a join names, or null when the join was refused (and the
+   * client told). The local checks come first, then the channel's rules.
+   *
+   * A join refused on a channel the socket already holds ends that membership: the refusal is the
+   * current answer, and keeping the old subscription would keep what it just lost.
+   */
+  private async authorizeJoin(clientId: string, client: ConnectedClient, msg: SubscribeMessage): Promise<ChannelGrant | null> {
+    const local = this.subscribeRefusal(client, msg.filter)
+    if (local !== null) {
+      this.refuse(client, msg.channel, refusal("refused", local), msg.ref)
+      return null
+    }
+    const decision = await this.guard.authorizeJoin(client.claims, msg.channel, msg.private === true)
+    if (decision.admitted) return decision.grant
+    this.enforcer.dropMembership(clientId, client, msg.channel)
+    this.refuse(client, msg.channel, decision, msg.ref)
+    return null
   }
 
   /** Why a join is refused, or null when it is accepted. */
@@ -659,6 +800,14 @@ export class RealtimeServer {
     sender: ConnectedClient,
     msg: BroadcastMessage,
   ): void {
+    // The send rule's event and payload checks: no table is needed, so no database call is made.
+    const subscription = sender.subscriptions.get(msg.channel)
+    const declaration = subscription?.access?.declaration ?? null
+    if (!sendChecksAdmit(this.guard.sendChecksFor(declaration), msg.event, msg.payload)) {
+      const message = refusals.payload(msg.event, msg.channel, declaration ?? "this channel")
+      this.refuse(sender, msg.channel, refusal("payload_refused", message))
+      return
+    }
     this.fanOutBroadcast(msg, sender.projectRef, senderClientId)
   }
 
@@ -709,6 +858,11 @@ export class RealtimeServer {
    * without a replication slot.
    */
   async dispatchChange(change: WalChange): Promise<void> {
+    if (isOutboxChange(change)) {
+      await this.deliverOutbox(change)
+      return
+    }
+    this.enforcer.noteChange(change)
     const subscribers = this.subscribersOf(change)
     if (subscribers.length === 0) return
 
@@ -723,6 +877,24 @@ export class RealtimeServer {
       await this.deliverIfVisible(clientId, client, subscription, change, masked, record)
     }
     if (record) this.tap.end(record)
+  }
+
+  /**
+   * A broadcast a function in the database sent (`_supatype.realtime_send`), delivered to the
+   * channel's members: everyone the channel's join rule admitted, since a subscription exists only
+   * for them, and no socket as its sender because none sent it.
+   *
+   * The outbox is never forwarded as a row change to anyone, whatever role subscribed to it, and on
+   * a shared instance it is not delivered at all (private channels are not available there).
+   */
+  private async deliverOutbox(change: WalChange): Promise<void> {
+    if (this.env.multiTenant) return
+    const broadcast = outboxBroadcast(change)
+    if (broadcast === null) return
+    const holders = this.channels.getChannelClients(broadcast.channel, null)
+    const grants = holders.map(({ client }) => client.subscriptions.get(broadcast.channel)?.access)
+    if (!(await this.guard.mayDeliverFromDatabase(broadcast.channel, grants))) return
+    this.fanOutBroadcast(broadcast, null, null)
   }
 
   /**

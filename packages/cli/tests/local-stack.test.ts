@@ -88,3 +88,15 @@ describe("serverBaseUrl for a docker project", () => {
     expect(serverBaseUrl(docker, dir)).toBe("http://localhost:18880")
   })
 })
+
+// docs/studio.md: native dev does not start Studio. Push and `admin create-user` still printed
+// `Studio: http://localhost:<port>/studio/` for a native project, a link that answers 404.
+describe("stackStudioUrl", () => {
+  it("is /studio/ on a docker stack, and nothing on a native one", async () => {
+    const { stackStudioUrl } = await import("../src/local-stack.js")
+    const native = projectConfig({ provider: "native", database: { provider: "native" } })
+    expect(stackStudioUrl(docker, "http://localhost:18880")).toBe("http://localhost:18880/studio/")
+    expect(stackStudioUrl(native, "http://localhost:18880")).toBeUndefined()
+    expect(stackStudioUrl(docker, undefined)).toBeUndefined()
+  })
+})

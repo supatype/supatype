@@ -1,5 +1,7 @@
 # Supatype: full context for language models
 
+Docs version: Supatype 0.9.2 (released 2026-11-12). Engine v0.11.2, server v2.6.0, Postgres 17.2.16, Deno 2.9.8.
+
 > Zero drift: one set of TypeScript types runs the whole stack, database to component. One schema derives the Postgres tables, migrations, row-level security, REST and GraphQL APIs, auth, storage, realtime, Studio editing views and the typed client. Self-hostable. SDKs MIT, CLI and services Apache 2.0, API server MIT, Postgres image PostgreSQL License, schema engine source-available under BSL 1.1.
 
 This file is the expanded companion to https://www.supatype.com/llms.txt: a summary first, then the full text of every docs and guide page. Prefer linking agents here when they need product facts without scraping HTML.
@@ -59,7 +61,7 @@ Schema (https://www.supatype.com/docs/schema.html):
 Client (https://www.supatype.com/docs/client.html):
 - Import `createClient` from the generated `supatype/generated/client.ts`, with no type argument. It knows which models keep drafts.
 - On a drafts model, `update` saves a draft; `update(data, { publish: true })` also publishes; `.draft()` reads drafts; `rpc("publish", { model_table, record_id }, { schema: "supatype" })` publishes.
-- Realtime: `from(table).subscribe(cb, { event })`. Functions: `functions.invoke(name, { body })`. `error` is a plain object with `message` and, when known, `code`, `status`, `details`, `hint` and `field`. Auth calls and storage object calls (upload, download and the rest) throw on a network failure.
+- Realtime: `from(table).subscribe(cb, { event })`. Functions: `functions.invoke(name, { body })`. `error` is a `SupatypeError` (an `Error`) with `message` and, when known, `code`, `status`, `details`, `hint` and `field`. A cached read reports `meta.cacheStatus` (`HIT`, `MISS` or `BYPASS`) on the result, not at its top level. `global(name)` reads and updates a singleton model's one row. Auth calls and storage object calls (upload, download and the rest) throw on a network failure.
 - `BigInt` columns read as `bigint`; `Decimal` and `Money` read as strings, so no digits are lost.
 - GraphQL: `graphql<T>(query, variables)`. Rich text, blocks and json fields come back as objects, not the JSON strings pg_graphql sends: the client reads the schema once per role and decodes every `JSON` scalar field the query selects, through aliases, fragments, relations and lists. A field it cannot place stays as returned. Relation fields use the schema's names (`talks`, not `talkCollection`) from the first push on 0.7.0.
 
@@ -138,7 +140,7 @@ Install the CLI, scaffold a project, and run the full stack on your machine. Sup
 $ npm install -g @supatype/cli
 ```
 
-The CLI needs Node.js 18 or later. Vite 8, which `supatype init` sets up for a Vite app, needs Node.js 20.19 or later. For a machine without Node, the [CLI](https://www.supatype.com/docs/cli.html#usage) page has a standalone binary. The first run downloads the binaries it needs into `~/.supatype/cache/`.
+The CLI needs Node.js 18 or later. Vite 8, which `supatype init` sets up for a Vite app, needs Node.js 20.19 or later, or 22.12 or later on Node 22. For a machine without Node, the [CLI](https://www.supatype.com/docs/cli.html#usage) page has a standalone binary. The first run downloads the binaries it needs into `~/.supatype/cache/`.
 
 On Linux and macOS you can also use the install script or Homebrew. On Windows, use npm.
 
@@ -267,7 +269,7 @@ Run the whole platform on a server you own with Docker Compose. The project layo
 
 #### 1. Prepare the server
 
-Ubuntu 22.04 or similar, Docker with Compose v2, Node.js (18 or later for the CLI, 20.19 or later to build a Vite 8 app), and the CLI:
+Ubuntu 22.04 or similar, Docker with Compose v2, Node.js (18 or later for the CLI, 20.19 or later, or 22.12 or later on Node 22, to build a Vite 8 app), and the CLI:
 
 ```sh
 $ npm install -g @supatype/cli
@@ -303,9 +305,9 @@ Images come from Docker Hub, and each CLI release runs the exact images it was t
 
 To run on a Postgres you already have, such as RDS or Cloud SQL, set `database: { external: { url: process.env.DATABASE_URL! } }` in `supatype.config.ts`. The stack then starts no `db` service, and every service connects there. It needs Postgres 17 or later. Field-level access rules are enforced through generated views instead of the planner rewrite in `supatype/postgres`. Realtime needs `wal_level = logical`, a free replication slot, the `wal2json` plugin and a role with `REPLICATION`. `supatype db check --connection "$DATABASE_URL"` reports what a database lacks, and `--emit` prints the SQL that fixes what it can.
 
-Every function is handed two addresses. `ctx.url` is for calling the API from inside the function. Under Docker it is `http://kong:8000`, which no browser can open. `ctx.publicUrl` is the project's public address, `API_EXTERNAL_URL` in `.env`, for links you give to people.
+Every function is handed two addresses. `ctx.url` is for calling the API from inside the function. Under Docker it is `http://kong:8100`, which no browser can open. `ctx.publicUrl` is the project's public address, `API_EXTERNAL_URL` in `.env`, for links you give to people.
 
-Functions get no database connection by default. Setting `SUPATYPE_FUNCTIONS_DB_URL` in `.env` hands every function that URL as `ctx.dbUrl`: a raw Postgres connection as whichever role it names, which bypasses row rules and field masking. Point it at a least-privilege role granted only what your functions need, never the admin URL, for example `postgresql://functions_reader:<password>@db:5432/my-app`.
+Functions get no database connection by default. Setting `SUPATYPE_FUNCTIONS_DB_URL` in `.env` hands every function that URL as `ctx.dbUrl`: a raw Postgres connection as whichever role it names. Row rules and field masking apply for that role exactly as they would for a request: a superuser or a role with `BYPASSRLS` (the admin role, `service_role`) skips both, any other role is held to them. Point it at a least-privilege login role that is neither, granted only what your functions need, never the admin URL, for example `postgresql://functions_reader:<password>@db:5432/<POSTGRES_DB>`. The database is the value of `POSTGRES_DB` in your `.env` (`supatype init` sets it to the project name; the stack default is `supatype`).
 
 #### 4. Serve a static app
 
@@ -332,7 +334,7 @@ Set `API_EXTERNAL_URL` and `SITE_URL` in `.env` to `https://example.com`: values
 
 `supatype dev` never turns HTTPS on, so the same committed config still runs on `http://localhost`.
 
-> **RATHER NOT RUN IT YOURSELF?:** Supatype Cloud runs the same stack for you, and it is coming soon. [Join the waiting list](https://www.supatype.com/#cloud), or [book a call](https://www.supatype.com/#contact) about self-hosting with support.
+> **RATHER NOT RUN IT YOURSELF?:** Supatype Cloud runs the same stack for you, and it is in closed beta. [Request access](https://www.supatype.com/#cloud), or [book a call](https://www.supatype.com/#contact) about self-hosting with support.
 
 ### Deploy changes
 
@@ -776,6 +778,75 @@ Renames are recorded in `supatype/renames.json`. Commit it. Every push replays i
 
 `--yes` does not override hand-edited access rules. Only `--overwrite-drift` does. Objects that Supatype did not create are never dropped or taken over.
 
+### Server logic in a Postgres function
+
+The schema declares tables and [access rules](https://www.supatype.com/docs/schema.html#access). It has no place for your own SQL, so logic that must run as one step in the database, such as checking a price and raising it in one transaction, is a Postgres function that you create yourself and call with `supatype.rpc()`. "No raw SQL" means the access rules are typed, not that the database is closed to you.
+
+`place_bid.sql`:
+
+```sql
+CREATE FUNCTION public.place_bid(lot_id uuid, amount numeric)
+RETURNS public.lot
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = ''
+AS $$
+DECLARE
+  current_lot public.lot;
+BEGIN
+  -- Lock the row, so two bids at once are checked one after the other.
+  SELECT * INTO current_lot FROM public.lot WHERE id = lot_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'no such lot';
+  END IF;
+  IF amount <= current_lot.price THEN
+    RAISE EXCEPTION 'bid must be above %', current_lot.price;
+  END IF;
+  UPDATE public.lot SET price = amount WHERE id = lot_id RETURNING * INTO current_lot;
+  RETURN current_lot;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.place_bid(uuid, numeric) TO authenticated;
+NOTIFY pgrst, 'reload schema';
+```
+
+- **Lock what you check.** `SELECT ... FOR UPDATE` makes a second caller wait until the first transaction ends, so the check and the update cannot interleave.
+- **`SECURITY INVOKER` or `DEFINER`.** An invoker function runs as the caller, so the [row rules](https://www.supatype.com/docs/schema.html#access) and [field masking](https://www.supatype.com/docs/schema.html#field-rules) on every table it touches apply as they would for a request. That is the default, and the one to use. A definer function runs as the role that created it, which skips both, so it must do its own checks (for example against `auth.uid()`) and should be written with great care.
+- **`SET search_path = ''`.** It stops a caller shadowing a table or function with one of their own. Name every object with its schema, as above. It matters most for a definer function.
+- **Grant it.** The API roles can call only what you grant: `GRANT EXECUTE ... TO authenticated`, or `anon` for a signed-out caller.
+- **Create it.** Run the SQL with `psql` against your database, or in Studio's [SQL runner](https://www.supatype.com/docs/studio.html#sql). `NOTIFY pgrst, 'reload schema'` makes the API pick the function up straight away.
+- **Call it.** `rpc` sends the named arguments, and a `RAISE EXCEPTION` comes back as `error`.
+
+`typescript`:
+
+```ts
+const { data: lot, error } = await supatype.rpc("place_bid", { lot_id: lotId, amount: 120 })
+```
+
+> **NOT MANAGED:** Supatype does not manage this function. A push neither applies it nor changes or drops it: it leaves a function it did not make alone. But nothing else carries it either. `supatype dev --reset-db` removes the database volume and the function with it. A new environment does not get it, so run the SQL again there, or keep it in a file your own deploy step applies. On Supatype Cloud, run it in each environment's SQL runner. It is not in the schema, so it is not in the generated types: `rpc` takes the name and arguments you give it. Managed functions are planned for after the beta.
+
+#### Run a function on a schedule
+
+The image ships `pg_cron`, so a Postgres function can run on a timer. Write the function as above (here, one that closes every lot whose end time has passed), then schedule it by hand.
+
+```sh
+$ psql "$DATABASE_URL"
+
+SELECT cron.schedule('close-lots', '* * * * *', $$SELECT public.close_ended_lots()$$);
+SELECT jobid, jobname, schedule, command, username, database FROM cron.job;
+SELECT status, return_message, start_time FROM cron.job_run_details ORDER BY runid DESC LIMIT 5;
+SELECT cron.unschedule('close-lots');
+```
+
+- **Where it runs.** In your project's database, the one named by `POSTGRES_DB`, as the role that called `cron.schedule`. With the admin URL that role is `supatype_admin`, a superuser, so the job is not held to row rules and field masking, and the function should do its own checks.
+- **Who can schedule.** The admin role can. Studio's SQL runner connects as `supatype_sql_editor`, which has no access to the `cron` schema: `cron.schedule` there fails with `permission denied for schema cron`. Use `psql` with the admin URL.
+- **List and remove.** `cron.job` lists the jobs, `cron.job_run_details` says whether each run succeeded, and `cron.unschedule('name')` removes one.
+
+> **NOT MANAGED:** The job is not in the schema. A push does not apply it, `supatype dev --reset-db` removes it with the database volume, and a new environment does not get it: schedule it in each environment by hand. Declared jobs are planned for after the beta. This was run against the `supatype/postgres` image a release pins; Supatype Cloud databases have not been checked.
+
+The same pattern serves a query the REST filters cannot express. The [geography example](https://www.supatype.com/docs/schema/fields.html) adds a `places_within` function the same way.
+
 ## Client
 
 Source: https://www.supatype.com/docs/client.html
@@ -803,7 +874,9 @@ Every page in these docs imports the client from this one file. In development, 
 
 A production build gets your deployment's values from `supatype build`, which runs your build command with them, or from the host's settings. When Supatype serves the app, the page can read them from the server instead, with `<script src="/supatype-env.js" vite-ignore></script>` in `index.html` (`vite-ignore` keeps `vite build` from warning that it cannot bundle it); a Next.js app serves the same script from a route ([Frameworks: Next.js](https://www.supatype.com/docs/frameworks.html#nextjs)). For each value the build did not carry, the client reads the one that script set, at its first request. It never guesses the address from the page. `createClient` itself never throws, so a page that creates the client at module scope still prerenders. The first request made with no address or no anon key throws a `MissingClientValuesError` naming what is missing and the variables to set, rather than returning it as `{ data: null, error }`. [Deploy your frontend](https://www.supatype.com/docs/deploying-your-frontend.html) covers each host.
 
-The session is saved and restored by default. Pass `auth: { persistSession: false }` to keep it in memory only.
+`supatype.url` and `supatype.anonKey` are the address and anon key the client uses: the ones given to `createClient`, else the ones the page set (see above), read each time you ask. Each is an empty string while neither has one, and neither throws. Use `anonKey` for a call the client does not make, such as opening a second connection or a plain `fetch` to the API.
+
+The session is saved and restored by default. A restored session keeps the user as it was, including `isAnonymous`, `identities` and `factors`, so a guest is still a guest after a reload. Pass `auth: { persistSession: false }` to keep it in memory only.
 
 `createClient` takes these options as well as `url` and `anonKey`:
 
@@ -832,7 +905,7 @@ Tables are named as in the database: `post`, `comment`, `post_tag`. Calling `cre
 
 Exact numbers keep every digit when you import from the generated `client.ts`. A `BigInt` column reads as a `bigint`. `Decimal` and `Money` columns read as strings.
 
-A number too large for JavaScript, in a column the client does not know, returns an error that names the column. This usually happens in an embed: select the column directly instead.
+A number too large for JavaScript, in a column the client does not know, returns an error that names the column. This usually happens in an embed: select the column directly instead. This covers a number inside an array too, at any depth, such as a json column holding `[9007199254740993]`. `BigInt[]` and `Decimal[]` columns the generated types describe keep every element exact instead.
 
 ### Read rows
 
@@ -864,6 +937,27 @@ const { data: post } = await supatype.from("post").select("*").eq("slug", "hello
 console.log(post?.title)
 ```
 
+#### Linking many-to-many rows
+
+A many-to-many link is a row in the junction table, and you write it like any other row. The junction is named after the two tables, sorted and joined with `_` (`lot_tag` for `lot` and `tag`), with a `<model>_id` column for each end. It is in the generated types, so `from("lot_tag")` is typed. Nested `connect` and `set` writes are not supported yet.
+
+`typescript`:
+
+```ts
+// add a link, and several at once
+await supatype.from("lot_tag").insert({ lot_id: lot.id, tag_id: tag.id })
+await supatype.from("lot_tag").insert(tags.map((t) => ({ lot_id: lot.id, tag_id: t.id })))
+
+// list a lot's tags, or the links themselves
+const { data } = await supatype.from("lot").select("title, tags:tag(name)").eq("id", lot.id)
+const { data: links } = await supatype.from("lot_tag").select("tag_id").eq("lot_id", lot.id)
+
+// remove a link
+await supatype.from("lot_tag").delete().eq("lot_id", lot.id).eq("tag_id", tag.id)
+```
+
+Who may write a link follows from its two ends. A link is readable by a caller who can read both rows, and writable by a caller who can read both and may update the model that owns the link: the one whose own `ManyToMany` field names the junction (either one, when both declare it). A refused insert returns an error. A delete the caller may not make removes no row and returns no error, so ask for the deleted rows with `.select()` if you need to know. See [Access Rules](https://www.supatype.com/docs/schema/access-rules.html#many-to-many-junction-tables).
+
 `count` is `null` unless you ask for it:
 
 `typescript`:
@@ -894,6 +988,36 @@ await supatype.from("post").select("id").ilike("title", "%hello%").range(0, 19)
 
 Reads also take `order`, `limit` and `range`. Filters work on `update` and `delete` too.
 
+### Cache a read
+
+`.cache({ ttl })` keeps a read's result in the client's memory for `ttl` milliseconds. Add `server: true` to cache it on the server as well, for a model that declares a `cache`; add `public: true` to share one entry between users when the model allows it.
+
+`typescript`:
+
+```ts
+const { data, meta } = await supatype
+  .from("post")
+  .select("id, title")
+  .cache({ ttl: 30_000, server: true })  // milliseconds
+
+console.log(meta?.cacheStatus)  // "HIT", "MISS" or "BYPASS"
+```
+
+The cache status is `meta.cacheStatus`, on the result next to `data` and `error`: it is not a field of the result itself. It is `"HIT"` when a cache answered and `"MISS"` when the read went to the database. `"BYPASS"` appears only when the server says so in its `X-Supatype-Cache-Status` header. A model with no server cache, or a project with caching off, sends no header, and the read reports `"MISS"`. A read that did not call `.cache()` has no `meta.cacheStatus`, and `meta` itself can be absent.
+
+### Globals
+
+A singleton model (`singleton: true`) holds one row that always exists, such as site settings. `global(name)` reads and updates it without a filter. `name` is the model's snake case name, as in `_global_site_settings`; for a model that sets its own `tableName`, use `from(tableName)` instead.
+
+`typescript`:
+
+```ts
+const { data: settings } = await supatype.global<{ title: string }>("site_settings").get()
+await supatype.global("site_settings").update({ title: "New title" })
+```
+
+`get()` returns the row, or `null`. `update(fields)` changes only the fields you name and returns the row. Both return `{ data, error }`, and the model's access rules apply as for any other read or write.
+
 ### Insert, update, delete
 
 `typescript`:
@@ -911,6 +1035,8 @@ await supatype.from("comment").delete().eq("id", commentId)
 ```
 
 A write returns no rows unless you add `.select()`: without it, `data` is `null`. Returning a row needs permission to read it, so leave `.select()` off when the access rules let the caller create a row but not read it. On a write, `single()` and `maybeSingle()` work only after `.select()`. On a delete, `.select()` returns the rows it deleted. `upsert` inserts or updates by primary key.
+
+An update or delete with no filter is refused, so `.delete()` alone returns an error instead of emptying the table. The `supatype/postgres` image loads `pg_safeupdate`, which raises `DELETE requires a WHERE clause` (or the same for `UPDATE`). To change every row, add a filter that matches all of them, such as `.not("id", "is", null)`.
 
 A `RichText` field takes a plain string on write.
 
@@ -1036,7 +1162,7 @@ await supatype.functions.invoke("stats", { method: "GET", headers: { "x-region":
 
 Inside a function, `ctx.url` is the API's internal address, for calls the function makes. `ctx.publicUrl` is the public address, for links you give to people.
 
-`supatype.rpc(name, params, options)` calls a Postgres function. Its options are `count`, `head`, `schema` for a function outside the default schema, and `idempotent`.
+`supatype.rpc(name, params, options)` calls a Postgres function. Its options are `count`, `head`, `schema` for a function outside the default schema, and `idempotent`. A function is not part of the schema: see [Server logic in a Postgres function](https://www.supatype.com/docs/schema.html#server-logic) for writing one and what Supatype does not manage.
 
 ### GraphQL
 
@@ -1117,10 +1243,10 @@ Supatype has bindings for React, Vue, Svelte and Solid, a React Native helper, a
 
 | Package | Exports |
 | --- | --- |
-| `@supatype/react` | `SupatypeProvider`, `useSupatype`, `useQuery`, `useMutation`, `useFunction`, `useAuth`, `useSubscription`, `useLivePreview`, `RichText` |
-| `@supatype/vue` | `supatypePlugin`, `useSupatype`, `useQuery`, `useMutation`, `useFunction`, `useAuth`, `useSubscription` |
-| `@supatype/svelte` | `setSupatypeClient`, `getSupatypeClient`, `createQuery`, `createMutation`, `createFunction`, `createAuth`, `createSubscription` |
-| `@supatype/solid` | `SupatypeContext`, `useSupatype`, `createQuery`, `createMutation`, `createFunction`, `createAuth`, `createSubscription` |
+| `@supatype/react` | `SupatypeProvider`, `useSupatype`, `useQuery`, `useMutation`, `useFunction`, `useAuth`, `useSubscription`, `useChannel`, `useRealtimeConnection`, `useLivePreview`, `RichText` |
+| `@supatype/vue` | `supatypePlugin`, `useSupatype`, `useQuery`, `useMutation`, `useFunction`, `useAuth`, `useSubscription`, `useChannel`, `useRealtimeConnection` |
+| `@supatype/svelte` | `setSupatypeClient`, `getSupatypeClient`, `createQuery`, `createMutation`, `createFunction`, `createAuth`, `createSubscription`, `createChannel`, `createRealtimeConnection` |
+| `@supatype/solid` | `SupatypeContext`, `useSupatype`, `createQuery`, `createMutation`, `createFunction`, `createAuth`, `createSubscription`, `createChannel`, `createRealtimeConnection` |
 | `@supatype/react-native` | `createNativeClient`, `secureStoreAdapter`, `asyncStorageAdapter`, `openOAuth`, `createAuthUrlListener` |
 | `@supatype/ssr` | `createServerClient`, and `GET` from `@supatype/ssr/next` |
 
@@ -1619,7 +1745,7 @@ Auth calls put the auth server's code in `error.code`, beside `message` and `sta
 
 An anonymous sign-in creates a real user with a user id and a session. Turn it on with `SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED=true`. Because the user has an id, an anonymous user passes `LoggedIn` and can own rows. The token carries `is_anonymous: true`.
 
-`signInAnonymously({ options: { data, captchaToken } })` takes optional metadata and a captcha token, and the user comes back with `isAnonymous: true`.
+`signInAnonymously({ options: { data, captchaToken } })` takes optional metadata and a captcha token, and the user comes back with `isAnonymous: true`. The flag survives a reload: a restored session keeps it, and a session saved without it takes it from the token's `is_anonymous` claim.
 
 #### Keep anonymous users out
 
@@ -1841,7 +1967,23 @@ email: {
 
 > **CONSOLE SENDS NOTHING:** `console`, the default, logs that a message would have been sent but leaves out the body, so the link is not in the log. To try magic links or password reset, configure a real provider.
 
-For Resend, set `SUPATYPE_RESEND_API_KEY` and `SUPATYPE_RESEND_FROM` in `.env`. For SES, set `SUPATYPE_SES_FROM`; credentials come from the environment's AWS configuration.
+On a self-hosted stack, for Resend set `email.resend_api_key` and `email.resend_from` in the `email` block above (a value set by hand in `.env` is replaced from `supatype.config.ts`). For SES set `email.ses_from`; credentials come from the environment's AWS configuration.
+
+On Supatype Cloud there is no `.env` and no ambient AWS configuration, so SES takes all of its settings from the `email` block, and a push that leaves one out is refused:
+
+`supatype.config.ts`:
+
+```ts
+email: {
+  provider: "ses",
+  ses_from: "no-reply@example.com", // required: the sender address, verified in SES
+  ses_access_key_id: env("SES_ACCESS_KEY_ID"), // required: name an environment variable, never the key itself
+  ses_secret_access_key: env("SES_SECRET_ACCESS_KEY"), // required, the same way
+  ses_region: "eu-west-2", // optional
+},
+```
+
+Without `ses_from` the server cannot send, so mail would be dropped while requests still succeed. That is why Cloud refuses the push and names `email.ses_from`.
 
 #### Email sign-in and confirmation
 
@@ -1859,6 +2001,36 @@ auth: {
 - `enableConfirmations`: whether a new sign-up has to click a link in an email before it can sign in. Unset, a self-hosted stack (`supatype self-host compose`) sends the link and local dev, Docker or native, confirms the sign-up at once. `true` or `false` sets it for every stack.
 
 `supatype dev` and `supatype self-host compose` pass both to the auth server on every start, as `SUPATYPE_EXTERNAL_EMAIL_ENABLED` and `SUPATYPE_MAILER_AUTOCONFIRM`. Either variable set in the project's `.env` wins over the config for that stack; the CLI never writes them there. Studio shows each under **Authentication > Configuration**, with the key that sets it.
+
+#### Rate limits
+
+`auth.rateLimits` caps how often one client may call the auth server:
+
+`supatype.config.ts`:
+
+```ts
+auth: {
+  rateLimits: { verify: 10, otp: 5 },
+},
+```
+
+Each limit except `smsSent` counts requests per client IP address. The address is the one the gateway forwards: Kong writes `X-Real-IP` from the connection and replaces any value the client sent, so a client cannot pick its own. The server believes a forwarded address only on a request that carries the project's forwarding secret, which Kong adds and no client holds. Any other request counts against the address of its connection, whatever `St-Forwarded-For`, `X-Real-IP` or `X-Forwarded-For` it carries, and the IP recorded in audit logs follows the same rule. A client over a limit gets 429 with error code `over_request_rate_limit` until the window lets it in again.
+
+| Key | What it counts, per client | Window | Default |
+| --- | --- | --- | --- |
+| `otp` | Sign-up and sign-in requests: `/signup` (not anonymous), `/otp`, magic links, password recovery, `/resend` and updating the signed-in user. Each of these counts on its own. It counts requests, not emails | 5 minutes | 30 |
+| `verify` | Requests to `/verify`, which checks the code or link from an email or SMS, whether the code is right or not | 5 minutes | 30 |
+| `tokenRefresh` | Requests to `/token`: password sign-in, refreshing a session and the other grants | 5 minutes | 150 |
+| `sso` | Requests that start a SAML sign-in | 5 minutes | 30 |
+| `mfa` | Multi-factor challenges, and verifies, each counted on its own | 1 minute | 15 |
+| `anonymousUsers` | Anonymous sign-ins | 1 hour | 30 |
+| `smsSent` | SMS messages the server sends, across every client together | 1 hour | 30 |
+
+A limit of N lets one client make N requests at once, and then one more each time the window divided by N passes. Every per-client limit works that way, over its own window: a limit of 3 lets one client make 3 requests at once, never more. A limit below 1 still lets one through. How many emails the server sends an hour is a separate limit: `SUPATYPE_RATE_LIMIT_EMAIL_SENT` on self-host, and the platform's on Cloud.
+
+On self-host each key renders as a `SUPATYPE_RATE_LIMIT_*` variable for the server (`mfa` as `SUPATYPE_MFA_RATE_LIMIT_CHALLENGE_AND_VERIFY`), and a value in `.env` wins. Behind a proxy in front of Kong, Kong sees the proxy's address, so every client would share one count: set `SUPATYPE_RATE_LIMIT_HEADER` in `.env` to a header that proxy writes from the connection, and only if nothing else can reach Kong.
+
+The forwarding secret is `SUPATYPE_FORWARDING_SECRET` in `.env`. `supatype init` generates it, and a project that predates it gets one on its next `dev` or `self-host` command. It is given to the server (as `SUPATYPE_SECURITY_FORWARDING_SECRET`), to Kong and to the functions worker, and to nothing else: the worker removes it from the environment before it loads your functions, so function code cannot read it. When a function calls the project's own address, the worker passes on the end user's address with it, so a function that signs a user in is counted against that user and not against the worker. Under Docker the worker reaches Kong on a second port, 8100, that is never published to the host: Kong leaves the two headers alone there, where it removes them on the public port, and adds no secret of its own, so code that reaches 8100 without the secret is still counted against its own connection. Keep it out of version control like the other secrets in `.env`, and never log it. A server with no secret set believes forwarded addresses from any sender, as before, and says so once when it starts.
 
 #### Environment variables
 
@@ -2326,7 +2498,31 @@ File metadata is a row in the `storage` schema of your project's Postgres. The b
 
 > **WARNING:** With the Native provider, the storage service is the same code a deployment runs, so bucket rules, `maxSize`, `accept` and transforms apply as they will once deployed. If it cannot start, storage is off: `supatype dev` prints why, `/storage/v1` answers 503 "storage service is not running", and storage comes back once you fix the cause and restart dev. There is no fallback store, because one that skipped your rules would let any caller read a private bucket.
 
+#### Switching storage or GraphQL off
+
+`services: { storage: false }` in `supatype.config.ts` answers every `/storage/v1` request with 503, and `services: { graphql: false }` answers `/graphql/v1` with 501. Self-host renders `SUPATYPE_STORAGE_DISABLED` and `SUPATYPE_GRAPHQL_DISABLED` into the server; a push to Supatype Cloud sets the same switch for the project. A key left out leaves the service on, and `true` turns it back on.
+
 #### Your own S3 bucket
+
+On Supatype Cloud, name the bucket in `supatype.config.ts` and `supatype push` (or `supatype deploy`) sends it to the project's production environment. Only the organisation's owners and admins can set it, and the keys are read from your environment or `.env` with `env("NAME")`, sent once, stored encrypted and never shown again:
+
+`supatype.config.ts`:
+
+```ts
+import { defineConfig, env } from "@supatype/cli"
+export default defineConfig({
+  // docs:no-check (a fragment: the rest of your config stays as it is)
+  storage: {
+    provider: "s3",
+    production: "s3",
+    s3: { bucket: "acme-files", region: "eu-west-1", accessKey: env("ACME_S3_KEY"), secretKey: env("ACME_S3_SECRET") },
+  },
+})
+```
+
+Use `endpoint` (an https URL) in place of `region` for another S3-compatible store, and `forcePathStyle` to override path-style addressing. Both keys are required on Cloud, since a Cloud project has no instance role to fall back to. Leaving `storage.s3` out of the config sends nothing and keeps whatever the project has; to go back to Supatype's bucket, call `DELETE /projects/<ref>/storage-bucket`.
+
+> **WARNING:** Switching buckets does not move your files. New files go to the new bucket; the ones stored before stay in the old one and stop being served. Copy them across first if you need them. Self-host reads its bucket from `S3_*` in `.env` and ignores `storage.s3`.
 
 Set `S3_BUCKET` and the storage service keeps every bucket inside that one S3 bucket, the way Supabase Storage uses `GLOBAL_S3_BUCKET`. A bucket is a row in your database and a key prefix in S3: a file `avatars/me.png` is stored under `avatars/me.png/<version>`. The service never creates an S3 bucket or puts a bucket policy, so:
 
@@ -2357,7 +2553,7 @@ Removing a bucket from the schema drops its policies on the next push. The bucke
 
 Source: https://www.supatype.com/docs/realtime.html
 
-Subscribe to inserts, updates and deletes on your tables over a WebSocket. Each change is checked against the subscriber's read access before it is sent.
+Subscribe to inserts, updates and deletes on your tables over a WebSocket. Each change is checked against the subscriber's read access before it is sent. Broadcast and presence channels can be made private, with rules in your schema.
 
 Pre-1.0: APIs and config may change between releases.
 
@@ -2373,7 +2569,7 @@ The realtime service reads changes from Postgres logical replication, so every c
 
 Every table Supatype manages has `REPLICA IDENTITY FULL`, so the write-ahead log carries the whole previous row. A table set up outside Supatype keeps Postgres's default identity, and its `old` can hold only the key.
 
-Values arrive with the same types as a REST read. A `BigInt` column becomes a native `bigint`, and `Decimal` and `Money` stay exact strings.
+Values arrive with the same types and formats as a REST read. A `BigInt` column becomes a native `bigint`, and `Decimal` and `Money` stay exact strings. `Json` columns arrive as the parsed value, not as JSON text. `timestamptz` arrives as ISO 8601 with a `T` and a full offset, such as `2024-01-01T12:00:00+00:00`, which every browser parses; `timestamp` is `2024-01-01T12:00:00` and `timetz` has its full offset. Fractional seconds keep their microseconds. Arrays of any type arrive as arrays, as REST sends them: `integer[]` and `double precision[]` hold numbers, `boolean[]` holds booleans, `bigint[]` and `numeric[]` hold exact strings, and `text[]`, `uuid[]` and `date[]` hold strings. Before 0.9.3 every array arrived as Postgres's text form, such as `"{1,2}"`. Before 0.9.3 `Json` was a string and `timestamptz` was `2024-01-01 12:00:00+00`, which Safari and Firefox read as `Invalid Date`; code that called `JSON.parse` on a `Json` column now gets the value itself.
 
 ### Read access
 
@@ -2463,14 +2659,14 @@ const room = supatype.realtime
 room.broadcast("move", { x: 120, y: 48 })
 ```
 
-- Only clients that have subscribed to the channel receive its messages. The sender does not get its own broadcast back.
-- A presence entry is the payload you pass to `track`, plus `user_id` from the token. The server writes `user_id` last, so a payload cannot claim to be someone else. Every client without a signed-in user shares the `user_id` `anonymous`.
+- Only clients that have subscribed to the channel receive its messages. The two differ on the sender: a broadcast is not sent back to the client that sent it, but presence is. Your own `track` arrives in your `onPresence` as a join, and your own leave as a leave, so skip your own entry if you only want the others.
+- A presence entry is the payload you pass to `track`, plus `user_id` from the token. The server writes `user_id` last, so a payload cannot claim to be someone else. Every client without a signed-in user shares the `user_id` `anonymous`, so `user_id` cannot tell two anonymous clients apart, or tell you which entry is your own. Put a value you generate yourself in the `track` payload, such as `track({ clientId: crypto.randomUUID(), name })`, and key your member map on that.
 - Calling `track` again announces the new payload as a fresh join, so keep your own map of members keyed by `user_id`.
-- A client that joins late hears about joins and leaves from then on. It is not sent the list of who is already there.
+- A client that joins late is sent the members already tracked on the channel as joins, then hears about joins and leaves from then on.
 - A client leaves on `untrack()`, on unsubscribe and when its socket closes.
 - Messages sent while the socket is not open are dropped, so send after `SUBSCRIBED`.
 
-> **WARNING:** Broadcast and presence have no access rules. Anyone with your anon key who knows a channel's name can join it, read its messages and send to it. Do not put private data in a broadcast, and use a hard-to-guess channel name for anything you would not show the public.
+> **WARNING:** A channel your schema does not declare has no access rules. Anyone with your anon key who knows its name can join it, read its messages and send to it. Do not put private data in it. Declare the channel to guard it: see [private channels](https://www.supatype.com/docs/realtime.html#private).
 
 ### Framework hooks
 
@@ -2497,7 +2693,295 @@ function Comments({ postId }: { postId: string }) {
 
 It needs `SupatypeProvider` above it, which takes your client as `client`. Give each use its own channel name: two hooks with the same name share a channel.
 
-`@supatype/vue` has `useSubscription(table, { event, filter })`, and `@supatype/svelte` and `@supatype/solid` have `createSubscription(table, { event, filter })`. These watch the `public` schema and return `data`, `error` and `status`, which is `"connecting"`, `"connected"`, `"disconnected"` or `"error"`. `data` starts empty and collects rows from the changes that arrive: inserts are added, updates replace the row with the same `id`, deletes remove it. They do not load the rows that already exist, so pair them with a query.
+`useChannel(name, setup, deps)` is for a channel that needs more than one listener, such as rows, presence and a broadcast together. `setup` receives the channel and adds its listeners; the hook subscribes, unsubscribes when the component unmounts or `name` or `deps` change, and runs `setup` again only when `deps` change, as `useEffect` does. It returns `status` and `error` as `useSubscription` does, and `isConnected` and `connectionState` for the socket itself.
+
+`tsx`:
+
+```tsx
+import { useChannel } from "@supatype/react"
+import { addBid, notify } from "./app"
+
+function Auction({ id }: { id: string }) {
+  const { status, isConnected } = useChannel(`auction:${id}`, (channel) => {
+    channel.on("postgres_changes", { event: "INSERT", table: "bid", filter: `auction_id=eq.${id}` }, ({ new: bid }) => addBid(bid))
+    channel.onBroadcast("outbid", (payload) => notify(payload))
+  }, [id])
+  return <p>{isConnected ? status : "reconnecting"}</p>
+}
+```
+
+`useRealtimeConnection()` returns only `isConnected` and `connectionState`. `@supatype/vue` has `useChannel(name, setup)` and `useRealtimeConnection()`, and `@supatype/svelte` and `@supatype/solid` have `createChannel(name, setup)` and `createRealtimeConnection()`. They return `status` and `error` as that binding's `createSubscription` does (`"connecting"`, `"connected"`, `"disconnected"` or `"error"`), plus `isConnected` and `connectionState`, each as a ref, signal accessor or store to match the binding. `name` can be a string, or one that changes: a ref or getter in Vue, an accessor in Solid, a store in Svelte (with runes, `toStore(() => name)` from `svelte/store` makes one). When it changes the old channel is left, its listeners go with it, and `setup` runs on the new channel, so `status` reads `"connecting"` until it joins. Otherwise `setup` runs once, when the component mounts (straight away in Svelte), and the channel is left when it unmounts. There is no `deps` argument.
+
+`@supatype/vue` has `useSubscription(table, { event, filter })`, and `@supatype/svelte` and `@supatype/solid` have `createSubscription(table, { event, filter })`. These watch the `public` schema and return `data`, `error` and `status`, which is `"connecting"`, `"connected"`, `"disconnected"` or `"error"`. `data` is the table's rows. It is read once the subscription has joined, and read again after each re-join (a dropped socket that came back, or a sign-in), so changes made while the socket was down are not lost. From then on each change is an upsert by key: an insert or update replaces the row with the same key or adds it, and a delete removes it, with no effect for a key that is not held. The key is `id`; pass `key: "slug"`, or an array for a composite key, when the primary key is another column. A `filter` narrows the read as well as the changes. If the read fails, `error` holds the reason until a later read succeeds, and `status` is unchanged. Before 0.9.3 `data` started empty and an update or delete of a row that existed before subscribing did nothing.
+
+### Private channels
+
+A private channel is a broadcast and presence channel with access rules, written in your schema. You declare it with a `Channel` type, push, and the realtime service checks every join, broadcast and presence update against that rule, as the user who made it. Nobody can read or fake traffic on it just by knowing its name.
+
+This is the same idea as Supabase Realtime Authorization. The difference is who decides. In Supabase the client flags a channel private and policies on `realtime.messages` do the rest. Here the schema declaration decides, whether or not the client says `private`, so a client cannot skip the rules by leaving a flag out.
+
+#### How it works
+
+- A channel has three operations. `join` covers subscribing, receiving broadcasts and receiving presence. `send` covers broadcasting. `track` covers appearing in presence.
+- An operation you leave out is denied to everyone except the service role. A declaration with no rules at all is refused when the schema is read.
+- Each rule is written in the same [access rule language](https://www.supatype.com/docs/schema.html#access) as a model, and runs inside Postgres as the caller. A `Rows` rule sees only the rows that caller may read.
+- Each operation is judged on its own. A rule that reads a table the caller has no privilege on denies that operation and no other, so a channel with `join: Public` and a `track` rule over a private table still admits anon to join, and refuses it presence.
+- The server asks once at join, keeps the answer, and then judges each broadcast and presence update from that answer with no database call.
+- The service role may do anything on any channel.
+
+#### Example: an auction lot
+
+Each lot has a channel. Only a signed-in user who is watching the lot may join it and appear in its presence. Any signed-in user who has joined may send a `bid` event, and only with an amount between 1 and 1,000,000. Only the seller, or an auctioneer, may announce that the reserve is met, which is a second channel on the same lot.
+
+`schema/index.ts`:
+
+```ts
+import type {
+  Model, Channel, UUID, Int, LoggedIn, Role, In, Exists, Rows,
+  Eq, All, Any, AuthUid, Param, Event, Payload,
+} from "@supatype/types"
+
+export type Lot = Model<
+  { id: UUID; seller_id: UUID; title: string },
+  { access: { read: LoggedIn } }
+>
+
+export type LotWatcher = Model<
+  { id: UUID; lot_id: UUID; user_id: UUID },
+  { access: { read: LoggedIn } }
+>
+
+export type Bid = Model<
+  { id: UUID; lot_id: UUID; bidder_id: UUID; amount: Int },
+  { access: { read: LoggedIn; create: LoggedIn } }
+>
+
+// Lots the signed-in user is watching.
+type MyLots = Rows<"lot_watcher", "lot_id", Eq<"user_id", AuthUid>>
+
+// True when the signed-in user is the seller of the lot named in the topic.
+type SellerOfThisLot = Exists<
+  Rows<"lot", "id", All<[Eq<"id", Param<"id">>, Eq<"seller_id", AuthUid>]>>
+>
+
+// Bids and watchers. A signed-in watcher may send a "bid" event with a sensible amount.
+export type LotChannel = Channel<"lot:{id}", {
+  params: { id: UUID }
+  access: {
+    join: Any<[In<"id", MyLots>, Role<"auctioneer">]>
+    send: All<[
+      LoggedIn,
+      Event<"bid">,
+      Payload<"amount", { kind: "number"; min: 1; max: 1000000 }>,
+    ]>
+    track: All<[LoggedIn, In<"id", MyLots>]>
+  }
+}>
+
+// Announcements only the seller (or an auctioneer) may make about the same lot.
+export type LotStatusChannel = Channel<"lot:{id}:status", {
+  params: { id: UUID }
+  access: {
+    join: Any<[In<"id", MyLots>, Role<"auctioneer">]>
+    send: All<[Any<[SellerOfThisLot, Role<"auctioneer">]>, Event<"reserve_met">]>
+  }
+}>
+```
+
+Things to notice:
+
+- `In<"id", MyLots>` at the top of a rule: a bare string names a channel parameter, here the `{id}` in the pattern. Inside `Rows` a bare string is a column of that table, so a parameter there is written `Param<"id">`.
+- `Event` and `Payload` are checked by the realtime server on every broadcast, with no database call. They are valid only in `send` and only directly inside `All<[...]>`. One `All` names one event, which is why the seller's event has its own channel.
+- `Payload` checks the shape of a field: `string` (with `maxLength`), `number` (with `min` and `max`), `boolean` or `required`. A missing field fails its check. It cannot say whether a bid is a good one. Put that in a database function (see [sending from the database](https://www.supatype.com/docs/realtime.html#send-from-db)).
+- The channel types need no `export`, but exporting them does no harm.
+
+#### Declaring a channel
+
+- A pattern is segments separated by `:`. A segment is a literal, a `{name}` that matches exactly one segment, or a final `*` that matches one or more remaining segments.
+- A literal may hold only letters, digits, `_`, `.` and `-`. A pattern may not be a bare `*`, and may not start with `realtime:` or `_supatype`.
+- Every `{name}` needs an entry in `params`, and every `params` key must be in the pattern. A parameter is a `UUID`, a `string` or an `Int`. A topic whose parameter has the wrong shape, such as `lot:abc` for `{id: UUID}`, is refused as not fitting. It never reaches Postgres as a bad cast.
+- Two declarations that could match the same topic are refused, and both are named. `lot:{id}` and `lot:featured` cannot both exist.
+- `Owner` is refused on a channel, because a channel has no row to own.
+- A `send` rule made only of `Event` and `Payload` checks who is sending nothing, so anon may send. `supatype diff` and `supatype push` warn about it every time, as long as the rule stands. Add a caller test such as `LoggedIn`. Writing `Public` in the rule says anyone may send, and silences the warning.
+- `supatype diff` and `supatype push` list channels added, removed and changed, and which operation's rule changed.
+- The engine must be new enough to emit the access functions. The CLI refuses a push that declares a channel, or sets `realtime.channels`, to an engine that does not list `private_channels` in its capabilities. See [moving from 0.9.2](https://www.supatype.com/docs/realtime.html#upgrading).
+- After `supatype generate`, the declared patterns type the channel names in the client, so editors suggest `lot:${string}`. Any other string is still accepted.
+
+A declaration is enforced as soon as it is pushed, for every client, including ones built before channels existed.
+
+#### The realtime.channels switch
+
+The switch decides what happens to a topic that no declaration matches. It lives in `supatype.config.ts` and push carries it into the database, so self-host and Cloud need nothing else.
+
+`supatype.config.ts`:
+
+```ts
+import { defineConfig } from "@supatype/cli"
+export default defineConfig({
+  project: { name: "gavel" },
+  database: { provider: "docker" },
+  server: { mode: "dev" },
+  app: { mode: "none" },
+  realtime: { channels: "declared" },
+})
+```
+
+| Value | An undeclared topic |
+| --- | --- |
+| `"open"` | Broadcast and presence work as they always did. This is the default when the key is absent. |
+| `"declared"` | The join is allowed, so `from(table).subscribe()` still works, but broadcast and presence on it are refused. A broadcast from the database to it is dropped. `supatype init` writes this for new projects. |
+
+The `REALTIME_CHANNELS` environment variable on the realtime service can only tighten this. Set to `declared`, it makes the service behave as declared even when the database says `open`. It can never loosen a database that says `declared`. Any other value stops the service from starting.
+
+#### Using a private channel from the client
+
+Pass `private: true` when you open the channel. The server enforces declarations without it. What the flag adds is an assertion: a name that no declaration matches is refused at once, so a typo fails loudly, and a server too old to enforce channels is never asked.
+
+`typescript`:
+
+```ts
+import { isRealtimeChannelError } from "@supatype/client"
+import { supatype } from "./supatype"
+import { displayName, lotId, retryLater, showBid, showRefusal, tellUser, updateWatchers } from "./app"
+
+const lot = supatype.realtime
+  .channel(`lot:${lotId}`, { private: true })
+  .onBroadcast("bid", (bid) => showBid(bid))
+  .onPresence(({ joins, leaves }) => updateWatchers(joins, leaves))
+  .onRefused((refusal) => {
+    // The channel is still joined. This one send went nowhere.
+    if (refusal.code === "payload_refused") tellUser("That bid was not accepted.")
+  })
+  .subscribe((status, err) => {
+    if (status === "SUBSCRIBED") lot.track({ name: displayName })
+    if (status === "CHANNEL_ERROR" && isRealtimeChannelError(err)) {
+      if (err.retryable) retryLater()
+      else showRefusal(err.reason)
+    }
+  })
+
+lot.broadcast("bid", { amount: 120 })
+```
+
+In React, `useChannel` takes the options as its fourth argument, and returns `error` for a refused or withdrawn join and `refusal` for a refused send. The Vue, Solid and Svelte channel bindings take the same options and return `refusal` too.
+
+`tsx`:
+
+```tsx
+import { useChannel } from "@supatype/react"
+import { isRealtimeChannelError } from "@supatype/client"
+import { showBid } from "./app"
+
+function Lot({ id }: { id: string }) {
+  const { status, error, refusal } = useChannel(
+    `lot:${id}`,
+    (channel) => {
+      channel.onBroadcast("bid", (bid) => showBid(bid))
+    },
+    [id],
+    { private: true },
+  )
+
+  if (status === "CHANNEL_ERROR") {
+    return <p>{isRealtimeChannelError(error) ? error.reason : "error"}: {error?.message}</p>
+  }
+  return <p>{status}{refusal ? ` (${refusal.code})` : ""}</p>
+}
+```
+
+#### Refusals and withdrawal
+
+Every refusal carries a fixed code. Your app acts on the code, and may show the message. Codes are listed in [refusal codes](https://www.supatype.com/docs/realtime.html#refusal-codes).
+
+- A refused join arrives as `CHANNEL_ERROR`, with a `RealtimeChannelError` as the second argument. Its `reason` is the code, `channel` names the topic, and `retryable` is true only when the server could not reach the database. `isRealtimeChannelError(value)` tells one from any other error.
+- A refused broadcast, presence track or payload does not change the channel's status. The channel is still joined. It goes to `onRefused` as `{ channel, code, message }`, with `code` one of `send_denied`, `track_denied` or `payload_refused`.
+- Withdrawal is access taken back from a channel you held. It reaches every handle on that channel as `CHANNEL_ERROR` with reason `withdrawn`, and you also leave the channel's presence. The client does not rejoin by itself. Subscribe again once the user's access is restored.
+- A message never contains the rule or the data it read. It names the declaration.
+
+#### Sending from the database
+
+A broadcast is not a transaction, so data that matters, such as a bid, should be written by a database function. That function can then tell the watchers itself with `_supatype.realtime_send(topic, event, payload)`. It works from any SQL: an RPC function, a trigger, a hook or a migration.
+
+`place_bid.sql`:
+
+```sql
+create or replace function place_bid(p_lot uuid, p_amount integer)
+returns void
+language plpgsql
+security invoker
+as $$
+begin
+  insert into bid (id, lot_id, bidder_id, amount)
+  values (gen_random_uuid(), p_lot, auth.uid(), p_amount);
+
+  -- Tell everyone watching the lot. The send rule of lot:{id} is checked as the caller.
+  perform _supatype.realtime_send(
+    'lot:' || p_lot,
+    'bid',
+    jsonb_build_object('amount', p_amount)
+  );
+end;
+$$;
+```
+
+The client calls it like any function, and listeners get the broadcast through `onBroadcast` as usual.
+
+`typescript`:
+
+```ts
+const { error } = await supatype.rpc("place_bid", { p_lot: id, p_amount: 120 })
+if (error) console.error(error.code, error.message)
+```
+
+- Receivers are every member the channel's `join` rule admitted. There is no new access path.
+- `realtime_send` checks the caller's `send` rule, including the event and payload checks, and raises error `42501` with the same sentence a refused broadcast gets. Only signed-in users sending as themselves pass. Anon is refused. The service role may send anything.
+- It writes one row to `_supatype.realtime_outbox`, which the realtime service reads from the replication slot. A trigger deletes each row as it is written, so the table never fills. Inserting into the outbox directly is judged by the same rule, and the row's `sender` must be the caller's own id (leave it out and the insert is refused).
+- Under `declared`, a database send to a topic no declaration matches is dropped, and the service logs it once per topic.
+
+> **SECURITY DEFINER:** Keep the function `SECURITY INVOKER`, as above, so the send rule judges the user. A `SECURITY DEFINER` function owned by a superuser counts as the service role, and its sends skip every check. Do the checks inside such a function yourself.
+
+#### Token changes, re-checks and outages
+
+- **New token.** When a socket gets a new token, for example after sign-in, sign-out or a role change, every channel it holds is judged again as the new identity. A channel whose `join` rule no longer admits the user is withdrawn, with a presence leave. Changed `send` and `track` answers replace the old ones.
+- **Revocation.** If a user is removed from a table a rule reads, such as `lot_watcher`, the held channels of that declaration are judged again, in one batch a second. They are also judged again after a schema push, and every 300 seconds as a backstop. Set `REALTIME_CHANNEL_RECHECK_S` to change that interval.
+- **Expiry.** A token that expires closes the socket with 4401, as before.
+- **Database down at join.** The service fails closed. It refuses every join, open channels included, with code `unavailable` and `retryable` set, because without the database it cannot tell whether a topic is declared. Retry with a delay.
+- **Database down at a re-check.** Nobody loses a channel because a check could not run. Held channels keep their access and the check is tried again at the next interval. A new token that cannot be checked still withdraws the channels, since the old answer no longer applies.
+- **Shared instance.** A shared realtime service, which serves many projects from one database, does not enforce channel rules. It refuses a join that says `private`, with code `shared_instance`. Supatype Cloud (closed beta) runs one realtime service per project.
+
+### Refusal codes
+
+The set is closed. A client that meets a code it does not know should treat it as `refused`.
+
+| Code | Arrives as | Meaning | What the app should do |
+| --- | --- | --- | --- |
+| `join_denied` | `CHANNEL_ERROR` | The channel's `join` rule said no, or the channel declares none. | Tell the user they may not open this. Do not retry. Ask them to sign in if they are not. |
+| `not_declared` | `CHANNEL_ERROR` | You opened it with `private: true` and no declaration matches the name. | A bug: fix the name, or push the declaration. |
+| `does_not_fit` | `CHANNEL_ERROR` | A declaration matches the start of the name, but a parameter has the wrong shape, such as a non-UUID. | A bug: build the topic from a valid value. |
+| `unavailable` | `CHANNEL_ERROR`, `retryable` | The server could not reach the database to check. | Retry after a delay. This is the only retryable code. |
+| `shared_instance` | `CHANNEL_ERROR` | The realtime service is shared, and private channels are not available there. | Use a project with its own realtime service. |
+| `withdrawn` | `CHANNEL_ERROR` | A re-check took back access to a channel you held. | Stop showing the channel's data. Join again only when the user's access changes. |
+| `send_denied` | `onRefused` | A broadcast was refused: the `send` rule said no, there is none, or the topic is undeclared under `declared`. | Show that the send failed. The channel is still joined. |
+| `track_denied` | `onRefused` | A presence track was refused. | Show that the user is not shown as present. The channel is still joined. |
+| `payload_refused` | `onRefused` | The event name or payload failed the send rule's checks. | Fix the message, or tell the user their input was not accepted. |
+| `refused` | `CHANNEL_ERROR` | Any other refusal, such as a bad filter, a missing table or no token. | Read the message. Do not retry blindly. |
+| `unsupported_server` | `CHANNEL_ERROR` | The client's own: the server did not announce private channel support, so a `private: true` join was never sent. The message says to upgrade the server. | Upgrade the realtime service. Do not fall back to an open channel. |
+
+### Moving from 0.9.2
+
+Nothing changes until you declare a channel or set `realtime.channels`. A project with no `realtime` key stays `"open"`, so broadcast and presence behave as they did. `supatype init` writes `"declared"` for new projects only.
+
+Before 0.9.3, anyone with your anon key could join any channel, read its broadcasts, send on it and appear in its presence. To close that:
+
+- Step 1: Upgrade the realtime service and the engine. The engine must list `private_channels` in its capabilities. The CLI checks this and refuses the push if it does not, because an older engine would drop the channels and report success while enforcing nothing. On self-host, raise the engine pin in `versions.engine`. On Cloud, a push that declares channels is refused until the platform's engine lists the capability.
+- Step 2: Declare a `Channel` for each topic your app uses, with the rules you want. Declaring one enforces its pattern at once, for every client, in either mode.
+- Step 3: Set `realtime: { channels: "declared" }` and run `supatype dev`. Fix the refusals you see. `supatype diff` warns when the mode goes from `open` to `declared`, and when you remove a declaration under `declared`.
+- Step 4: Push.
+- Step 5: Add `private: true` to the channels the client opens, so a mistyped name is refused instead of left open.
+
+A channel named after a table, which `from(table).subscribe()` opens, keeps working under `declared` with no declaration, because it only carries row changes. Row changes are still guarded by the table's access rules.
+
+A client that sends `private: true` to a 0.9.2 realtime service fails with `unsupported_server` and the message "this realtime server does not enforce private channels; upgrade it".
 
 ### Connection and auth
 
@@ -2507,7 +2991,9 @@ The client opens the socket at `/realtime/v1` on your project URL when the first
 
 When someone signs in, signs out or a different user signs in, the client reconnects with the new token and joins every channel again. Access is checked as the new identity from then on. A token refresh for the same user does not reconnect, so no changes are missed.
 
-If the socket drops, the client retries after 1, 2, 4 seconds and so on, doubling each time, for up to 10 attempts. Channels report `SUBSCRIBING` while it retries and `TIMED_OUT` once it gives up. Changes made while the socket was down are not replayed, so refetch after a reconnect if you need the gaps filled.
+A channel's status cannot tell a drop from a first connect, since both read `SUBSCRIBING`. For the socket itself, `supatype.realtime.isConnected` is true while it is open, and `supatype.realtime.onConnectionChange((state) => ...)` calls you each time `supatype.realtime.connectionState` changes between `"connected"`, `"connecting"` (first connect, reconnecting after a drop or a sign-in, or waiting to retry) and `"disconnected"` (nothing subscribed, `disconnect()` was called, or every retry failed). It returns a function that stops the listener, and does not call you with the state it already has. Refetch when the state returns to `"connected"` after a drop. In React, `useChannel` and `useRealtimeConnection` expose the same two values.
+
+If the socket drops, the client retries after 1, 2, 4, 8 and 16 seconds, then every 30 seconds, for up to 10 attempts. Channels report `SUBSCRIBING` while it retries and `TIMED_OUT` once it gives up. Changes made while the socket was down are not replayed, so refetch after a reconnect if you need the gaps filled.
 
 ### Config and requirements
 
@@ -2525,6 +3011,10 @@ The service reads these environment variables. The self-host compose file sets t
 | `PORT` | 4000 | The port the service listens on |
 | `REPLICATION_POLL_INTERVAL` | 100 | How often, in milliseconds, the slot is read |
 | `SECURE_CHANNELS` | `true` | When `true`, a client must present a valid token before it can join a channel |
+| `REALTIME_CHANNELS` | unset | Set to `declared` to refuse broadcast and presence on undeclared channels whatever the database says. It can only tighten `realtime.channels` |
+| `REALTIME_CHANNEL_RECHECK_S` | 300 | Seconds between re-checks of every channel a socket holds, as a backstop to the checks made on a new token, a push and a change to a table a rule reads |
+
+To set these from `supatype.config.ts` rather than the environment, use `realtime: { channels: "declared", recheckSeconds: 120 }`. Self-host renders them as the realtime service's defaults, which a value in `.env` overrides. A push to Supatype Cloud sets them on the project's realtime service (production only), and a setting you take out of the config stops applying on the next push that still sets another one.
 
 ### Limits
 
@@ -2532,6 +3022,7 @@ The service reads these environment variables. The self-host compose file sets t
 - While `supatype push` is changing the schema, the slot is not read. Changes made during the push are held in the slot and sent once it finishes.
 - Each change costs one database query per subscriber, to check that subscriber's access. Many subscribers to a busy table means many queries.
 - The replication slot keeps WAL until the service reads it. If the service is stopped for a long time while the database keeps writing, WAL builds up on disk.
+- Each private channel a socket holds costs one query at join, one more every re-check interval, and a batch a second while a table its rules read is changing.
 - Subscriptions live in the service's memory. A restart drops every socket, and clients reconnect and join again.
 
 ## Functions
@@ -2668,7 +3159,7 @@ export default defineConfig({
 
 `supatype push` refuses a name that matches no function, so a typo cannot silently grant nothing. `supatype doctor` lists the current grants.
 
-> **LOCAL DEV:** The local router does not apply this list. Under `supatype dev` every function receives `ctx.serviceRoleKey`, and under `supatype functions serve` every function does when `SUPATYPE_SERVICE_ROLE_KEY` is set in your shell. Test that a function works without the key on a self-hosted stack.
+Local dev applies the same list, so a function that relies on the key without being named fails there first. Under `supatype functions serve` no function receives the key unless `SUPATYPE_SERVICE_ROLE_KEY` is set in your shell, and then only the functions the list names.
 
 ### Environment and secrets
 
@@ -2681,6 +3172,8 @@ Read them from `ctx.env`. The files are read on each call, so a changed value ta
 
 Every value set with `supatype functions env set`, in `.env.local` or in `.env.<name>.local` arrives in `ctx.env` on each call, never in `Deno.env`: `Deno.env` is the worker's one process environment, shared by every call running at the same time, so a value put there for one function would reach every other. `Deno.env.get("RESEND_API_KEY")` finds nothing.
 
+`Deno.env` holds only the worker's own settings (such as `SUPATYPE_URL`, `SUPATYPE_PUBLIC_URL` and `SUPATYPE_ANON_KEY`, which also arrive as `ctx` fields), Deno's `DENO_*` variables and what the operating system needs, such as `PATH` and the temporary directory. Before any function is imported the worker deletes everything else, so the stack's secrets and the variables in your shell never reach function code, under `supatype dev` and `supatype functions serve` as on a deployed stack. A self-hosted worker also keeps `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` and `SITE_URL` when Compose passes them.
+
 ```sh
 $ npx supatype functions env set RESEND_API_KEY=re_123
 $ npx supatype functions env list
@@ -2688,6 +3181,16 @@ $ npx supatype functions env unset RESEND_API_KEY
 ```
 
 On a project that is not linked, these commands edit `functions/.env.local`. `list` masks the values.
+
+Add `--function <name>` to `list`, `set` or `unset` to work on one function's own values: on a linked project they go to that function, and on a project that is not linked they edit `functions/.env.<name>.local`. A function's own value overrides a shared one with the same name.
+
+```sh
+$ npx supatype functions env set RESEND_API_KEY=re_456 --function send-invite
+$ npx supatype functions env list --function send-invite
+$ npx supatype functions env unset RESEND_API_KEY --function send-invite
+```
+
+On Supatype Cloud the per-function routes need a control plane that serves `/projects/<ref>/functions/<name>/env`.
 
 `functions/send-invite/index.ts`:
 
@@ -2712,6 +3215,8 @@ const { data, error } = await supatype.functions.invoke("greet", { body: { name:
 
 `supatype dev` serves functions through the same gateway as the rest of the API when a functions directory exists. You do not run anything else.
 
+With the Native provider, Deno runs in the project folder, so a project with a `package.json` resolves `npm:` imports from its `node_modules`. Install what a function imports, such as `npm install postgres` for `npm:postgres`. Without it the call fails with `Could not find a matching package for 'npm:postgres' in the node_modules directory`. Do not turn on `nodeModulesDir: "auto"` in a `deno.json` there: Deno then rewrites `node_modules`, and `supatype.config.ts` stops loading.
+
 To run functions on their own, with Deno watching for changes:
 
 ```sh
@@ -2719,7 +3224,7 @@ $ npx supatype functions serve
 $ npx supatype functions invoke greet --local --data '{"name":"Alex"}'
 ```
 
-`serve` listens on port `18472` by default; change it with `--port`. It loads `functions/.env.local` unless you pass `--env-file`. `invoke` sends a POST, prints the status and the response, and gives up after 30 seconds. It exits 1 when the function answers with a status of 400 or above, so a script can tell a failed call (a 404 for a function that does not exist, say) from one that worked. `--auth` adds a test token to the request. With `--local`, or when no Cloud project is linked, `invoke` calls a running `serve` on `--port` (18472 by default) when one answers, and the project's dev API otherwise.
+`serve` listens on port `18472` by default; change it with `--port`. It loads `functions/.env.local` unless you pass `--env-file`. `invoke` sends a POST, prints the status and the response, and gives up after 30 seconds. It exits 1 when the function answers with a status of 400 or above, so a script can tell a failed call (a 404 for a function that does not exist, say) from one that worked. `--auth` adds a test token to the request, on this machine only: on a Cloud link it is refused, because it would send your Supatype Cloud session, which can manage your projects, to the function, and on a self-hosted link it is refused because there is no user token to send. Call a deployed function with a signed-in user's access token instead. With `--local`, or when no Cloud project is linked, `invoke` calls a running `serve` on `--port` (18472 by default) when one answers, and the project's dev API otherwise.
 
 ### Self-host
 
@@ -2735,13 +3240,17 @@ $ docker compose -p supatype-<project> -f .supatype/self-host/docker-compose.yml
 
 On an unlinked project with a self-host Compose file, `supatype functions deploy` uploads nothing. It lists the functions it found on disk and prints that restart command.
 
-The worker gets the anon and service-role keys from the stack. To give functions a database connection, set `SUPATYPE_FUNCTIONS_DB_URL`; it appears as `ctx.dbUrl`. It is off by default because a direct connection bypasses access rules, field masking and model hooks. Point it at a role you have restricted, or accept that.
+The worker gets the anon and service-role keys from the stack. To give functions a database connection, set `SUPATYPE_FUNCTIONS_DB_URL`; it appears as `ctx.dbUrl`. It is off by default because a direct connection is not a request through the API: model hooks do not run, and row rules and field masking apply only for the role the URL names. A superuser or `BYPASSRLS` role (the admin role, `service_role`) skips both, so point it at a login role that is neither, granted only what your functions need. The database name at the end of the URL is the value of `POSTGRES_DB` in your `.env`.
+
+The worker runs Deno 2.9.8. Postgres drivers verified against a live database on it: `npm:postgres` (latest), `npm:postgres@3.4.5` and `npm:pg`. `npm:postgres` 4.0 and later does not run on Deno before 2.8, where it fails with `Not implemented: LibuvStreamWrap.prototype.useUserBuffer` or `socket._handle.useUserBuffer is not a function`. Every 3.4 release runs there; a stack on an older worker image should pin `npm:postgres@3.4.5`.
 
 Function logs are JSON lines on the container's output, each with the call's `request_id`, status and duration:
 
 ```sh
 $ npx supatype self-host compose logs --service functions-worker
 ```
+
+Under `supatype dev` without Docker (native dev), functions run inside the server process, so there is no worker container to read. `supatype dev` sets `SUPATYPE_FUNCTIONS_LOG_TO_STDOUT`, and the server then prints each line a function writes to the terminal that runs `dev`, prefixed with the function name, for example `[hello] got a request`. Lines that name no function, such as Deno's own errors, are prefixed `[deno]`. The same lines stay in Studio's function logs. A server that does not have the variable set, such as Cloud or a Compose stack, prints nothing extra.
 
 > **NOTE:** The Compose file mounts `functions/` at the project root. Keep the default path on a self-hosted stack.
 
@@ -3017,6 +3526,8 @@ A `RichText` field takes a plain string. It becomes a one-paragraph document. Ri
 
 A `Blocks` entry is `{ type, data }`, with the block's fields under `data`, as Studio stores it. See `sections` below.
 
+A column stored as `jsonb` takes an object or an array as it is. A string is read as JSON text, so a value that is itself a JSON string needs its quotes: `alert: JSON.stringify("outbid")`, not `alert: "outbid"`, which fails with `invalid input syntax for type json`. This includes a field whose type push stores as `jsonb` by fallback, such as a single string literal type.
+
 `expr` gives values the database works out when the seed runs:
 
 `seeds/02-posts.ts`:
@@ -3060,7 +3571,7 @@ A `SupatypeAuthUserId` field with `onDelete` has a foreign key to the user, so t
 
 ### Many-to-many rows
 
-Many-to-many relations have no nested write. The rows live in the junction table, which the builder does not list. Write them with `db.$sql`, which runs in the same transaction:
+Many-to-many relations have no nested write yet. The rows live in the junction table, which the builder does not list, so a seed writes them with `db.$sql`, which runs in the same transaction. (App code can write the same rows through the client: see [Linking many-to-many rows](https://www.supatype.com/docs/client.html#many-to-many).)
 
 `seeds/03-tags.ts`:
 
@@ -3110,7 +3621,9 @@ $ supatype seed                    # every file in seeds/
 $ supatype seed seeds/02-posts.ts  # one file
 $ supatype seed --atomic           # all files in one transaction
 $ supatype seed --status           # what ran, when, and what changed since
-$ supatype seed --connection <dsn> # another database
+$ supatype seed --connection <dsn> # another database, from this machine
+$ supatype seed --env staging       # a linked project's environment
+$ supatype seed --local             # the local stack, even when linked
 $ supatype seed --environment staging
 ```
 
@@ -3118,13 +3631,23 @@ $ supatype seed --environment staging
 
 A Docker project's local stack has to be running: with it stopped, `supatype seed` starts nothing and exits 2, saying to start it with `supatype dev`, or `supatype self-host compose up -d` on a server. `--connection` seeds the database it names either way.
 
-A project linked to Supatype Cloud is refused, so a local run cannot seed it by mistake. Pass `--force` only when you mean to seed the linked project.
-
 Each file is one transaction. Without `--atomic`, a failure in the third file leaves the first two applied, and the report says so.
 
 Errors name your schema, such as `Tag.name is already taken`, with the file and position. Exit code `1` means a seed failed. Exit code `2` means the run could not start.
 
 A seed writes the model's own table, so rows on a drafts model are seeded as published.
+
+#### A linked project
+
+A project linked with `supatype link`, to Supatype Cloud or to a self-hosted server, seeds through that server. The CLI collects your files as it does locally and sends the result to the server, which applies it as the environment's own database role. The CLI never holds the database credential. `--env <name>` picks the environment, and the link's default is used without it.
+
+- Seeding production asks you to type the project ref. In a script, or with no terminal, pass `--confirm-production`. A self-hosted server's one environment is production.
+- `--force` is refused on a linked project. Use `--confirm-production` to skip the prompt, or `--local` to seed the stack on this machine instead.
+- `--environment` must match the environment being seeded, because that is what an `{ environment }` condition reads. Drop it, or pass `--env` with the same name.
+- Every file must `export default` a function. A file without one would run its writes when it is read, so it is refused before anything is sent.
+- The server refuses with `schema_not_pushed` when the database lacks the schema the seed was built against. Run `supatype push` first.
+- `--status` needs only permission to view the project. Applying a seed needs permission to push the schema.
+- `--connection` and `--local` skip the link and seed the database or stack on this machine.
 
 ## Studio
 
@@ -3156,7 +3679,13 @@ Signing in is not enough on its own. Every person also needs a [Studio role](htt
 
 ### Finding your way
 
-The sidebar holds the dashboard, Models, Database, Media & Storage, Authentication, Edge Functions, Realtime and Observability, plus Settings. Entries marked as coming soon open a placeholder page and do nothing yet.
+The sidebar lists, top to bottom: Dashboard and Models; Database and Media & Storage; Authentication; Edge Functions, Static site and Realtime; and Plugins. Settings is pinned at the bottom.
+
+Some entries depend on who you are or where Studio runs. Authentication is hidden from editors and viewers. Realtime is hidden when the server does not offer the Realtime inspector. Static site appears only when the host (Supatype Cloud or a self-host deployment that provides it) describes a site, and its Deployments page needs a host that can list deployments.
+
+Features that are not built yet have no sidebar entry. Some pages inside a group still say a feature is coming soon: Database Wrappers, Read Replicas and Analytical Warehouse under Database, Backups there too except on Supatype Cloud, and Auth Hooks and Attack Protection under Authentication.
+
+The Static site group shows the site address, whether it is served from files or proxied to an app, and what is served, with a Settings page for the serving mode, SPA fallback and response headers. A setting that `supatype.config.ts` sets is marked as such. Where a deployment can list site deployments, the group has a Deployments page. A deployment that cannot describe its site has no Static site group.
 
 **Jump to** in the top bar searches pages, users and records.
 
@@ -3194,6 +3723,8 @@ Each model has tabs beside the editor:
 | Cache | The model's cached REST responses |
 
 Editors do not see Schema or Rules. Cache is for admins and developers.
+
+When the cache service refuses a request, the Cache tab shows the reason the server gave, with the HTTP status after it. If the project has no keyspace behind the cache yet, it says that nothing is cached and reads go straight to the database.
 
 ### Rich text and blocks
 
@@ -3307,6 +3838,7 @@ The GraphQL page sends queries to `POST /graphql/v1`. Pick a model to start from
 - Statements that drop, empty or overwrite data (`DROP`, `TRUNCATE`, `DELETE`, `UPDATE`, and an `ALTER` that drops something or turns off row level security) ask first and name what they change.
 - `EXPLAIN (FORMAT JSON)` draws the plan as a tree.
 - Query History lists earlier runs in this session.
+- A `DELETE` or `UPDATE` with no `WHERE` fails with `DELETE requires a WHERE clause`. That is `pg_safeupdate`, which the image loads for every session, this runner included. Write `WHERE true` to mean every row. On a connection of your own, `SET safeupdate.enabled = 0` turns the check off for that session.
 
 > **FULL ACCESS:** Queries run as `supatype_sql_editor`, which has the rights of the role that owns your tables. Row level security does not apply and masked columns show in full. It is not a superuser. Every query is recorded. Only admins and developers can open it.
 
@@ -3393,7 +3925,7 @@ The server checks every Studio request against this table.
 | Create, change and delete buckets | Yes | Yes | No | No |
 | Give and remove Studio roles | Yes | No | No | No |
 
-> **SQL EDITOR:** The SQL editor signs in as `supatype_sql_editor`. It is not a superuser, but it is a member of the database owner. Row level security does not apply there, and masked columns show in full. Every query is recorded.
+> **SQL EDITOR:** The SQL editor signs in as `supatype_sql_editor`. It is not a superuser, but it is a member of the database owner. Row level security does not apply there, and masked columns show in full. Every query is recorded. After each statement, everything the editor created is handed to the project owner. A table, view or function you make there ends up owned by the owner, not by `supatype_sql_editor`. A `SECURITY DEFINER` function written in the editor therefore runs with the owner's rights, and the owner is not a superuser.
 
 > **BUCKET RULES:** A bucket's access rules page is part of "see the access rules". Viewers and editors see it read-only. Only admins and developers can change the rules.
 
@@ -3520,6 +4052,8 @@ The first source holding a value decides it. A local address there, such as `loc
 
 ### Supatype hosts it
 
+A missing page on a plain static site serves `index.html`, on a self-hosted stack and on Supatype Cloud alike, so a single-page app's routes load on a refresh. Set `spa: false` in the `build` section of `supatype.config.ts` to answer 404 instead, and `spa: true` to turn the fallback on for a framework whose Cloud default is off. `supatype deploy` sends the setting to Cloud and `supatype self-host compose` gives it to the self-hosted server. With nothing set, both hosts take the same default from the framework: on for a plain static site, Vite and Remix SPA, off for Next.js, Astro, SvelteKit and Nuxt, whose pages are pre-rendered. A deploy with the fallback on refuses when the build has no `index.html` at its root: add one, or set `spa: false`.
+
 When a self-hosted stack serves your app (`app.mode: "static"`), its server answers `/supatype-env.js` with its own address and anon key:
 
 ```sh
@@ -3591,7 +4125,7 @@ An Expo Router app has no `index.html`. Its web page is rendered from `app/+html
   <meta charSet="utf-8" />
 ```
 
-Expo renders `+html.tsx` only when `web.output` in `app.json` is `"static"` or `"server"`, as a new app's is. With `"single"`, put `<script src="/supatype-env.js"></script>` in the head of `public/index.html` instead. A `"static"` export is plain files: have Supatype host them with `supatype app add --static ./dist`. A `"server"` export, the default from SDK 58, renders each page in a Node server (`npx expo serve`); the Supatype server in front of it answers `/supatype-env.js` itself, whatever the app mode. On any other host, build with the values instead.
+Expo renders `+html.tsx` only when `web.output` in `app.json` is `"static"` or `"server"`, as a new app's is. With `"single"`, put `<script src="/supatype-env.js" vite-ignore></script>` in the head of `public/index.html` instead. A `"static"` export is plain files: have Supatype host them with `supatype app add --static ./dist`. A `"server"` export, the default from SDK 58, renders each page in a Node server (`npx expo serve`); the Supatype server in front of it answers `/supatype-env.js` itself, whatever the app mode. On any other host, build with the values instead.
 
 A native build, for iOS or Android and on EAS, has no page, so it takes its values at build time under `EXPO_PUBLIC_SUPATYPE_URL` and `EXPO_PUBLIC_SUPATYPE_ANON_KEY`. `expo export` and EAS builds run in production mode, which never reads `.env.development.local`, where `supatype dev` and `keys` put the local stack's values. Give them your deployment's: on a linked machine, build through `supatype build`; for an EAS build, set the two names in the project's EAS environment variables, with the values `supatype keys --print frontend --env production` prints.
 
@@ -3808,7 +4342,7 @@ Pre-1.0: APIs and config may change between releases.
 
 ### Create the project locally
 
-On your machine, with Node.js 20.19 or later: the CLI needs 18, and the Vite 8 app it sets up needs 20.19.
+On your machine, with Node.js 20.19 or later, or 22.12 or later on Node 22: the CLI needs 18, and the Vite 8 app it sets up needs one of those.
 
 #### 1. Scaffold
 
@@ -3865,7 +4399,7 @@ A one-time setup on Ubuntu 22.04 or similar, with SSH access.
 
 ```sh
 # Docker: https://docs.docker.com/engine/install/ubuntu/
-# Node.js 20.19 or later, which Vite 8 needs to build the app (Ubuntu's own nodejs package is older): https://nodejs.org/en/download
+# Node.js 20.19 or later, or 22.12 or later on Node 22, which Vite 8 needs to build the app (Ubuntu's own nodejs package is older): https://nodejs.org/en/download
 $ sudo apt update && sudo apt install -y git
 $ sudo npm install -g @supatype/cli
 
@@ -3993,7 +4527,7 @@ Watch the run under **Actions** on GitHub. When it succeeds, load your gateway U
 | Site unchanged | `supatype build` writes to the directory in `app.static_dir`, then re-run `supatype self-host compose up -d`. |
 | `supatype build` fails | It lists each source it tried for the API URL and anon key. On the VM both come from `.env`: `API_EXTERNAL_URL` must be the public address, not `localhost`, and `ANON_KEY` must be set. See [Deploy your frontend](https://www.supatype.com/docs/deploying-your-frontend.html#missing). |
 
-> **RATHER NOT RUN IT YOURSELF?:** Supatype Cloud runs the same stack for you, and it is coming soon. [Join the waiting list](https://www.supatype.com/#cloud), or [book a call](https://www.supatype.com/#contact) about self-hosting with support.
+> **RATHER NOT RUN IT YOURSELF?:** Supatype Cloud runs the same stack for you, and it is in closed beta. [Request access](https://www.supatype.com/#cloud), or [book a call](https://www.supatype.com/#contact) about self-hosting with support.
 
 ## Coming from Supabase
 
@@ -4156,7 +4690,7 @@ $ supatype push
 ### What does not carry over
 
 - **Your SQL migrations.** Supatype does not replay `supabase/migrations`. It plans changes from the schema and records the migrations it applies.
-- **Your RLS policies.** They are rewritten as access rules. Rules are types, and there is no raw SQL escape hatch, so a policy the rule types cannot express needs another approach, such as a hook or a function.
+- **Your RLS policies.** They are rewritten as access rules. Rules are types: there is no raw SQL escape hatch for access rules, so a policy the rule types cannot express needs another approach, such as a hook or a Postgres function you write yourself ([Server logic in a Postgres function](https://www.supatype.com/docs/schema.html#server-logic)). Your database is still Postgres, and you can run your own SQL in it.
 - **Generated types.** Delete `database.types.ts`. The client types come from the generated `supatype/generated` files.
 - **Function entry points.** The handler shape differs, so each function's entry needs a small rewrite. The code inside, being Deno, mostly stays.
 - **Function names and bodies in the client are not typed**, unlike tables.
@@ -4380,7 +4914,7 @@ The default superuser is `supatype_admin`, set with `POSTGRES_USER`.
 | `pg_net` | Async HTTP requests from triggers and functions. |
 | `pgjwt` | JWT signing and checking in SQL. |
 | `pg_cron` | Scheduled jobs inside Postgres. |
-| `pg_safeupdate` | Stops UPDATE and DELETE with no WHERE clause. |
+| `pg_safeupdate` | Stops UPDATE and DELETE with no WHERE clause. It is in `shared_preload_libraries`, so it applies to every session: API requests, Studio's SQL runner and your own `psql`. Write `WHERE true` to mean every row, or `SET safeupdate.enabled = 0` to turn it off for the session. |
 | `pg_plan_filter` | Rejects queries over a cost limit. |
 | `wal2json` | Logical decoding as JSON, for realtime. |
 
@@ -4459,7 +4993,7 @@ psql "$DATABASE_URL" -c "SELECT * FROM supacache.pg_stat_keyspace;"
 | Backups | A separate artefact on a separate schedule with a separate restore. | Persisted keys are Postgres tables, so base backups and point-in-time recovery include them. |
 | Monitoring | A Redis exporter to deploy and wire up. | pg_stat_keyspace views, granted to pg_monitor. Existing Postgres collectors read them. |
 | Command and type surface | Wider. Adds streams, scripting, HyperLogLog and geo. | Strings, hashes, lists, sets, sorted sets, bitmaps, Bloom and Cuckoo filters, pub/sub and transactions. |
-| Maturity | Mature and battle-tested, with a large ecosystem. | New, with a focused feature set. |
+| Maturity | Mature, with a large ecosystem. | New, with a focused feature set. |
 
 ### What it does not do
 
@@ -4805,7 +5339,7 @@ $ supatype push --help
 
 The npm package needs Node.js 18 or later. It is the install to use on Windows.
 
-The npm package runs the same program as the standalone install, so the React version your app uses, or any other package it installs, has no effect on the CLI. The first run of each version downloads that program from `releases.supatype.com` into `~/.supatype/cache/cli/<version>/` and checks it against the release's signed checksums. In a scaffolded project that happens during `npm install`, when the `prepare` script runs `supatype generate`. A production install with `--omit=dev` leaves the CLI out, and `prepare` then generates nothing and succeeds, since the build that needed the generated files ran with everything installed. Where that site is unreachable, set `SUPATYPE_CDN_BASE` to a mirror of it. The program is built for Linux and macOS on x64 and arm64, and for Windows on x64.
+The npm package runs the same program as the standalone install, so the React version your app uses, or any other package it installs, has no effect on the CLI. The first run of each version downloads that program from `releases.supatype.com` into `~/.supatype/cache/cli/<version>/` and checks it against the release's signed checksums. In a scaffolded project that happens during `npm install`, when the `prepare` script runs `supatype generate`. A production install with `--omit=dev` leaves the CLI out, and `prepare` then generates nothing and succeeds, since the build that needed the generated files ran with everything installed. Where that site is unreachable, set `SUPATYPE_CDN_BASE` to a mirror of it. A CLI built from source has no release public key embedded and refuses the download; set `SUPATYPE_RELEASE_PUBLIC_KEY` to the release minisign public key to verify the checksums against it. When set, it takes the place of the embedded key. The program is built for Linux and macOS on x64 and arm64, and for Windows on x64.
 
 On a Linux or macOS machine without Node, such as a CI image or a server, install the standalone binary instead, with the script or with Homebrew:
 
@@ -4824,7 +5358,7 @@ Many commands that reach a database take `--connection <url>` to override the co
 
 Commands that use Docker first check that it answers. A Docker that says it cannot be reached fails the command at once. A Docker that is running but slow to answer, as on a machine carrying many containers, is waited for, with a line saying so, for up to 60 seconds in all; set `SUPATYPE_DOCKER_TIMEOUT` to a whole number of seconds to wait longer or shorter.
 
-> **CLOUD:** Commands marked **Cloud** need Supatype Cloud, which is coming soon. Everything else works locally and on a self-hosted stack.
+> **CLOUD:** Commands marked **Cloud** need Supatype Cloud, which is in closed beta ([request access](https://www.supatype.com/#cloud)). Everything else works locally and on a self-hosted stack.
 
 ### Project and local development
 
@@ -4856,7 +5390,7 @@ Commands that use Docker first check that it answers. A Docker that says it cann
 | Command | Description | Useful flags |
 | --- | --- | --- |
 | `push` | Push schema to the database: diff, prompt for destructive changes, apply migration, generate types | `--yes`, `--connection <url>`, `--env <name>`, `--direct` (alias `--local`), `--overwrite-drift`, `--run-hooks` |
-| `diff` | Show planned schema changes without applying them (dry run) | `--connection <url>`, `--env <name>`, `--direct` |
+| `diff` | Show planned schema changes (the operations, not the SQL) without applying them. There is no `push --dry-run`: `diff` is the preview and `migrate` prints the SQL | `--connection <url>`, `--env <name>`, `--direct` |
 | `generate` | Regenerate TypeScript types without running a migration |  |
 | `migrate` | Write the SQL a push would apply, without applying it. Plain, it takes no lock your application waits on and the file records nothing: applied by hand, the next push finds the tables unmanaged. With `--record` the file also records the migration as a push does | `-o, --output <file>`, `--record`, `--force` |
 | `migrations list` | List applied migrations with schema snapshot metadata | `--connection <url>`, `--env <name>` |
@@ -4882,13 +5416,21 @@ An object passed to `adopt` is named as `doctor` names it: `kind:table.name`, or
 
 | Command | Description | Useful flags |
 | --- | --- | --- |
-| `seed [file]` | Run database seeds: optional single file; else all seeds/*.ts (alphabetical); else seed.ts | `--status`, `--atomic`, `--connection <dsn>`, `--environment <name>` |
+| `seed [file]` | Run database seeds: optional single file; else all seeds/*.ts (alphabetical); else seed.ts | `--status`, `--atomic`, `--connection <dsn>`, `--environment <name>`, `--env <name>`, `--local`, `--confirm-production` |
 | `cache rest list` | List cached REST GET entries | `--table <name>`, `--json` |
 | `cache rest get <key>` | Show one cache entry (full key) | `--json` |
 | `cache rest delete <key>` | Delete one cache entry |  |
 | `cache rest flush` | Flush REST cache entries | `--table <name>`, `--yes` |
 
-`seed` refuses to run against a project linked to Supatype Cloud unless you pass `--force`. See [Seeding](https://www.supatype.com/docs/seeding.html).
+`seed` on a linked project (Supatype Cloud, or a server linked with `supatype link`) sends the seeds to that server instead of connecting to the database. `--local` seeds the local stack instead, and `--force` is refused. See [Seeding](https://www.supatype.com/docs/seeding.html).
+
+#### Switching the server cache on
+
+A model's `cache` block says which tables may be cached. It does not switch anything on: the running stack keeps its own allowlist, `cache_tables`, and a table is served from the cache only when both agree. `push` and `dev` add each newly declared table to that allowlist through the running stack and never change an entry that already exists. If the stack is not answering they create `.supatype/api-config.json` from the server's default shape and write the entry there.
+
+Both print a note while `cache_max_ttl` is 0, which it is until you set it: with a TTL of 0 nothing is cached. Set it under API, REST, Settings in Studio, or with the admin API, which is what the CLI calls:
+
+PATCH /admin/v1/config/rest Authorization: Bearer <service role key> { "cache_max_ttl": 60, "cache_tables": { "posts": { "enabled": true, "allow_public": false } } } All three fields are optional, and `schema` and `max_rows` are left alone when absent. `cache_max_ttl` is 0 to 86400 seconds. `cache_tables` **replaces the whole map**, so read it with `GET /admin/v1/config/rest` and send back the entries you want to keep. The schema's declaration is a ceiling: a table it does not declare, or declares with `enabled: false`, is switched off and listed in the answer's `adjusted` array, and a `cache_max_ttl` above a declared `maxTtl` is lowered to it. Every Cloud plan runs the cache, Free included. Free's is smaller: 10,000 entries of up to 1,024 bytes each, and no row cache. On Cloud, `push` stores the declaration but does not switch tables on, so enable them in Studio or with this call; against a local or self-hosted stack, `push` and `dev` do it for you.
 
 `reset` drops only the tables your schema manages. Sign-ins, Studio users and stored files are kept. It then clears the record of past seed runs, so a `runOnce` seed runs again, and runs the seeds unless you pass `--no-seed`. To start the whole database again, use `supatype dev --reset-db`.
 
@@ -4901,9 +5443,9 @@ An object passed to `adopt` is named as `doctor` names it: `kind:table.name`, or
 | `functions invoke <name>` | Invoke a local or deployed function; exits 1 when it answers 400 or above | `--data <json>`, `--auth`, `--local` (a running `functions serve` if one answers, else the dev API), `--port <port>` (of that serve, default 18472) |
 | `functions deploy` | Deploy all functions (or `--only <name>` for one) to the linked project | `--only <name>`, `--env <name>`, `--dry-run` |
 | `functions list` **Cloud** | List all deployed functions for the linked project |  |
-| `functions delete <name>` **Cloud** | Remove a deployed function |  |
+| `functions delete <name>` | Remove a deployed function and its env values from the linked project, on Cloud or on a self-hosted server. On a project that is not linked it removes nothing and says so |  |
 | `functions logs <name>` **Cloud** | Tail logs for a deployed function | `--since <duration>` (default 1h) |
-| `functions env list`, `set <KEY=value>`, `unset <key>` **Cloud** | Manage function environment variables |  |
+| `functions env list`, `set <KEY=value>`, `unset <key>` **Cloud** | Manage function environment variables | `--function <name>` (one function's own values, which override a shared one) |
 | `hooks new <name>` | Scaffold a hook handler |  |
 | `hooks list` | Show the hooks the schema declares and whether each one can run |  |
 
@@ -4935,7 +5477,8 @@ Turn SAML on with `auth.sso.saml.enabled` in `supatype.config.ts` first. The `ss
 | `self-host compose status` | Show compose service status |  |
 | `self-host compose logs` | Tail compose logs | `--service <name>`, `-f, --follow` |
 | `add domain [domain]` | Add a custom domain with automatic HTTPS (self-host) | `--email <email>` for Let's Encrypt |
-| `link` | Link this project to cloud or self-host (unified .supatype/link.json) | `--url <url>`, `--token <token>`, `--env <name>`, `--fix-gitignore` |
+| `link` | Link this project to cloud or self-host (unified .supatype/link.json). Refuses a different project or host than the one already linked, unless `--force` | `--url <url>`, `--token <token>`, `--env <name>`, `--fix-gitignore`, `--force` |
+| `unlink` | Remove this folder's link (`.supatype/link.json`, and the legacy `cloud.json` and `linked.json` if present) and say what was removed |  |
 | `envs list` | List linked environments, and the default commands use: `environments` in supatype.config.ts when it names one, else this checkout&apos;s |  |
 | `envs use <name>` | Set this checkout&apos;s default environment. `environments.default` in supatype.config.ts wins over it, and `envs use` says so |  |
 | `build [command...]` | Run your app's production build with the deployment's API URL and anon key under every front-end name (VITE_, PUBLIC_, NEXT_PUBLIC_, EXPO_PUBLIC_). Runs the package.json build script unless a command follows --. Refuses to start when either value is missing | `--env <name>`, `--allow-local`, `-- <command...>` |
@@ -4952,22 +5495,24 @@ Commands that reach the local stack's database or API need that stack running: `
 
 `build` takes each value from the first of: the environment (`SUPATYPE_URL`, `SUPATYPE_ANON_KEY` or any framework's name), the `/supatype-env.json` of the server the environment's URL names (for the anon key only, so CI can set just `SUPATYPE_URL`), the linked environment, and a `.env` that records a deployment (`PUBLIC_SUPATYPE_URL` or `API_EXTERNAL_URL`, and `ANON_KEY`). An anon key counts only for the URL being built for; one a source holds for another deployment is listed as skipped. It refuses a local address unless you pass `--allow-local`, never gives the build the service role key, writes no file, and exits with the build's own code. A package.json build script that is itself `supatype build` is refused rather than run again. `deploy` builds the app the same way. See [Deploy your frontend](https://www.supatype.com/docs/deploying-your-frontend.html).
 
-For a self-hosted stack, `link --url` takes the stack's gateway URL and `--token` its `SERVICE_ROLE_KEY`. The full walkthrough is in [Self-host](https://www.supatype.com/docs/#self-host) and [Deploy to a VM with GitHub Actions](https://www.supatype.com/deploy-vm-github-actions.html).
+For a self-hosted stack, `link --url` takes the stack's gateway URL and `--token` its `SERVICE_ROLE_KEY`. The link is made to the project the server says it serves, whatever this folder is called.
+
+A folder holds one link, to Supatype Cloud or to a self-hosted server, and `envs use` chooses between environments of that one link. `link` to a different project, or to the other kind of host, refuses and names the link that is there: run `supatype unlink` to remove it, or pass `--force` to replace it with a fresh one. Linking the same project again (to refresh a token, or to add an environment with `--env`) always works. To work against both hosts at once, keep a folder for each (a second clone or a `git worktree`) and link each to its own host. The full walkthrough is in [Self-host](https://www.supatype.com/docs/#self-host) and [Deploy to a VM with GitHub Actions](https://www.supatype.com/deploy-vm-github-actions.html).
 
 ### Supatype Cloud
 
-All of these need Supatype Cloud, which is coming soon.
+All of these need Supatype Cloud, which is in closed beta ([request access](https://www.supatype.com/#cloud)).
 
 | Command | Description | Useful flags |
 | --- | --- | --- |
-| `login` | Sign in to Supatype Cloud (stores refreshable session for push/deploy) | `--email <email>`, `--password <password>` (prefer `SUPATYPE_PASSWORD`) |
+| `login` | Sign in to Supatype Cloud in your browser. It opens the accounts site, you approve, and type the code shown there into the terminal; the CLI stores a personal access token (`spt_...`) for push and deploy. The URL is always printed. The CLI asks the control plane where the accounts site is (`GET /api/v1/cli/login/config`), or you set `SUPATYPE_ACCOUNTS_URL`; if neither gives an address, login stops and says so. A Cloud behind a bot check refuses the CLI with `captcha_failed`; login then says that sign-in works only through the browser and points to `--token` for CI. Any other refusal prints the control plane's own message and exits 1. A new Cloud account cannot create a project until it is approved (closed beta) | `--api-url <url>` (a Cloud other than supatype.com; `SUPATYPE_API_URL` sets it too),`--name <name>` (the token's name, default `cli_<hostname>_<time>`), `--no-browser`, `--token <spt_...>` (store a token made in your account instead of signing in, for CI; `SUPATYPE_ACCESS_TOKEN` takes one too) |
 | `logout` | Clear stored Supatype Cloud credentials |  |
-| `whoami` | Show the current Supatype Cloud session |  |
-| `link --project <slug>` | Link this project to cloud or self-host (unified .supatype/link.json) | `--token <token>`, `--env <name>` |
-| `projects list` | List all projects in your organisation |  |
-| `projects create <name>` | Create a new project | `--tier <tier>`, `--region <region>` |
-| `projects pause <slug>` | Pause a project |  |
-| `projects resume <slug>` | Resume a paused project |  |
+| `whoami` | Show the current Supatype Cloud session, checked against the control plane. Exit 0 when valid, 1 when rejected, 2 when the control plane cannot be reached |  |
+| `link --project <slug>` | Link this project to cloud or self-host (unified .supatype/link.json). A cloud link asks the Cloud you signed in to with `login`, unless `--api-url` or `SUPATYPE_API_URL` names another | `--api-url <url>`, `--token <token>`, `--env <name>` |
+| `projects list` | List your projects. In a linked project it lists that project's organisation; before a link it lists every organisation you belong to (just the one, if you have one) | `--org <slug>` (one organisation only) |
+| `projects create <name>` | Create a new project, in your only organisation, or the one `--org` names (required when you belong to several and nothing is linked) | `--tier <tier>`, `--region <region>`, `--org <slug>` |
+| `projects pause <slug>` | Pause a project | `--org <slug>` |
+| `projects resume <slug>` | Resume a paused project | `--org <slug>` |
 | `domains list`, `add <domain>`, `remove <domainId>`, `verify <domainId>` | Manage custom domains for a project |  |
 | `envs create <name>` | Create a cloud environment (staging/preview) |  |
 | `db connection-string` | Show the database connection string for the linked project | `--transaction`, `--env <name>` |
@@ -4987,6 +5532,36 @@ All of these need Supatype Cloud, which is coming soon.
 Binaries are cached in `~/.supatype/cache/`. `cache clean --force` removes every cached binary, pinned or not.
 
 Upgrading an npm install leaves the previous version's program in `~/.supatype/cache/cli/`, since another project may still use it. Once the programs of other versions take more than 250 MB, the CLI says so when it starts, at most once a day. `cache clean` removes them, and never the running version; a project still on a removed version downloads it again on its next command.
+
+## Versions
+
+Source: https://www.supatype.com/docs/versions.html
+
+What each part of a Supatype release is at, so you can tell which versions go together.
+
+Pre-1.0: APIs and config may change between releases.
+
+### What a release is made of
+
+A release is one number for the CLI and every `@supatype/*` package. The engine, server and Postgres images it runs, and the Deno that functions run on, are pinned by that release and move with it, not with the newest image on Docker Hub.
+
+| Component | Version | What it is |
+| --- | --- | --- |
+| CLI and npm packages | `0.9.2` | The latest release, 2026-11-12. The published `@supatype/*` packages, such as `@supatype/client` and `@supatype/react`, carry the same number |
+| Schema engine | `v0.11.2` | Parses the schema, plans and applies a push (`supatype/schema-engine`) |
+| Server | `v2.6.0` | The Supatype server: the API, auth and the services behind it (`supatype/server`) |
+| Postgres | `17.2.16` | The database image, with its extensions (`supatype/postgres`) |
+| Deno | `2.9.8` | The runtime for functions and hooks |
+
+The pins come from `release/images.json` in the repository, and the page is generated from it, so it is out of date only between a pin changing and the next site sync.
+
+### There is no 0.4, 0.5 or 0.6
+
+The CLI went from 0.3.6 straight to 0.7.0, on npm and as git tags. Nothing is missing from the [changelog](https://www.supatype.com/changelog.html): those versions were never released.
+
+### Check what you run
+
+`supatype --version` prints the CLI version. A self-hosted stack pins the images in its rendered compose file; `supatype self-host compose up -d` renders it again after an upgrade.
 
 ## Licensing
 

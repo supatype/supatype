@@ -9,13 +9,13 @@ import { isArrayOf, isBoolean, isJsonObject, isShape, isString, nullable, option
 import {
   SECRET,
   connect,
-  freePort,
   serviceToken,
   subscribe,
-  testEnv,
+  ANY_PORT, testEnv,
   userToken,
   type Peer,
 } from "./fixtures/socket.js"
+import { undeclaredChannels } from "./fixtures/fake-channel-db.js"
 
 /**
  * The inspector's live stream against a real database: what each payload view may show.
@@ -148,10 +148,10 @@ describe.skipIf(!databaseUrl)("GET /admin/v1/stream payload views", () => {
     admin = new pg.Client({ connectionString: databaseUrl })
     await admin.connect()
     await admin.query(SETUP)
-    port = await freePort()
-    adminPort = await freePort()
-    server = new RealtimeServer(testEnv(port, { adminPort, databaseUrl: databaseUrl!, slotName: SLOT, replicationPollInterval: 100 }))
+    server = new RealtimeServer(testEnv(ANY_PORT, { adminPort: ANY_PORT, databaseUrl: databaseUrl!, slotName: SLOT, replicationPollInterval: 100 }), { channelDb: undeclaredChannels() })
     await server.start()
+    port = server.port
+    adminPort = server.adminPort ?? 0
     await server.waitForReplicationStartup()
   })
 

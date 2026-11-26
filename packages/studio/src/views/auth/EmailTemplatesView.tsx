@@ -1,6 +1,6 @@
 import React, { useState } from "react"
 import { useStudioClient } from "../../StudioCore.js"
-import { Badge, Button, Card, ConfirmButton, Input, Skeleton, Textarea, type DestructiveQuestion } from "../../components/ui.js"
+import { Badge, Button, Card, ConfirmButton, Input, SavedNotice, Skeleton, Textarea, type DestructiveQuestion } from "../../components/ui.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { useEmailTemplate, type EmailTemplateState } from "../../hooks/useEmailTemplate.js"
 
@@ -102,6 +102,7 @@ function Actions({ state }: { state: EmailTemplateState }): React.ReactElement {
       <Button variant="primary" disabled={state.busy} onClick={() => void state.save()}>
         {state.busy ? "Saving…" : "Save template"}
       </Button>
+      <SavedNotice at={state.savedAt} />
       {savedAt !== null && (
         <>
           <Badge variant="green">Saved edit in force since {new Date(savedAt).toLocaleString()}</Badge>

@@ -103,12 +103,21 @@ export function compileProgram(stageDir: string, outDir: string): string {
   return program
 }
 
+/**
+ * Windows' own bsdtar, which writes a zip when the name ends in .zip. By full path because Git
+ * Bash's tar is often first on PATH and reads a drive letter as a remote host. Not PowerShell's
+ * Compress-Archive, which on CI's runner produced a zip without the executable at its root.
+ */
+export function windowsZipTool(): string {
+  return join(process.env["SystemRoot"] ?? "C:\\Windows", "System32", "tar.exe")
+}
+
 /** Zips on Windows and tars elsewhere, with the one executable at the root, as the release does. */
 function archiveProgram(program: string, archive: string): void {
   const dir = dirname(program)
   const name = program.slice(dir.length + 1)
   if (process.platform === "win32") {
-    mustRun("powershell.exe", ["-NoProfile", "-Command", `Compress-Archive -Path '${program}' -DestinationPath '${archive}' -Force`], dir)
+    mustRun(windowsZipTool(), ["-a", "-c", "-f", archive, "-C", dir, name], dir)
   } else {
     mustRun("tar", ["-czf", archive, "-C", dir, name], dir)
   }

@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it } from "vitest"
 import { WebSocket } from "ws"
 import { RealtimeServer } from "../src/server.js"
 import { expectObject } from "./fixtures/expect-json.js"
-import { connect, freePort, serviceToken, testEnv, userToken, type Peer } from "./fixtures/socket.js"
+import { connect, serviceToken, ANY_PORT, testEnv, userToken, type Peer } from "./fixtures/socket.js"
+import { undeclaredChannels } from "./fixtures/fake-channel-db.js"
 
 /**
  * `CONNECTION_LIMIT` in single-tenant mode, which is how every Cloud project's own realtime runs.
@@ -36,10 +37,10 @@ describe("CONNECTION_LIMIT", () => {
   })
 
   it("closes the socket past the limit with 4429, and reports the limit", async () => {
-    const port = await freePort()
-    const adminPort = await freePort()
-    server = new RealtimeServer(testEnv(port, { adminPort, connectionLimit: 2 }))
+    server = new RealtimeServer(testEnv(ANY_PORT, { adminPort: ANY_PORT, connectionLimit: 2 }), { channelDb: undeclaredChannels() })
     await server.start()
+    const port = server.port
+    const adminPort = server.adminPort ?? 0
 
     peers.push(await connect(port, userToken("a")), await connect(port, userToken("b")))
     const third = await connect(port, userToken("c"))
@@ -50,14 +51,28 @@ describe("CONNECTION_LIMIT", () => {
   })
 
   it("lets everyone in when unset, and reports no limit", async () => {
-    const port = await freePort()
-    const adminPort = await freePort()
-    server = new RealtimeServer(testEnv(port, { adminPort }))
+    server = new RealtimeServer(testEnv(ANY_PORT, { adminPort: ANY_PORT }), { channelDb: undeclaredChannels() })
     await server.start()
+    const port = server.port
+    const adminPort = server.adminPort ?? 0
 
     for (let i = 0; i < 50; i++) peers.push(await connect(port, userToken(`u${i}`)))
 
     expect(peers.every((p) => p.ws.readyState === WebSocket.OPEN)).toBe(true)
     expect(await connectionsLimit(adminPort)).toMatchObject({ limit: null, total: 50 })
+  })
+
+  it("binds ports the OS chose, one pair per server, so parallel suites cannot collide", async () => {
+    const other = new RealtimeServer(testEnv(ANY_PORT, { adminPort: ANY_PORT }), { channelDb: undeclaredChannels() })
+    server = new RealtimeServer(testEnv(ANY_PORT, { adminPort: ANY_PORT }), { channelDb: undeclaredChannels() })
+    try {
+      await server.start()
+      await other.start()
+      const ports = [server.port, server.adminPort, other.port, other.adminPort]
+      expect(ports.every((p) => typeof p === "number" && p > 0)).toBe(true)
+      expect(new Set(ports).size).toBe(4)
+    } finally {
+      await other.stop()
+    }
   })
 })

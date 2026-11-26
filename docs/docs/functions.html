@@ -103,6 +103,7 @@
     </ul></div>
     <div><span class="label">REFERENCE</span><ul>
       <li><a href="/docs/cli.html">CLI</a></li>
+      <li><a href="/docs/versions.html">Versions</a></li>
     </ul></div>
     <div><span class="label">MORE</span><ul>
       <li><a href="/licensing.html">Licensing</a></li>
@@ -212,7 +213,7 @@
   },
 })</pre></div>
 <p><code>supatype push</code> refuses a name that matches no function, so a typo cannot silently grant nothing. <code>supatype doctor</code> lists the current grants.</p>
-<div class="callout warn"><span class="callout-label">LOCAL DEV</span><p>The local router does not apply this list. Under <code>supatype dev</code> every function receives <code>ctx.serviceRoleKey</code>, and under <code>supatype functions serve</code> every function does when <code>SUPATYPE_SERVICE_ROLE_KEY</code> is set in your shell. Test that a function works without the key on a self-hosted stack.</p></div>
+<p>Local dev applies the same list, so a function that relies on the key without being named fails there first. Under <code>supatype functions serve</code> no function receives the key unless <code>SUPATYPE_SERVICE_ROLE_KEY</code> is set in your shell, and then only the functions the list names.</p>
 
 <h2 id="env">Environment and secrets</h2>
 <p>Variables for functions live in env files inside the functions directory:</p>
@@ -222,11 +223,18 @@
 </ul>
 <p>Read them from <code>ctx.env</code>. The files are read on each call, so a changed value takes effect without a restart. Keep them out of git.</p>
 <p>Every value set with <code>supatype functions env set</code>, in <code>.env.local</code> or in <code>.env.&lt;name&gt;.local</code> arrives in <code>ctx.env</code> on each call, never in <code>Deno.env</code>: <code>Deno.env</code> is the worker's one process environment, shared by every call running at the same time, so a value put there for one function would reach every other. <code>Deno.env.get("RESEND_API_KEY")</code> finds nothing.</p>
+<p><code>Deno.env</code> holds only the worker's own settings (such as <code>SUPATYPE_URL</code>, <code>SUPATYPE_PUBLIC_URL</code> and <code>SUPATYPE_ANON_KEY</code>, which also arrive as <code>ctx</code> fields), Deno's <code>DENO_*</code> variables and what the operating system needs, such as <code>PATH</code> and the temporary directory. Before any function is imported the worker deletes everything else, so the stack's secrets and the variables in your shell never reach function code, under <code>supatype dev</code> and <code>supatype functions serve</code> as on a deployed stack. A self-hosted worker also keeps <code>STRIPE_SECRET_KEY</code>, <code>STRIPE_WEBHOOK_SECRET</code> and <code>SITE_URL</code> when Compose passes them.</p>
 <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre>$ npx supatype functions env set RESEND_API_KEY=re_123
 $ npx supatype functions env list
 $ npx supatype functions env unset RESEND_API_KEY</pre></div>
 <p>On a project that is not linked, these commands edit <code>functions/.env.local</code>. <code>list</code> masks the values.</p>
+<p>Add <code>--function &lt;name&gt;</code> to <code>list</code>, <code>set</code> or <code>unset</code> to work on one function's own values: on a linked project they go to that function, and on a project that is not linked they edit <code>functions/.env.&lt;name&gt;.local</code>. A function's own value overrides a shared one with the same name.</p>
+<div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
+<pre>$ npx supatype functions env set RESEND_API_KEY=re_456 --function send-invite
+$ npx supatype functions env list --function send-invite
+$ npx supatype functions env unset RESEND_API_KEY --function send-invite</pre></div>
+<p>On Supatype Cloud the per-function routes need a control plane that serves <code>/projects/&lt;ref&gt;/functions/&lt;name&gt;/env</code>.</p>
 <div class="cb"><div class="cb-bar"><span>functions/send-invite/index.ts</span><button type="button" class="cb-copy">Copy</button></div>
 <pre><span class="k">const</span> apiKey = ctx.env[<span class="s">"RESEND_API_KEY"</span>]
 <span class="k">if</span> (!apiKey) <span class="k">return</span> Response.json({ message: <span class="s">"RESEND_API_KEY is not set"</span> }, { status: 500 })</pre></div>
@@ -239,11 +247,12 @@ $ npx supatype functions env unset RESEND_API_KEY</pre></div>
 
 <h2 id="local">Local development</h2>
 <p><code>supatype dev</code> serves functions through the same gateway as the rest of the API when a functions directory exists. You do not run anything else.</p>
+<p>With the Native provider, Deno runs in the project folder, so a project with a <code>package.json</code> resolves <code>npm:</code> imports from its <code>node_modules</code>. Install what a function imports, such as <code>npm install postgres</code> for <code>npm:postgres</code>. Without it the call fails with <code>Could not find a matching package for 'npm:postgres' in the node_modules directory</code>. Do not turn on <code>nodeModulesDir: "auto"</code> in a <code>deno.json</code> there: Deno then rewrites <code>node_modules</code>, and <code>supatype.config.ts</code> stops loading.</p>
 <p>To run functions on their own, with Deno watching for changes:</p>
 <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre>$ npx supatype functions serve
 $ npx supatype functions invoke greet --local --data '{"name":"Alex"}'</pre></div>
-<p><code>serve</code> listens on port <code>18472</code> by default; change it with <code>--port</code>. It loads <code>functions/.env.local</code> unless you pass <code>--env-file</code>. <code>invoke</code> sends a POST, prints the status and the response, and gives up after 30 seconds. It exits 1 when the function answers with a status of 400 or above, so a script can tell a failed call (a 404 for a function that does not exist, say) from one that worked. <code>--auth</code> adds a test token to the request. With <code>--local</code>, or when no Cloud project is linked, <code>invoke</code> calls a running <code>serve</code> on <code>--port</code> (18472 by default) when one answers, and the project's dev API otherwise.</p>
+<p><code>serve</code> listens on port <code>18472</code> by default; change it with <code>--port</code>. It loads <code>functions/.env.local</code> unless you pass <code>--env-file</code>. <code>invoke</code> sends a POST, prints the status and the response, and gives up after 30 seconds. It exits 1 when the function answers with a status of 400 or above, so a script can tell a failed call (a 404 for a function that does not exist, say) from one that worked. <code>--auth</code> adds a test token to the request, on this machine only: on a Cloud link it is refused, because it would send your Supatype Cloud session, which can manage your projects, to the function, and on a self-hosted link it is refused because there is no user token to send. Call a deployed function with a signed-in user's access token instead. With <code>--local</code>, or when no Cloud project is linked, <code>invoke</code> calls a running <code>serve</code> on <code>--port</code> (18472 by default) when one answers, and the project's dev API otherwise.</p>
 
 <h2 id="self-host">Self-host</h2>
 <p>The self-host Compose file always includes a <code>functions-worker</code> service, built from the <code>supatype/functions-worker</code> image. It mounts the project read-only and serves <code>functions/</code> from it. There is no bundle or upload step: the files on disk are what runs.</p>
@@ -252,10 +261,12 @@ $ npx supatype functions invoke greet --local --data '{"name":"Alex"}'</pre></di
 <pre>$ docker compose -p supatype-&lt;project&gt; -f .supatype/self-host/docker-compose.yml restart functions-worker</pre></div>
 <p><code>&lt;project&gt;</code> is your project name from <code>supatype.config.ts</code> in lower case, with spaces and other symbols replaced by <code>-</code>. <code>supatype self-host compose restart functions-worker</code> does the same and finds the project name for you. Env file changes do not need a restart.</p>
 <p>On an unlinked project with a self-host Compose file, <code>supatype functions deploy</code> uploads nothing. It lists the functions it found on disk and prints that restart command.</p>
-<p>The worker gets the anon and service-role keys from the stack. To give functions a database connection, set <code>SUPATYPE_FUNCTIONS_DB_URL</code>; it appears as <code>ctx.dbUrl</code>. It is off by default because a direct connection bypasses access rules, field masking and model hooks. Point it at a role you have restricted, or accept that.</p>
+<p>The worker gets the anon and service-role keys from the stack. To give functions a database connection, set <code>SUPATYPE_FUNCTIONS_DB_URL</code>; it appears as <code>ctx.dbUrl</code>. It is off by default because a direct connection is not a request through the API: model hooks do not run, and row rules and field masking apply only for the role the URL names. A superuser or <code>BYPASSRLS</code> role (the admin role, <code>service_role</code>) skips both, so point it at a login role that is neither, granted only what your functions need. The database name at the end of the URL is the value of <code>POSTGRES_DB</code> in your <code>.env</code>.</p>
+<p>The worker runs Deno 2.9.8. Postgres drivers verified against a live database on it: <code>npm:postgres</code> (latest), <code>npm:postgres@3.4.5</code> and <code>npm:pg</code>. <code>npm:postgres</code> 4.0 and later does not run on Deno before 2.8, where it fails with <code>Not implemented: LibuvStreamWrap.prototype.useUserBuffer</code> or <code>socket._handle.useUserBuffer is not a function</code>. Every 3.4 release runs there; a stack on an older worker image should pin <code>npm:postgres@3.4.5</code>.</p>
 <p>Function logs are JSON lines on the container's output, each with the call's <code>request_id</code>, status and duration:</p>
 <div class="cb"><div class="cb-bar"><span>terminal</span><button type="button" class="cb-copy">Copy</button></div>
 <pre>$ npx supatype self-host compose logs --service functions-worker</pre></div>
+<p>Under <code>supatype dev</code> without Docker (native dev), functions run inside the server process, so there is no worker container to read. <code>supatype dev</code> sets <code>SUPATYPE_FUNCTIONS_LOG_TO_STDOUT</code>, and the server then prints each line a function writes to the terminal that runs <code>dev</code>, prefixed with the function name, for example <code>[hello] got a request</code>. Lines that name no function, such as Deno's own errors, are prefixed <code>[deno]</code>. The same lines stay in Studio's function logs. A server that does not have the variable set, such as Cloud or a Compose stack, prints nothing extra.</p>
 <div class="callout"><span class="callout-label">NOTE</span><p>The Compose file mounts <code>functions/</code> at the project root. Keep the default path on a self-hosted stack.</p></div>
 
 <h2 id="hooks">Model hooks</h2>

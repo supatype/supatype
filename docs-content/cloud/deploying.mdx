@@ -5,7 +5,9 @@ description: "Deploy your Supatype project to Supatype Cloud, from local develop
 
 ## Prerequisites
 
-- A Supatype Cloud account
+- A Supatype Cloud account. Cloud is in a closed beta: a new account cannot create a project until it
+  is approved, and the dashboard says "You can create a project as soon as your account is approved"
+  until then.
 - The Supatype CLI installed
 - A local Supatype project
 
@@ -15,7 +17,14 @@ description: "Deploy your Supatype project to Supatype Cloud, from local develop
 npx @supatype/cli login
 ```
 
-This prompts for your Cloud account email and password. Once logged in, the CLI stores a refreshable session locally.
+This opens your browser. Approve the sign-in there, then type the code the page shows into the
+terminal. The CLI stores a personal access token locally, and never asks for your password. If the
+browser does not open, the URL to visit is printed (`--no-browser` prints it without trying).
+
+To use a Cloud other than supatype.com, pass `--api-url <url>` or set `SUPATYPE_API_URL`.
+
+On a machine with no terminal, such as CI, create a personal access token in your account and use it
+instead: `supatype login --token <spt_...>`, or set `SUPATYPE_ACCESS_TOKEN`.
 
 ## Step 2: Link your project
 
@@ -83,7 +92,8 @@ npx supatype deploy --app-only      # deploy the static site, skip the schema
 
 ### GitHub Actions
 
-In CI, `supatype login` reads the account from `SUPATYPE_EMAIL` and `SUPATYPE_PASSWORD` instead of prompting:
+In CI there is no browser, so use a personal access token. Create one in your account, store it as a
+secret, and set it as `SUPATYPE_ACCESS_TOKEN`; the CLI reads it directly, with no `login` step:
 
 ```yaml
 name: Deploy to Supatype Cloud
@@ -94,16 +104,14 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      SUPATYPE_ACCESS_TOKEN: ${{ secrets.SUPATYPE_ACCESS_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: npm install
-      - run: npx supatype login
-        env:
-          SUPATYPE_EMAIL: ${{ secrets.SUPATYPE_EMAIL }}
-          SUPATYPE_PASSWORD: ${{ secrets.SUPATYPE_PASSWORD }}
       - run: npx supatype link --project ${{ vars.SUPATYPE_PROJECT }}
       - run: npx supatype deploy --yes
 ```
@@ -122,16 +130,14 @@ on:
 jobs:
   preview:
     runs-on: ubuntu-latest
+    env:
+      SUPATYPE_ACCESS_TOKEN: ${{ secrets.SUPATYPE_ACCESS_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: npm install
-      - run: npx supatype login
-        env:
-          SUPATYPE_EMAIL: ${{ secrets.SUPATYPE_EMAIL }}
-          SUPATYPE_PASSWORD: ${{ secrets.SUPATYPE_PASSWORD }}
       - run: npx supatype link --project ${{ vars.SUPATYPE_PROJECT }}
       - run: npx supatype deploy --env preview --schema-only --yes
 ```
@@ -176,4 +182,10 @@ List environment variables (the values are masked):
 
 ```bash
 npx supatype functions env list
+```
+
+To set a value for one function only, add `--function <name>`. A function's own value overrides a shared one with the same name:
+
+```bash
+npx supatype functions env set MY_API_KEY=sk-123456 --function send-email
 ```

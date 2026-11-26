@@ -34,6 +34,9 @@ const RECONCILE_SQL_EDITOR_SQL = [
   "SELECT format('ALTER ROLE supatype_sql_editor WITH LOGIN PASSWORD %L', :'pw')",
   "WHERE EXISTS (SELECT FROM pg_roles WHERE rolname = 'supatype_sql_editor')",
   "\\gexec",
+  // Only the password. The image grants the editor its owner WITH INHERIT TRUE, SET FALSE so
+  // submitted SQL cannot SET ROLE into the owner, and hands what the editor creates to the owner
+  // through public.supatype_sql_editor_reassign_owned(). Nothing here widens that grant.
   "",
 ].join("\n")
 

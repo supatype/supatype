@@ -1,9 +1,184 @@
 # Changelog
 
-## Unreleased
+There is no 0.4, 0.5 or 0.6 release: this package went from 0.3.6 straight to 0.7.0, on npm and as git tags, so
+no entries are missing from this file.
+
+## 0.9.3
+
+### Features
+
+* **storage:** the extractor reads `Folder<N>` as a bucket-rule operand and refuses it in a model's
+  `access`, or with a position that is not a whole number from 1.
+* **push, diff:** the access summary lists what each role can reach under the rules (new `effective`
+  field, printed by `diff` and `dev`), so a `Private` model no longer reads as full CRUD. `after`
+  is unchanged for `--json`.
+* **push:** a warning names any field stored as jsonb because its TypeScript type has no column type
+  (a single string literal, say). The mapping is unchanged.
+* **generate:** the generated client declares the schema's channels as `SupatypeChannels`, keyed by
+  pattern with each parameter's type (`"lot:{id}": { params: { id: string } }`), so
+  `realtime.channel()` autocompletes `lot:${string}` and `lobby:${string}`. Names that match no
+  declaration still type-check, since an `open` server admits them. Nothing is emitted when the
+  schema declares no channel.
+* **realtime:** declare private channels in the schema. `export type LotChannel = Channel<"lot:{id}",
+  { params: { id: UUID }, access: { join, send, track } }>` takes the same rules as a model, with the
+  channel's parameters standing where a model has columns (`In<"id", MyLots>`, and `Param<"id">`
+  inside a `Rows<>` filter). `send` can also hold `Event<"bid">` and `Payload<"amount", { kind:
+  "number"; min: 1 }>` inside `All<[...]>`, which the realtime server checks per message. A
+  pattern's last segment can be `*`. A declaration is refused at extract time when its pattern and
+  `params` disagree, when two declarations can match one topic, when `Param<>`, `Event<>` or
+  `Payload<>` appear anywhere but a channel's rules, or when a rule names something that is not a
+  parameter. Declaring a channel enforces its pattern for every client at once.
+* **config:** `realtime.channels` is `"open"` (the default, so an existing project is unchanged) or
+  `"declared"`, which refuses broadcast and presence on a topic no declaration matches. It reaches
+  the database through push. `supatype init` writes `"declared"` for a new project.
+* **diff, push:** list channel changes (added, removed, which operation's rule changed) and warn
+  when removing a declaration or turning `declared` on takes broadcast and presence away. The lines
+  appear once the engine reports them; an older engine says nothing.
+* **push:** refuses a schema that declares channels, or sets `realtime.channels`, against a pinned
+  engine older than 0.11.0 (`ENGINE_MIN_FOR_CHANNELS`). An older engine drops both keys, so the push
+  would succeed with nothing enforcing the channels.
+* **push, diff, doctor, adopt, dev, deploy:** a schema that declares channels or sets
+  `realtime.channels` is sent only to an engine or server that lists `private_channels` in its
+  capabilities, as identity columns already are with `identity_columns`. This is checked on its
+  own, apart from the version floor above, so an older engine can never drop the channels in
+  silence.
+* **dev:** runs the same engine floor check as `supatype push` before applying a schema, native and
+  Docker alike. It skipped it, so a pinned older engine took channels and enforced nothing.
+* **push, diff:** warn when a channel's `send` rule tests only `Event<>` or `Payload<>` and nothing
+  about the caller. Those nodes are checked by the realtime server and compile to TRUE in the
+  database, so `send: Event<"bid">` admits every caller, anon included. The warning names the channel
+  and suggests `send: All<[LoggedIn, Event<"bid">]>`. It is a warning, not an error, and is carried
+  to the engine in the schema's `warnings`.
+* **deploy:** a Cloud deploy's create call sends the site's manifest, each file's NFC path, size and
+  sha256, and the app's `spa` flag (`build.spa`, or the framework's default), so the server can say
+  which files it already holds. This is the first of four steps toward hosting the site on the
+  project's own domain; until the server side lands, `deploy --app-only` against Cloud still ends
+  without a live site.
+* **deploy:** a Cloud deploy uploads only the files the server says it lacks (`missing`), each to
+  `<uploadUrl>/<sha256>`, six at a time, so an unchanged build uploads nothing. Every call carries
+  `Authorization`, `X-Org-Id` and `X-Supatype-Environment`, every upload's status is checked, and a 5xx
+  or a dropped connection is retried three times. Any other refusal stops the deploy, naming the file
+  and the server's reason, before finalize. Uploads used to go by path and their answers were never read.
+* **deploy:** a Cloud deploy checks finalize and prints the site's own address (`https://<ref>.<domain>`)
+  from its answer, not the control plane's API URL. A 502 `pointer_not_pushed` (the version is recorded
+  but the project's server was not told) is retried three times, since finalize is idempotent, and then
+  reported as "uploaded but not live". Any other refusal, such as `blobs_missing`, stops with the
+  server's reason. Finalize's answer was never read before, so a failed finalize looked like success.
+* **deploy:** Cloud's own tier limit decides how large a site may be. The CLI no longer stops a Cloud
+  deploy at a fixed 500 MB; the server answers 413 and the deploy prints its reason (the site's size,
+  and the limit for the project's tier). `deploy --local` and a self-hosted link keep the 500 MB check,
+  since no server applies a limit there. The unused `commands/deploy-types.ts` tier table, which had no
+  `growth` tier and was never read, is deleted.
+* **deploy:** `deploy --preview` against a Cloud link is refused before the config is read or anything
+  is built: "Previews are not available on Supatype Cloud yet". Deploy without `--preview` to publish to
+  production. `--schema-only`, `--local` and self-hosted links are unchanged.
+* **deploy:** a site over its plan's size is a soft limit and still goes live. When Cloud's create
+  answer carries a `site_over_plan` warning, the deploy prints the site's size and the plan's in MB
+  and "Upgrade your plan before <date> to avoid overage charges", on every deploy while over. Other
+  warning codes print their message. Only a site over the tier's hard cap is refused (413
+  `site_too_large`, with the server's reason).
+* **deploy:** `deploy status` prints the site's address first, then the live version, when it went
+  live, and the size against the plan ("80 MB of 50 MB plan"); when Cloud says the site is over
+  plan it adds the date to upgrade before. `deploy rollback` prints the address as well as the
+  version it went back to. Each line appears only when the server sends the field.
+
+### Features
+
+* **login:** `supatype login` signs in through the browser. It opens the accounts site (which the
+  control plane names at `/api/v1/cli/login/config`, or `SUPATYPE_ACCOUNTS_URL`) and always prints the URL; after you approve, type the
+  code the page shows into the terminal and the CLI stores the personal access token (`spt_...`)
+  the control plane sealed to this CLI's key. `--name` names the token, `--no-browser` only prints
+  the URL, and `--token <spt_...>` (or `SUPATYPE_ACCESS_TOKEN`) stores a token made in your account,
+  for CI. A personal access token is never renewed through `/auth/refresh`, and a refusal of one
+  says it was revoked or expired.
+
+### Breaking Changes
+
+* **login:** password login is gone. Sign-in on the platform now needs a Cloudflare Turnstile token a
+  terminal cannot give, so `supatype login --email --password` failed with `Login failed (400)`.
+  `--email`, `--password`, `SUPATYPE_EMAIL` and `SUPATYPE_PASSWORD` are no longer read. A session
+  an older CLI stored keeps working until it expires.
+
+### Features
+
+* **functions:** `functions env list`, `set` and `unset` take `--function <name>` to work on one
+  function's own values, which override a shared one. A linked self-hosted server serves them at
+  `/admin/v1/functions/<name>/env`, Supatype Cloud at `/projects/<ref>/functions/<name>/env`, and a
+  project that is not linked keeps them in `functions/.env.<name>.local`.
 
 ### Bug Fixes
 
+* **push, generate:** the generated client registers array columns of exact values (`"bigint[]"`
+  and `"numeric[]"`, from the array's element type, `NUMERIC(19,4)` included), and types them as
+  the single values are: `bigint[]` for BIGINT elements and `string[]` for NUMERIC, DECIMAL and
+  MONEY. They were `number[]`, which a double rounds. Run `supatype push` to regenerate.
+* **deploy:** the build step puts the app directory's `node_modules/.bin`, and every one above it, on PATH,
+  as `npm run` does, so the framework defaults (`vite build`, `astro build`, `next build`) and a bare
+  `buildCommand` find their binary. They failed with "'vite' is not recognized" before. The
+  `build.outputDirectory` doc now says it is relative to `build.directory` (`"dist"`, not `"web/dist"`).
+* **dev (native):** a Valkey named in `SUPATYPE_VALKEY_ADDR` logs in with `SUPATYPE_VALKEY_PASSWORD` (and
+  `SUPATYPE_VALKEY_USERNAME`), or with no password, never the keyspace's. `init` writes a keyspace password
+  into every `.env`, and a Valkey with no password refused the server with WRONGPASS. A named Valkey that
+  used `SUPATYPE_KEYSPACE_PASSWORD` as its password now needs it as `SUPATYPE_VALKEY_PASSWORD`.
+* **push:** a refused push names one `supatype rename <from> <new name>` line for a dropped table or column
+  with more than three possible new names. One table dropped beside eight added printed eight lines
+  naming it eight ways.
+* **dev, generate (Docker):** a project that names its engine image in `SUPATYPE_ENGINE_IMAGE` writes its
+  types, seed builder and admin config with that image, the one it pushes with. The cached host engine
+  wrote them, and when it was older than the image it refused a schema the image had just pushed, three
+  times, while push still said "Schema pushed." The line the CLI writes from `versions.engine` does not
+  count: the host engine at that pin already matches it.
+* **dev (native):** dev warns, with Deno's own error, when Deno cannot start in the project folder. A
+  `deno.lock` written by a newer Deno made the worker exit at once, and every function answered 502 with
+  an empty body and nothing in dev's output.
+* **self-host:** `compose restart functions-worker` says to run `compose up` when `SUPATYPE_FUNCTIONS_DB_URL`
+  names `db` but db is not on the functions network yet. Only `up` recreates db onto it, and until
+  then every function using `ctx.dbUrl` failed with `getaddrinfo ENOTFOUND db`.
+* **self-host:** `compose restart <service>` refuses a stack that is not running and names `compose up`.
+  It recreated the one service alone, with a database volume and networks for a stack that did not
+  exist, so a folder sharing a stopped stack's name got a stray container holding its own mount.
+* **push (native):** no Studio link after a push or `admin create-user` on a native project. Native dev
+  runs no Studio, and the printed `/studio/` link answered 404.
+* **dev (native):** functions get `ctx.dbUrl` only from `SUPATYPE_FUNCTIONS_DB_URL`, as on Docker. Native
+  dev handed every function the auth service's admin `DATABASE_URL`, a connection that skips row rules
+  and masking, and ignored `SUPATYPE_FUNCTIONS_DB_URL`.
+* **self-host, dev:** the compose file passes `SUPATYPE_EXTERNAL_ANONYMOUS_USERS_ENABLED`, `REALTIME_CHANNELS`
+  and `REALTIME_CHANNEL_RECHECK_S` from `.env`. The docs turn anonymous sign-in on and tune channel
+  re-checks with them, and none reached a container, so `signInAnonymously()` stayed refused.
+* **downloads:** a retried download says each failure in one sentence. The line read
+  `...; try again.. Retrying in 1s...`, a doubled full stop after every CDN message.
+* **storage:** a bucket rule that cannot be rendered on `storage.objects` (one naming a model
+  column, `In`, `Exists`, `Matches`) is refused at push, naming the bucket and the operation. It
+  used to become `FALSE` with nothing said, so a documented registered-only rule on a bucket denied
+  everyone. `BucketOwner` on `create` does not bind the path: see the storage docs.
+* **self-update, install, component downloads:** a stalled CDN no longer hangs the CLI. A request
+  fails only when no bytes have arrived for 60 s (`SUPATYPE_FETCH_TIMEOUT_MS` sets the window), with
+  no limit on total time, so a slow link still finishes. It is retried up to three times, an archive
+  retry resumes with an HTTP Range request from the bytes already received (a 200 answer restarts
+  from zero), checksums and signatures are checked on the complete file, and a failure names the URL
+  and says to try again. Archives show `Downloading supatype 0.9.2: 18 / 46 MB` in place on a
+  terminal, and a start and end line otherwise.
+* **push, dev:** a model's `cache` block now switches the server cache on. The CLI wrote the allowlist
+  only into an `.supatype/api-config.json` that nothing created, so it did nothing and said nothing.
+  It now PATCHes `/admin/v1/config/rest` on the running stack (adding only newly declared tables) and
+  falls back to creating the file from the server's default shape. The `cache_max_ttl is 0` note
+  prints whenever a table declares a cache and the TTL is 0.
+* **hooks:** the generated `hook()` and `hooks()` now pass the worker's function context through, so
+  `ctx.serviceRoleKey`, `ctx.url`, `ctx.anonKey`, `ctx.dbUrl` and `ctx.env` are typed and present on
+  every hook. A write a hook makes fires hooks again, bounded by the hook-depth header.
+* **dev:** the functions watcher restarts the worker for a folder copied in or deleted (names with no
+  extension were dropped), and reports "restarted" only once the worker answers through the gateway.
+* **admin:** when it removes `SUPATYPE_ADMIN_PASSWORD` from `.env` it now prints a line saying so.
+* **functions:** `npm:postgres` 3.4.6 and later failed in the functions worker with
+  `Not implemented: LibuvStreamWrap.prototype.useUserBuffer`. The Deno pin moves from 2.2.0 to 2.9.8
+  (worker image, the CLI's `releases/deno/VERSION`, the `init` template comment, the hook-adapter
+  script and the example configs); Deno fixed the call in 2.8.0. The release mirror workflow must run
+  for `v2.9.8` before the CLI can download it. `npm:postgres` (latest), `npm:postgres@3.4.5` and
+  `npm:pg` all answered a query from a function on the new worker.
+* **docs:** `ctx.dbUrl` no longer said to bypass row rules and field masking. They apply for the role the URL names, and only a superuser or `BYPASSRLS` role skips them. The `FunctionContext` JSDoc, the docs, the self-host example and the skill references now say so and say which database the URL ends in (`POSTGRES_DB`). Also documents `global()`, `meta.cacheStatus`, `pg_safeupdate`, presence echo, server logic in a Postgres function and a versions page, stamps every package changelog with the version it shipped in, and fails the release when one still says Unreleased.
+* **functions:** `functions env unset` on a project that is not linked removes every line of
+  `.env.local` whose name is the key, even one that breaks the secret name rule (`OLD-NAME=x`), and
+  says how many it removed. It used to say the key was not set and leave the line.
 * **dev:** on Linux the app URL (`http://localhost:18473/`) answered 502 for a Vite app. `supatype
   dev` started Vite on `127.0.0.1`, and Docker Engine on Linux reaches the host through the docker0
   bridge, not the loopback, so the gateway found nothing listening. On Linux Vite now listens on

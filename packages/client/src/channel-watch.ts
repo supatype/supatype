@@ -1,0 +1,86 @@
+import type { ChannelOptions, ChannelSubscription, RealtimeClient, RealtimeConnectionState } from "./realtime.js"
+import type { ChannelName } from "./types.js"
+import type { ChannelActionRefusal } from "./realtime-refusals.js"
+import { subscriptionViewOf, type SubscriptionView } from "./table-subscription.js"
+
+/**
+ * One channel with any number of listeners, and the socket's own state, for the Vue, Svelte and
+ * Solid bindings. Each binding is only the adapter between these and its framework's state, as it
+ * is for `watchTable`; React's `useChannel` reads the same two client signals directly.
+ */
+
+/**
+ * Join the channel `name`, let `setup` add its listeners first, and report each status as the
+ * binding's view of it. Returns the unsubscribe.
+ *
+ * `opts.private` asks for a private channel: see {@link ChannelOptions}. A refusal then shows as a
+ * `RealtimeChannelError`, so a binding can read its `reason`.
+ *
+ * `onRefused` hears a send, track or payload the server refused on the joined channel. The status
+ * does not move for it, so it has its own channel to the binding.
+ */
+export function watchChannel<TRow = Record<string, unknown>>(
+  realtime: RealtimeClient,
+  name: ChannelName,
+  setup: (channel: ChannelSubscription<TRow>) => void,
+  onStatus: (view: SubscriptionView) => void,
+  opts?: ChannelOptions | undefined,
+  onRefused?: ((refusal: ChannelActionRefusal) => void) | undefined,
+): () => void {
+  const channel = realtime.channel<TRow>(name, opts)
+  setup(channel)
+  if (onRefused !== undefined) channel.onRefused(onRefused)
+  channel.subscribe((status, err) => onStatus(subscriptionViewOf(status, err)))
+  return () => channel.unsubscribe()
+}
+
+/**
+ * Report the socket's state now and at each change. Returns the unsubscribe.
+ *
+ * The state is reported straight away because a binding mounting after the socket opened would
+ * otherwise show "disconnected" until the next change.
+ */
+export function watchConnection(
+  realtime: RealtimeClient,
+  onChange: (state: RealtimeConnectionState) => void,
+): () => void {
+  onChange(realtime.connectionState)
+  return realtime.onConnectionChange(onChange)
+}
+
+/** One channel at a time, which can be moved to another name. */
+export interface ChannelSlot {
+  /** Join `name`, leaving the channel held first. Joining the name already held does nothing. */
+  join(name: ChannelName): void
+  /** Leave the channel held, if any. */
+  leave(): void
+}
+
+/**
+ * A binding's channel when its name can change: the old channel is left, its listeners go with it,
+ * `setup` runs on the new one, and the status reads "connecting" until it joins. A binding calls
+ * `join` for the first name and again for each change, and `leave` when it is torn down. `opts` is
+ * given to every channel it joins, and `onRefused` hears every refused send on them.
+ */
+export function channelSlot<TRow = Record<string, unknown>>(
+  realtime: RealtimeClient,
+  setup: (channel: ChannelSubscription<TRow>) => void,
+  onStatus: (view: SubscriptionView) => void,
+  opts?: ChannelOptions | undefined,
+  onRefused?: ((refusal: ChannelActionRefusal) => void) | undefined,
+): ChannelSlot {
+  let held: { name: ChannelName; stop: () => void } | null = null
+  const leave = (): void => {
+    held?.stop()
+    held = null
+  }
+  return {
+    join(name) {
+      if (held?.name === name) return
+      if (held !== null) onStatus({ status: "connecting", error: null })
+      leave()
+      held = { name, stop: watchChannel<TRow>(realtime, name, setup, onStatus, opts, onRefused) }
+    },
+    leave,
+  }
+}

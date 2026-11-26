@@ -39,6 +39,7 @@ const EVERY_RULE = [
   "Public", "Private", "LoggedIn", "Owner", "OwnerFrom", "Role", "Any", "All", "Not",
   "Eq", "Neq", "Gt", "Gte", "Lt", "Lte", "Like", "Matches", "IsNull", "NotNull", "Exists", "In",
   "BucketPublic", "BucketPrivate", "BucketLoggedIn", "BucketOwner", "BucketRole",
+  "Event", "Payload",
 ]
 
 describe("the unknown access rule error", () => {

@@ -15,6 +15,12 @@ import { useInspectorAvailability, type InspectorAvailability } from "../hooks/u
 import { useStudioCapability } from "../hooks/useStudioCapability.js"
 import { SQL_EDITOR_HREF, sqlEditorOffered } from "../lib/sql-editor-access.js"
 import { bucketManagementOffered } from "../lib/capability-offers.js"
+import { useStaticSiteHost, type StaticSiteHost } from "../lib/static-site-host.js"
+import { staticSitePages } from "../lib/static-site.js"
+import { useExtensionServes } from "../hooks/useExtensionRoutes.js"
+
+/** The label of a group of pages not built yet. */
+const COMING_SOON = "Coming Soon"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -61,7 +67,7 @@ const STATIC_SECTIONS: Record<string, SectionDef> = {
           { label: "Overview",   href: "/database/overview" },
           { label: "Tables",     href: "/database/tables" },
           { label: "Views",      href: "/database/views" },
-          { label: "Functions",  href: "/database/functions", unavailable: { note: "Database function browser is not built yet" } },
+          { label: "Functions",  href: "/database/functions" },
           { label: "Triggers",   href: "/database/triggers" },
           { label: "Indexes",    href: "/database/indexes" },
           { label: "Constraints", href: "/database/constraints" },
@@ -80,7 +86,7 @@ const STATIC_SECTIONS: Record<string, SectionDef> = {
         ],
       },
       {
-        label: "Coming Soon",
+        label: COMING_SOON,
         items: [
           { label: "Wrappers",    href: "/database/wrappers", unavailable: { note: "Foreign data wrappers are not built yet" } },
           { label: "Replication", href: "/database/replication", unavailable: { note: "Read replicas are coming soon" } },
@@ -118,13 +124,8 @@ const STATIC_SECTIONS: Record<string, SectionDef> = {
           { label: "SSO",              href: "/authentication/sso" },
           { label: "Configuration",    href: "/authentication/configuration" },
           { label: "Email Templates",  href: "/authentication/email-templates" },
-        ],
-      },
-      {
-        label: "Coming Soon",
-        items: [
-          { label: "Hooks",    href: "/authentication/hooks", unavailable: { note: "Auth hooks are not built yet" } },
-          { label: "Security", href: "/authentication/security", unavailable: { note: "Attack protection settings are not built yet" } },
+          { label: "Hooks",            href: "/authentication/hooks" },
+          { label: "Attack Protection", href: "/authentication/security" },
         ],
       },
     ],
@@ -166,6 +167,32 @@ const STATIC_SECTIONS: Record<string, SectionDef> = {
   },
 }
 
+/**
+ * `section` with every page the host's extension serves made available: its "coming soon" note
+ * dropped, and the item moved out of a group of pages still to come into the group before it, so a
+ * page that works is not listed under "Coming Soon". On a host that serves none, nothing changes.
+ */
+export function withServedPages(section: SectionDef, serves: (href: string) => boolean): SectionDef {
+  const groups: NavGroup[] = []
+  for (const group of section.groups) {
+    const servedHere = group.items.filter((item) => item.unavailable !== undefined && serves(item.href))
+    if (servedHere.length === 0) {
+      groups.push(group)
+      continue
+    }
+    const available = servedHere.map(({ unavailable: _unavailable, ...item }) => item)
+    const rest = group.items.filter((item) => !servedHere.includes(item))
+    const previous = groups.at(-1)
+    if (group.label === COMING_SOON && previous !== undefined) {
+      groups[groups.length - 1] = { ...previous, items: [...previous.items, ...available] }
+      if (rest.length > 0) groups.push({ ...group, items: rest })
+    } else {
+      groups.push({ ...group, items: group.items.map((item) => available.find((a) => a.href === item.href) ?? item) })
+    }
+  }
+  return { ...section, groups }
+}
+
 /** The Database section, without the SQL editor for a role that is not offered it (RX1). */
 export function databaseSectionFor(capability: { role: string | null; permissions: Record<string, boolean> }): SectionDef {
   const section = STATIC_SECTIONS["database"]!
@@ -200,7 +227,7 @@ export function buildRealtimeSection(availability: InspectorAvailability): Secti
   return {
     title: "Realtime",
     groups: [{
-      label: "Coming Soon",
+      label: COMING_SOON,
       items: [
         { label: "Inspector", href: "/realtime", unavailable: { note: "The Realtime Inspector is coming soon" } },
         settings,
@@ -226,6 +253,7 @@ function getSectionId(path: string): string | null {
   if (path.startsWith("/observability")) return "observability"
   if (path.startsWith("/ai")) return "ai"
   if (path.startsWith("/edge-functions")) return "functions"
+  if (path === "/static-site" || path.startsWith("/static-site/")) return "static-site"
   if (path === "/realtime" || path.startsWith("/realtime/")) return "realtime"
   return null
 }
@@ -253,6 +281,26 @@ export function SectionPanelToggle({ open, onToggle }: { open: boolean; onToggle
       <IconList size={16} />
     </Button>
   )
+}
+
+function matchesHref(href: string, path: string): boolean {
+  return path === href || path.startsWith(href + "/") || path.startsWith(href + "?")
+}
+
+/**
+ * The href of the item a path belongs to, among items with no rule of their own: the longest one
+ * that matches. A section whose root item (/static-site) is a prefix of its other pages must not
+ * mark the root as current on all of them.
+ */
+export function longestMatchingHref(section: SectionDef, path: string): string | null {
+  const hrefs = section.groups.flatMap((g) => g.items).filter((i) => i.activeWhen === undefined && matchesHref(i.href, path)).map((i) => i.href)
+  return hrefs.reduce<string | null>((best, href) => (best === null || href.length > best.length ? href : best), null)
+}
+
+/** The Static site group's pages: Deployments only where the host provides it (Cloud). */
+export function buildStaticSiteSection(host: StaticSiteHost | undefined): SectionDef {
+  const items = host === undefined ? [] : staticSitePages(host).map((page) => ({ ...page }))
+  return { title: "Static site", groups: [{ items }] }
 }
 
 function buildSettingsSection(): SectionDef {
@@ -333,6 +381,8 @@ export function SecondaryPanel({
   const sectionId = getSectionId(path)
   const { availability: realtimeAvailability } = useInspectorAvailability({ enabled: sectionId === "realtime" })
   const capability = useStudioCapability()
+  const staticSiteHost = useStaticSiteHost()
+  const serves = useExtensionServes()
 
   const adminFetch = React.useCallback(
     (adminPath: string, init?: RequestInit) => functionsAdminFetch(client, adminPath, init),
@@ -427,9 +477,14 @@ export function SecondaryPanel({
     section = buildSettingsSection()
   } else if (sectionId === "realtime") {
     section = buildRealtimeSection(realtimeAvailability)
+  } else if (sectionId === "static-site") {
+    section = buildStaticSiteSection(staticSiteHost)
   } else {
     section = sectionId === "database" ? databaseSectionFor(capability) : (STATIC_SECTIONS[sectionId] ?? { title: "", groups: [] })
   }
+  section = withServedPages(section, serves)
+
+  const claimedHref = longestMatchingHref(section, path)
 
   return (
     <>
@@ -472,11 +527,7 @@ export function SecondaryPanel({
               // the Editor tab (not Schema tab) stays highlighted here.
               const active = item.activeWhen
                 ? item.activeWhen(path, search)
-                : (
-                  path === item.href ||
-                  path.startsWith(item.href + "/") ||
-                  path.startsWith(item.href + "?")
-                )
+                : item.href === claimedHref
 
               if (item.unavailable !== undefined) {
                 return (

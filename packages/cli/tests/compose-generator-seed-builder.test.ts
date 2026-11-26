@@ -13,6 +13,11 @@ import { projectConfig } from "./support/project-config.js"
  */
 const engineRequest = vi.hoisted(() => vi.fn<(endpoint: string, body: unknown, guard: unknown, engine: unknown) => Promise<unknown>>())
 
+// A CI runner has no Docker to ask; no stack runs for this project either way.
+vi.mock("../src/docker-exec.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/docker-exec.js")>()),
+  askDockerState: () => ({ status: 0, stdout: "", stderr: "", timedOut: false, missing: false }),
+}))
 vi.mock("../src/engine-client.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/engine-client.js")>()),
   ensureEngine: async () => {

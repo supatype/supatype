@@ -26,6 +26,8 @@ export interface EmailTemplateState {
   loading: boolean
   busy: boolean
   error: string | null
+  /** When the last save landed, or null before one has, while one is under way, or after a failed one. */
+  savedAt: number | null
   save(): Promise<void>
   reset(): Promise<void>
 }
@@ -92,19 +94,30 @@ export function useEmailTemplate(client: SupatypeClient, type: string): EmailTem
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [savedAt, setSavedAt] = useState<number | null>(null)
   useTemplateLoad(client, type, { setTemplate, setLoading, setError })
+  useEffect(() => { setSavedAt(null) }, [type])
 
-  const run = useCallback(async (action: string, init: RequestInit) => {
+  /** Whether the request went through; a failure is in `error` and never marks a save. */
+  const run = useCallback(async (action: string, init: RequestInit): Promise<boolean> => {
     setBusy(true)
     setError(null)
+    setSavedAt(null)
     try {
       setTemplate(await templateRequest(client, type, action, init))
+      return true
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+      return false
     } finally {
       setBusy(false)
     }
   }, [client, type])
+
+  const save = async (): Promise<void> => {
+    const body = JSON.stringify({ subject: template.subject, content: template.content })
+    if (await run("Save", { method: "PUT", body })) setSavedAt(Date.now())
+  }
 
   return {
     template,
@@ -113,7 +126,8 @@ export function useEmailTemplate(client: SupatypeClient, type: string): EmailTem
     loading,
     busy,
     error,
-    save: () => run("Save", { method: "PUT", body: JSON.stringify({ subject: template.subject, content: template.content }) }),
-    reset: () => run("Reset", { method: "DELETE" }),
+    savedAt,
+    save,
+    reset: async () => { await run("Reset", { method: "DELETE" }) },
   }
 }

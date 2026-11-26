@@ -3,6 +3,10 @@ import { EmptyState } from "../../components/EmptyState.js"
 import { ErrorBanner } from "../../components/ErrorBanner.js"
 import { useAuthSettings, type AuthSettings } from "../../hooks/useAuthSettings.js"
 import { usePlatform } from "../../hooks/usePlatform.js"
+import { CloudConfiguration } from "./CloudConfiguration.js"
+import { useCloudEnvironment } from "./CloudAuthParts.js"
+import { ConfigOnlyTable } from "./ConfigOnlyTable.js"
+import { MFA_SPECS, PHONE_COMMON_SPECS, SAML_SPECS, SESSION_SPECS } from "./authGroupSpecs.js"
 import { enabled, providerRows, SettingsLoading, SettingsTable, type SettingRow } from "./AuthSettingsTable.js"
 
 /**
@@ -49,13 +53,34 @@ function settingRows(s: AuthSettings): SettingRow[] {
   ]
 }
 
+/**
+ * Sections the auth server does not report: each row names its config key. Phone sign-in and the
+ * SMS provider, anonymous sign-in and SAML enablement are already rows above, so only the rest show.
+ */
+function ConfigOnlySections({ cloud }: { cloud: boolean }): React.ReactElement {
+  return (
+    <>
+      <ConfigOnlyTable title="Sessions and security" specs={SESSION_SPECS} cloud={cloud} />
+      <ConfigOnlyTable title="Multi-factor authentication" specs={MFA_SPECS} cloud={cloud} />
+      <ConfigOnlyTable title="Phone codes" specs={PHONE_COMMON_SPECS.slice(2)} cloud={cloud} />
+      <ConfigOnlyTable title="SAML options" specs={SAML_SPECS.slice(1)} cloud={cloud} />
+    </>
+  )
+}
+
 function howToChange(cloud: boolean): string {
   return cloud
     ? "These are managed by Supatype Cloud for this project and cannot be changed from Studio."
     : "These come from the auth server's environment when it starts. Change them in the project's .env (or the auth server's environment in your compose file) and restart the stack. Studio cannot change them."
 }
 
+/** Cloud with a known environment edits through the control plane; everything else reads what the auth server reports. */
 export function ConfigurationView(): React.ReactElement {
+  const environment = useCloudEnvironment()
+  return environment !== null ? <CloudConfiguration environment={environment} /> : <ReadOnlyConfiguration />
+}
+
+function ReadOnlyConfiguration(): React.ReactElement {
   const { settings, error, loading } = useAuthSettings()
   const cloud = usePlatform().platformUrl !== undefined
 
@@ -68,6 +93,7 @@ export function ConfigurationView(): React.ReactElement {
       {loading && <SettingsLoading />}
 
       {settings && <SettingsTable title="Sign-up and confirmation" rows={settingRows(settings)} cloud={cloud} />}
+      {settings && <ConfigOnlySections cloud={cloud} />}
       {settings &&
         (Object.keys(settings.external).length > 0 ? (
           <SettingsTable title="Sign-in methods" rows={providerRows(settings)} cloud={cloud} />

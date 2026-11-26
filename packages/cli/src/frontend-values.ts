@@ -25,6 +25,7 @@
  * is recorded, and a refusal prints the lot, as the seed connection resolver's does.
  */
 
+import { BuildRefused } from "./build-refused.js"
 import { readEnvFile } from "./env-file.js"
 import { FRONTEND_ANON_KEYS, FRONTEND_URL_KEYS, isLocalUrl, recordedApiUrl } from "./frontend-env.js"
 import { publishedAnonKey, readLinkedFrontendValues } from "./frontend-values-linked.js"
@@ -96,7 +97,7 @@ export interface ResolveFrontendOptions {
 }
 
 /** No usable value for one or both, with every source tried. */
-export class FrontendValuesRefused extends Error {
+export class FrontendValuesRefused extends BuildRefused {
   constructor(
     readonly tried: readonly FrontendSourceReport[],
     readonly missing: readonly FrontendValueName[],

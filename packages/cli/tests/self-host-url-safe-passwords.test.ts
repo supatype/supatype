@@ -20,6 +20,8 @@ vi.mock("../src/compose-services.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/compose-services.js")>()),
   takenComposePorts: async () => [],
 }))
+vi.mock("../src/compose-render-mode.js", async (importOriginal) =>
+  (await import("./support/no-running-stack.js")).withNoRunningStack(await importOriginal<typeof import("../src/compose-render-mode.js")>()))
 vi.mock("../src/config.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/config.js")>()
   return { ...actual, loadConfig: () => projectConfig }
@@ -49,6 +51,10 @@ vi.mock("../src/self-host-compose.js", async (importOriginal) => {
 })
 
 import { registerSelfHost } from "../src/commands/self-host.js"
+
+// A running stack: restarting one that has no containers is refused (stack-running.ts), and this
+// file is about what restart runs once it goes ahead.
+vi.mock("../src/stack-running.js", () => ({ restartRefusal: () => null, functionsNetworkNote: () => null, dbContainerNetworks: () => null }))
 
 /**
  * The compose file puts POSTGRES_PASSWORD, AUTHENTICATOR_PASSWORD and the SQL editor's password

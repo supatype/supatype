@@ -43,6 +43,24 @@ async function restStillLoading(url: string, headers: Record<string, string>, de
   }
 }
 
+/** `baseUrl`'s REST address, and the anon key as the header PostgREST reads. */
+function restRequest(baseUrl: string, anonKey: string | undefined): { url: string; headers: Record<string, string> } {
+  return { url: `${baseUrl.replace(/\/+$/, "")}/rest/v1/`, headers: anonKey ? { apikey: anonKey } : {} }
+}
+
+/**
+ * On a stack `self-host compose up` has just started: say to push when REST answers 503, as it
+ * does until the first push creates the schemas it exposes. A new stack otherwise looked up but
+ * answered 503 on its API with nothing to say why. One request, no wait; true when it said so.
+ */
+export async function noteRestAwaitsFirstPush(baseUrl: string, anonKey: string | undefined, deps: RestReadyDeps = liveDeps): Promise<boolean> {
+  const { url, headers } = restRequest(baseUrl, anonKey)
+  const status = await deps.fetchStatus(url, headers).catch(() => 0)
+  if (status !== 503) return false
+  deps.log("[supatype] The REST API answers 503 until your schema exists. Run `supatype push` to create it.")
+  return true
+}
+
 /**
  * Wait until `baseUrl`'s `/rest/v1/` stops answering 503, for at most `withinMs`. Says nothing
  * when REST already answers, one line while it waits, and what to do if it never does. Only 503 is
@@ -55,8 +73,7 @@ export async function waitForRestReady(
   deps: RestReadyDeps = liveDeps,
   withinMs: number = REST_READY_WITHIN_MS,
 ): Promise<boolean> {
-  const url = `${baseUrl.replace(/\/+$/, "")}/rest/v1/`
-  const headers: Record<string, string> = anonKey ? { apikey: anonKey } : {}
+  const { url, headers } = restRequest(baseUrl, anonKey)
   if (!(await restStillLoading(url, headers, deps))) return true
   deps.log("[supatype] Waiting for the REST API to load the new schema (PostgREST answers 503 until it does)...")
   const deadline = deps.now() + withinMs

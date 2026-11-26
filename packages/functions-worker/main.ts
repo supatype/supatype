@@ -5,13 +5,15 @@
  */
 
 import { parseEnvText } from "./dotenv.ts"
-import { FUNCTION_ENTRY_FILE, functionRouteName, isHookName } from "./routes.ts"
+import { scrubProcessEnv } from "./env-allowlist.ts"
+import { isHookName } from "./routes.ts"
 import { exitOnStop } from "./stop.ts"
 import {
-  currentHookDepth,
   runInvocation,
   type FunctionContext,
 } from "./invocation.ts"
+import { endUserAddress, HOOK_DEPTH_HEADER, installStackFetch } from "./stack-fetch.ts"
+import { discoverRoutes, type DiscoveredRoute } from "./discover.ts"
 import {
   closeTails,
   installStructuredLogging,
@@ -20,9 +22,12 @@ import {
 } from "./logging.ts"
 
 installStructuredLogging()
-// Once, at startup. Hook depth then comes from the invocation store rather than from a patch
-// applied and reverted around every call.
-installHookDepthPropagation()
+// The forwarding secret leaves the environment now, before any handler is imported, so user code
+// cannot read it; only the patch below holds it.
+const forwardingSecret = withholdForwardingSecret()
+// Once, at startup. Hook depth and the end user's address then come from the invocation store rather
+// than from a patch applied and reverted around every call.
+installStackFetch({ origin: stackOrigin, forwardingSecret })
 
 /**
  * Route names the worker answers itself.
@@ -31,14 +36,30 @@ installHookDepthPropagation()
  * collide with a function somebody has already deployed. Discovery warns if one is shadowed rather
  * than silently winning.
  */
-const RESERVED_ROUTES = new Set(["_logs"])
+const RESERVED_ROUTES = new Set(["_logs", "_functions"])
+
+/**
+ * The public functions this worker serves, by name: what the server's function list asks for, and
+ * what a 404 offers as `available`. A hook is procedural and the gateway refuses its route from
+ * outside, so it is neither listed nor suggested.
+ */
+function publicFunctionNames(handlers: Record<string, Handler>): string[] {
+  return Object.keys(handlers)
+    .filter((name) => !name.startsWith(HOOKS_ROUTE_PREFIX))
+    .sort()
+}
+
+/**
+ * The answer to `GET /functions/v1/_functions`, in the shape Studio's Edge Functions page reads. The
+ * worker keeps no call statistics, so the counts are zero rather than absent: a missing number is a
+ * page that cannot render the row.
+ */
+function functionListResponse(handlers: Record<string, Handler>): Response {
+  const data = publicFunctionNames(handlers).map((name) => ({ name, invocations24h: 0, avgDurationMs: 0 }))
+  return new Response(JSON.stringify({ data }), { headers: { "Content-Type": "application/json" } })
+}
 
 type Handler = (req: Request, ctx: FunctionContext) => Response | Promise<Response>
-
-interface DiscoveredRoute {
-  name: string
-  entrypoint: string
-}
 
 /**
  * Root for public functions, or "" when this worker serves none.
@@ -210,6 +231,20 @@ async function withholdServiceRoleKey(): Promise<string> {
 }
 
 /**
+ * The forwarding secret from the environment, or "" when the project has none, taken out of it.
+ *
+ * Like the service-role key above, and for the same reason: it is what makes the auth server believe
+ * an address a request passes on, so a function able to read it could claim any address. Withheld
+ * before any handler is imported, and handed to nothing but the patch on `fetch` that adds it to
+ * calls to the stack's own address.
+ */
+function withholdForwardingSecret(): string {
+  const secret = (Deno.env.get("SUPATYPE_FORWARDING_SECRET") ?? "").trim()
+  Deno.env.delete("SUPATYPE_FORWARDING_SECRET")
+  return secret
+}
+
+/**
  * The service-role key from `path`, or "" (no function is given it) when the file cannot be read.
  *
  * For a worker run under `deno run --watch`, as native `supatype dev` and `supatype functions serve`
@@ -226,35 +261,6 @@ async function readServiceRoleKeyFile(path: string): Promise<string> {
     log("error", `No function is given the service-role key: could not read ${path} (${errorText(err)})`)
     return ""
   }
-}
-
-async function discoverRoutes(root: string): Promise<DiscoveredRoute[]> {
-  const single = Deno.env.get("SUPATYPE_FUNCTION_NAME")?.trim()
-  const out: DiscoveredRoute[] = []
-
-  // The catch has to wrap the *iteration*: `Deno.readDir` returns its iterable without touching the
-  // filesystem, so a missing directory raises NotFound on the first `next()`, not here. A root that
-  // does not exist is ordinary, a project with functions but no hooks has no hooks directory, and
-  // letting it throw would fail startup and take that project's working functions down with it.
-  try {
-    // routes.ts is the rule a self-hosted control plane lists functions by too.
-    for await (const entry of Deno.readDir(root)) {
-      const fullPath = `${root}/${entry.name}`
-      const name = entry.isDirectory || entry.isFile ? functionRouteName(entry.name, entry.isDirectory ? "directory" : "file") : undefined
-      if (name === undefined || (single && name !== single)) continue
-      const entrypoint = entry.isDirectory ? `${fullPath}/${FUNCTION_ENTRY_FILE}` : fullPath
-      try {
-        await Deno.stat(entrypoint)
-        out.push({ name, entrypoint })
-      } catch {
-        // A directory with no entry module is not a route.
-      }
-    }
-  } catch (err) {
-    if (!(err instanceof Deno.errors.NotFound)) throw err
-  }
-
-  return out.sort((a, b) => a.name.localeCompare(b.name))
 }
 
 function entrypointImportUrl(entrypoint: string): string {
@@ -343,11 +349,17 @@ function jsonError(code: string, message: string, status: number, extra: Record<
   })
 }
 
+/** The one route a pinned worker serves (a per-function or per-hook pod), or undefined. */
+function singleFunction(): string | undefined {
+  return Deno.env.get("SUPATYPE_FUNCTION_NAME")?.trim()
+}
+
 const port = parseInt(Deno.env.get("PORT") ?? "8001", 10)
-// Order matters: withhold, then import. See withholdServiceRoleKey.
+// Order matters: withhold and scrub, then import. See withholdServiceRoleKey and env-allowlist.ts.
 const serviceRoleKey = await withholdServiceRoleKey()
+scrubProcessEnv()
 const root = functionsRoot()
-const routes = root ? await discoverRoutes(root) : []
+const routes = root ? await discoverRoutes(root, singleFunction()) : []
 const handlers = await loadHandlers(routes)
 
 // Hooks are namespaced so one worker can serve both without a name in `hooks/` ever shadowing, or
@@ -359,7 +371,7 @@ if (!root && !hooksDir) {
   )
 }
 if (hooksDir) {
-  const hookRoutes = await discoverRoutes(hooksDir)
+  const hookRoutes = await discoverRoutes(hooksDir, singleFunction())
   const hookHandlers = await loadHandlers(hookRoutes)
   for (const [name, handler] of Object.entries(hookHandlers)) {
     handlers[HOOKS_ROUTE_PREFIX + name] = handler
@@ -371,7 +383,7 @@ if (hooksDir) {
 // once, after both roots, so the failure means what it says, and it stays a failure, because a pod
 // serving nothing would answer 404 to the API server, which reads as the hook refusing to answer and
 // fails every write to its table.
-const single = Deno.env.get("SUPATYPE_FUNCTION_NAME")?.trim()
+const single = singleFunction()
 if (single && Object.keys(handlers).length === 0) {
   throw new Error(
     `Handler "${single}" not found under ${root}` + (hooksDir ? ` or ${hooksDir}` : ""),
@@ -408,11 +420,11 @@ async function readEnvFile(path: string): Promise<Record<string, string>> {
  */
 const managedEnvPath = (Deno.env.get("SUPATYPE_FUNCTION_ENV_FILE") ?? "").trim()
 
-async function readManagedEnv(): Promise<Record<string, string>> {
-  if (!managedEnvPath) return {}
+async function readManagedEnv(path: string = managedEnvPath): Promise<Record<string, string>> {
+  if (!path) return {}
   let parsed: unknown
   try {
-    parsed = JSON.parse(await Deno.readTextFile(managedEnvPath))
+    parsed = JSON.parse(await Deno.readTextFile(path))
   } catch {
     return {}
   }
@@ -421,52 +433,39 @@ async function readManagedEnv(): Promise<Record<string, string>> {
 }
 
 /**
- * The shared env file, then the managed values, then the function's own file, which wins. The three
- * are read together: every call waits for them.
+ * The file of one function's own managed values: `fn.<name>.json`, in the directory of the managed
+ * file, in the same JSON shape. Supatype Cloud writes one per function that has secrets of its own
+ * (self-host keeps them in `.env.<name>.local`). Empty when there is no managed file, or when the name
+ * is not a plain function name, so a route name can never reach outside that directory.
+ */
+function functionManagedEnvPath(fnName: string): string {
+  if (!managedEnvPath || !/^[A-Za-z0-9_-]+$/.test(fnName)) return ""
+  const slash = Math.max(managedEnvPath.lastIndexOf("/"), managedEnvPath.lastIndexOf("\\"))
+  return `${managedEnvPath.slice(0, slash + 1)}fn.${fnName}.json`
+}
+
+/**
+ * The shared env file, then the managed values, then the function's own file, which wins, then the
+ * function's own managed values, which win over all of those. They are read together: every call waits
+ * for them.
  */
 async function scopedEnvForFunction(fnName: string): Promise<Record<string, string>> {
-  const [shared, managed, fnVars] = await Promise.all([
+  const [shared, managed, fnVars, fnManaged] = await Promise.all([
     readEnvFile(sharedEnvPath),
     readManagedEnv(),
     readEnvFile(`${normalizedFunctionsDir}/.env.${fnName}.local`),
+    readManagedEnv(functionManagedEnvPath(fnName)),
   ])
-  return { ...shared, ...managed, ...fnVars }
-}
-
-const HOOK_DEPTH_HEADER = "x-supatype-hook-depth"
-
-/**
- * Carry the hook-depth header onto calls a hook makes back into the stack.
- *
- * Patched once, at startup, rather than per invocation. The old version replaced `globalThis.fetch`
- * for the duration of a call and restored it afterwards, which is only safe while exactly one
- * invocation runs at a time: two concurrent hooks would patch over each other, and the first to
- * finish would restore the other's patch. That mutation was half the reason for the lock.
- *
- * Depth comes from the invocation store, so this closure holds no per-call state at all.
- */
-function installHookDepthPropagation(): void {
-  const original = globalThis.fetch
-  globalThis.fetch = (input: Request | URL | string, init?: RequestInit): Promise<Response> => {
-    const depth = currentHookDepth()
-    const stack = stackOrigin()
-    if (depth === null || stack === null) return original(input, init)
-
-    const url = input instanceof Request ? input.url : String(input)
-    if (!url.startsWith(stack)) return original(input, init)
-
-    const request = new Request(input, init)
-    request.headers.set(HOOK_DEPTH_HEADER, depth)
-    return original(request)
-  }
+  return { ...shared, ...managed, ...fnVars, ...fnManaged }
 }
 
 /**
  * The database URL a function may use, when the deployment gave the worker one: off unless the
- * operator set SUPATYPE_FUNCTIONS_DB_URL (see `FunctionContext.dbUrl`).
+ * operator set SUPATYPE_FUNCTIONS_DB_URL (see `FunctionContext.dbUrl`). Never `DATABASE_URL`: that
+ * is the stack's own connection, and the scrub removes it before any function loads.
  */
 function dbUrlForFunctions(): string | undefined {
-  const raw = Deno.env.get("SUPATYPE_DB_URL") ?? Deno.env.get("DATABASE_URL")
+  const raw = Deno.env.get("SUPATYPE_DB_URL")
   return raw === undefined || raw.trim() === "" ? undefined : raw
 }
 
@@ -529,6 +528,7 @@ const server = Deno.serve({
   // still has a tail.
   if (RESERVED_ROUTES.has(fnName)) {
     if (fnName === "_logs") return tailResponse()
+    if (fnName === "_functions") return functionListResponse(handlers)
   }
 
   // A hook the map names with no code here (a new hook whose deploy failed) cannot be reached: 503,
@@ -541,7 +541,7 @@ const server = Deno.serve({
   }
   if (!fnName || !handlers[fnName]) {
     const message = fnName ? `Function "${fnName}" not found` : "No function specified"
-    return jsonError("not_found", message, 404, { available: Object.keys(handlers) })
+    return jsonError("not_found", message, 404, { available: publicFunctionNames(handlers) })
   }
 
   // Nothing goes into the process environment, so nothing has to be taken back out and nothing has
@@ -566,9 +566,8 @@ const server = Deno.serve({
   const start = performance.now()
 
   try {
-    const response = await runInvocation(context, req.headers.get(HOOK_DEPTH_HEADER), async () =>
-      handlers[fnName]!(req, context),
-    )
+    const inbound = { hookDepth: req.headers.get(HOOK_DEPTH_HEADER), clientAddress: endUserAddress(req.headers) }
+    const response = await runInvocation(context, inbound, async () => handlers[fnName]!(req, context))
     log("info", `${req.method} /functions/v1/${fnName} → ${response.status}`, {
       request_id: context.executionId,
       function: fnName,

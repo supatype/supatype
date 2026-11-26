@@ -1,6 +1,24 @@
 # Changelog
 
-## Unreleased
+There is no 0.4, 0.5 or 0.6 release: this package went from 0.3.6 straight to 0.7.0, on npm and as git tags, so
+no entries are missing from this file.
+
+## 0.9.3
+
+### Features
+
+* **storage:** `Folder<N>` names the Nth folder of an object path (from 1) in a bucket rule, so
+  `create: Eq<Folder<1>, AuthUid>` keeps each user to their own folder. `BucketRule` now also takes
+  `Any`, `All`, `Not`, comparisons and null checks over `AuthUid`, `AuthRole`, `Claim`, `Literal`
+  and `Folder`, so a registered-only rule can be written on a bucket.
+* **realtime:** `Channel<Pattern, { params, access }>` declares a realtime channel, with `join`,
+  `send` and `track` rules. `Param<"id">` names a channel parameter, and `Event<"bid">` and
+  `Payload<"amount", { kind: "number"; min: 1 }>` check a broadcast's event name and payload in a
+  `send` rule. `params` must name exactly the `{segments}` of the pattern, each a `UUID`, `string`
+  or `Int`, and the compiler refuses a key the pattern does not use. `ChannelParamNames`,
+  `ChannelConfig`, `ChannelAccess` and `PayloadCheck` are exported for tooling.
+
+## 0.8.0 (2026-11-02)
 
 ### Features
 

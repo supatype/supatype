@@ -3,6 +3,7 @@
 import React, { useState } from "react"
 import { useLocation } from "react-router-dom"
 import type { AdminConfig } from "../config.js"
+import type { SidebarSection } from "../types.js"
 import { LocaleSwitcher } from "./LocaleSwitcher.js"
 import { SupatypeIcon } from "./SupatypeLogo.js"
 import { Badge, Button, IconLink, TextLink } from "./ui.js"
@@ -11,6 +12,7 @@ import { JumpToSearch, JumpToSearchSheet } from "./JumpToSearch.js"
 import { UserAccountMenu } from "./UserAccountMenu.js"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu.js"
 import { cn } from "../lib/utils.js"
+import { getPageBreadcrumbs } from "./Sidebar.js"
 
 const FEEDBACK_URL = "https://github.com/supatype/supatype/issues/new/choose"
 const DOCS_URL = "https://supatype.com/docs"
@@ -25,6 +27,8 @@ interface TopBarProps {
   demoMode?: boolean | undefined
   /** The phone-width primary menu the burger opens and closes. */
   sidebar: SidebarToggle
+  /** The sections the host adds to the rail, which name the host's own pages in the header. */
+  hostSections?: readonly SidebarSection[] | undefined
 }
 
 /** What the burger needs to drive the primary menu and say so to assistive technology. */
@@ -124,6 +128,31 @@ function HeaderContext({ leftItems }: { leftItems: React.ComponentType[] | undef
 }
 
 /**
+ * The current page, after the host's own segments (Studio / Main here, org / project / environment
+ * on Cloud). It reads the same breadcrumb the tab title does, so a host adds nothing to get it.
+ * Below `sm` it is dropped with Studio's own label: the side panel heading names the page there.
+ */
+function PageCrumbs(
+  { config, path, hostSections }: { config: AdminConfig | null; path: string; hostSections: readonly SidebarSection[] | undefined },
+): React.ReactElement | null {
+  if (config === null) return null
+  const crumbs = getPageBreadcrumbs(path, config, hostSections)
+  if (crumbs.length === 1 && crumbs[0] === "Studio") return null
+  return (
+    <nav aria-label="Current page" className="hidden sm:flex min-w-0 items-center gap-2">
+      {crumbs.map((crumb, i) => (
+        <React.Fragment key={`${i}-${crumb}`}>
+          <Slash />
+          <span className={cn("max-w-[200px] truncate text-sm", i === crumbs.length - 1 ? "text-foreground" : "text-muted-foreground")}>
+            {crumb}
+          </span>
+        </React.Fragment>
+      ))}
+    </nav>
+  )
+}
+
+/**
  * Connect, Feedback and the docs. From `sm` up each sits in the header; below it they share one
  * overflow menu, so the header fits a 360px phone without cropping the account menu off its end.
  */
@@ -193,7 +222,7 @@ function HeaderSearch({ onDashboard }: { onDashboard: boolean }): React.ReactEle
   )
 }
 
-export function TopBar({ config, leftItems, extraItems, demoMode, sidebar }: TopBarProps): React.ReactElement {
+export function TopBar({ config, leftItems, extraItems, demoMode, sidebar, hostSections }: TopBarProps): React.ReactElement {
   const { pathname } = useLocation()
   const [connectOpen, setConnectOpen] = useState(false)
 
@@ -204,6 +233,7 @@ export function TopBar({ config, leftItems, extraItems, demoMode, sidebar }: Top
         <SidebarBurger sidebar={sidebar} />
       </div>
       <HeaderContext leftItems={leftItems} />
+      <PageCrumbs config={config} path={pathname} hostSections={hostSections} />
       {demoMode && (
         <Badge variant="outline" className="shrink-0 border-primary/40 text-primary">
           Demo

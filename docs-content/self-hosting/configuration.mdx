@@ -15,6 +15,27 @@ containers, PostgREST's roles, the object store's credentials) are fixed in the 
 Variables marked **Required** have no default: Compose stops before starting anything and names the
 one that is missing, for example `POSTGRES_PASSWORD is missing from .env`.
 
+## The managed block in `.env`
+
+Some lines in `.env` are written by the CLI from `supatype.config.ts`, each under a comment that
+starts `# supatype:managed`. On a self-hosted stack these are the mailer settings that `email` in the
+config gives.
+
+- **Do not edit a line under that marker.** Every `self-host compose up` (and the other commands that
+  start the stack) rewrites it from `supatype.config.ts`. A hand edit made in place, under the
+  marker, is replaced too, and the CLI warns about it: it keeps a hash of each value it last wrote
+  in `.supatype/env-managed.json` (never the value), and a line that no longer matches is a hand
+  edit. A project with no such record yet, on the first run after an upgrade, gets no warning.
+- **A line outside the block is warned about, then replaced if the config sets that name.** Put your
+  own value below the managed block, not under the marker. If it conflicts with what the config
+  gives, the CLI prints a warning naming the key with its old and new value, then writes the config's
+  value in its place. To keep a value for a managed name, set it in `supatype.config.ts`.
+- **A marked line for a name the config no longer gives is removed**; a value outside the block for
+  a name the config does not set is left alone.
+
+The warning is only for a value that differs from the config's and is not blank. A value that changed
+because you changed `supatype.config.ts` is not a hand edit and gets no warning.
+
 ## Database
 
 | Variable | Default | Description |
@@ -93,18 +114,31 @@ Local dev confirms sign-ups at once unless the config says otherwise.
 
 ### Email
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SUPATYPE_MAILER_MAILER_PROVIDER` | `console` | `console` writes each message to the server's log and sends nothing. Set `smtp` to deliver through the server below |
-| `SUPATYPE_SMTP_HOST` | None | SMTP server hostname |
-| `SUPATYPE_SMTP_PORT` | `587` | SMTP server port |
-| `SUPATYPE_SMTP_USER` | None | SMTP username |
-| `SUPATYPE_SMTP_PASS` | None | SMTP password |
-| `SUPATYPE_SMTP_ADMIN_EMAIL` | None | The address messages are sent from |
-| `SUPATYPE_SMTP_SENDER_NAME` | None | The name shown beside that address |
+Set email delivery in the `email` block of `supatype.config.ts`. Every `self-host compose` command
+writes these `.env` variables from it, so the config is the one place to change them:
 
-With the default provider no email leaves the server, whatever the SMTP variables say. The generated
-file passes only these settings, so on a self-hosted stack use `console` or `smtp`.
+| `supatype.config.ts` key | `.env` variable | Default | Description |
+|--------------------------|----------------|---------|-------------|
+| `email.provider` | `SUPATYPE_MAILER_MAILER_PROVIDER` | `console` | `console` writes each message to the server's log and sends nothing. Set `smtp` to deliver through the server below |
+| `email.smtp.host` | `SUPATYPE_SMTP_HOST` | None | SMTP server hostname |
+| `email.smtp.port` | `SUPATYPE_SMTP_PORT` | `587` | SMTP server port |
+| `email.smtp.user` | `SUPATYPE_SMTP_USER` | None | SMTP username |
+| `email.smtp.pass` | `SUPATYPE_SMTP_PASS` | None | SMTP password |
+| `email.smtp.admin_email` | `SUPATYPE_SMTP_ADMIN_EMAIL` | None | The address messages are sent from |
+| `email.smtp.sender_name` | `SUPATYPE_SMTP_SENDER_NAME` | None | The name shown beside that address |
+
+```typescript title="supatype.config.ts"
+email: {
+  provider: "smtp",
+  smtp: { host: "smtp.example.com", port: 587, user: "apikey", pass: process.env.SMTP_PASS, admin_email: "no-reply@example.com" },
+},
+```
+
+Do not set `SUPATYPE_MAILER_MAILER_PROVIDER` in `.env`: the next `self-host compose` command replaces it
+with the config's value, `console` when the config has no `email`, and prints a warning naming the key
+with its old and new value (a password or key is shown as `***`). This holds for a value outside the managed block and for one edited in place under the marker. With the `console` provider no email
+leaves the server, whatever the SMTP variables say. The generated file passes only these settings, so
+on a self-hosted stack use `console` or `smtp`.
 
 ### OAuth providers
 
@@ -284,7 +318,7 @@ you run the storage service yourself with one S3 bucket per bucket.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SUPATYPE_FUNCTIONS_DB_URL` | None | A Postgres URL handed to every function as `ctx.dbUrl`. It bypasses access rules and field masking, so name a least-privilege role, never the admin URL |
+| `SUPATYPE_FUNCTIONS_DB_URL` | None | A Postgres URL handed to every function as `ctx.dbUrl`. Rules and masking apply for the role the URL names; a superuser or `BYPASSRLS` role (the admin role, `service_role`) skips both. Name a least-privilege login role, never the admin URL, and end the URL with the database in `POSTGRES_DB` |
 | `STRIPE_SECRET_KEY` | None | Passed to the functions worker |
 | `STRIPE_WEBHOOK_SECRET` | None | Passed to the functions worker |
 
@@ -306,6 +340,10 @@ generated file names: for Supatype's own services, the exact release the CLI was
 `latest`, so upgrading the CLI moves them. A `versions` pin for
 `engine` or `server` in `supatype.config.ts` writes `SUPATYPE_ENGINE_IMAGE` or
 `SUPATYPE_SERVER_IMAGE` into `.env` for you.
+
+A `versions` pin wins over a hand-written image for the same service: the next `self-host compose`
+command puts the pinned image back and prints a warning naming the variable with its old and new
+value. To run your own image, remove that pin from `supatype.config.ts`.
 
 ## Generating keys
 

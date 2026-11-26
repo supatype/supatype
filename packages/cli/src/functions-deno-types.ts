@@ -106,6 +106,52 @@ export function sharedFunctionsReadmeSource(): string {
 }
 
 /**
+ * The `FunctionContext` interface, as source. Shared with the generated hooks module, which has to
+ * declare the same shape without importing `_shared/context.ts`: a hook can live where that file
+ * does not. Structural typing makes the two declarations one type.
+ */
+export const FUNCTION_CONTEXT_INTERFACE = `export interface FunctionContext {
+  /** Unique to this invocation. Every log line it writes carries the same value. */
+  readonly executionId: string
+  /** The function or hook route being served. */
+  readonly functionName: string
+  /**
+   * The project's API base URL, reachable from inside the function: for calling the API. Under
+   * Docker it is an in-stack name (http://kong:8100) that a browser cannot open.
+   */
+  readonly url: string
+  /**
+   * For links you give to people, such as one in an email, a redirect or a response: the project's
+   * public address, the gateway URL a browser or an app uses. Falls back to url when the deployment
+   * did not set it.
+   */
+  readonly publicUrl: string
+  readonly anonKey: string
+  /** Present only when the project granted this route the service role. */
+  readonly serviceRoleKey?: string
+  /**
+   * A raw Postgres connection URL. Off by default: present only when the operator sets
+   * SUPATYPE_FUNCTIONS_DB_URL in .env. It connects as whatever role that URL names and is not a
+   * request through the API, so model hooks do not run. Row rules and field masking apply for
+   * the role the URL names: a superuser or BYPASSRLS role (the admin role, service_role) skips
+   * both, any other role is held to them. Set it to a least-privilege login role that is
+   * neither, granted only what the functions need, never the admin URL, and treat it as a
+   * credential: never return it or log it.
+   */
+  readonly dbUrl?: string
+  readonly region: string
+  /**
+   * Values from the functions directory's .env.local (or SUPATYPE_SHARED_ENV_FILE), then those
+   * "supatype functions env set" gave a self-hosted project, then .env.<function>.local, which
+   * wins. The project's own .env is not read for these. They are read again on every call.
+   *
+   * They are here, never in Deno.env: that is the worker's one process environment, shared by every
+   * call running at once, so a value put there for one function would reach every other.
+   */
+  readonly env: Readonly<Record<string, string>>
+}`
+
+/**
  * The context type, as a module a function can import.
  *
  * Not an ambient declaration. `functions/deno.d.ts` is read by tsserver and by the tsconfig in this
@@ -131,44 +177,7 @@ export function functionsContextModuleSource(): string {
  * handlers had no type to import while this line told its author the file was maintained. Say
  * which commands, so the claim can be checked rather than believed.
  */
-export interface FunctionContext {
-  /** Unique to this invocation. Every log line it writes carries the same value. */
-  readonly executionId: string
-  /** The function or hook route being served. */
-  readonly functionName: string
-  /**
-   * The project's API base URL, reachable from inside the function: for calling the API. Under
-   * Docker it is an in-stack name (http://kong:8000) that a browser cannot open.
-   */
-  readonly url: string
-  /**
-   * For links you give to people, such as one in an email, a redirect or a response: the project's
-   * public address, the gateway URL a browser or an app uses. Falls back to url when the deployment
-   * did not set it.
-   */
-  readonly publicUrl: string
-  readonly anonKey: string
-  /** Present only when the project granted this route the service role. */
-  readonly serviceRoleKey?: string
-  /**
-   * A raw Postgres connection URL. Off by default: present only when the operator sets
-   * SUPATYPE_FUNCTIONS_DB_URL in .env. It connects as whatever role that URL names and is not a
-   * request through the API, so row rules and field masking do not apply to it. Set it to a
-   * least-privilege role granted only what the functions need, never the admin URL, and treat it
-   * as a credential: never return it or log it.
-   */
-  readonly dbUrl?: string
-  readonly region: string
-  /**
-   * Values from the functions directory's .env.local (or SUPATYPE_SHARED_ENV_FILE), then those
-   * "supatype functions env set" gave a self-hosted project, then .env.<function>.local, which
-   * wins. The project's own .env is not read for these. They are read again on every call.
-   *
-   * They are here, never in Deno.env: that is the worker's one process environment, shared by every
-   * call running at once, so a value put there for one function would reach every other.
-   */
-  readonly env: Readonly<Record<string, string>>
-}
+${FUNCTION_CONTEXT_INTERFACE}
 `
 }
 

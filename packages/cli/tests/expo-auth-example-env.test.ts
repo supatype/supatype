@@ -69,7 +69,7 @@ describe("the expo-auth web export's page", () => {
     const html = readFileSync(join(EXAMPLE, "public/index.html"), "utf8")
     const head = html.slice(0, html.indexOf("</head>"))
     // A plain script, so it runs before the bundle Expo appends to the body.
-    expect(head).toMatch(/<script src="\/supatype-env\.js"><\/script>/)
+    expect(head).toMatch(/<script src="\/supatype-env\.js" vite-ignore><\/script>/)
     // Expo fills these in, and mounts the app on #root.
     expect(html).toContain("%WEB_TITLE%")
     expect(html).toContain('<div id="root"></div>')

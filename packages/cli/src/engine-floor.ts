@@ -68,6 +68,20 @@ export const ENGINE_MIN_FOR_SEED = "0.4.0"
 export const ENGINE_MIN_FOR_GENERATED_COLUMNS = "0.7.0"
 
 /**
+ * First engine release that reads `channels` and `realtime` and emits the realtime channel access
+ * functions (the realtime private channels plan, section 14.2).
+ *
+ * Engine 0.11.0 is the release that carries stage A of the plan, and it was raised in the same
+ * change that raised the engine pin in release/images.json. The release-images test holds the pin
+ * at or above every `ENGINE_MIN_` floor, so the two cannot drift apart.
+ *
+ * Silent, like `versions`: an older engine does not reject the two keys, it drops them. The push
+ * succeeds, no access function exists, and a project that declared its channels private has
+ * channels nothing enforces.
+ */
+export const ENGINE_MIN_FOR_CHANNELS = "0.11.0"
+
+/**
  * The oldest engine this CLI runs at all (decision D3, local test round 3, N9). A bucket that names
  * no access mode leaves `public` out of the schema, and engine 0.7.0 fails on it with
  * ``missing field `public` ``, which says nothing about the cause.
@@ -217,6 +231,17 @@ export function modelsRequiringVersions(ast: ExtractedSchemaAstV2): string[] {
 }
 
 /**
+ * What in the schema needs the channels floor: each declared channel by name, and `realtime.channels`
+ * when the config states a mode, since an older engine drops that key too.
+ */
+export function schemaChannelDeclarations(ast: ExtractedSchemaAstV2): string[] {
+  return [
+    ...(ast.channels ?? []).map((channel) => channel.name),
+    ...(ast.realtime === undefined ? [] : ["realtime.channels"]),
+  ]
+}
+
+/**
  * One thing a schema can declare that an older engine cannot apply.
  *
  * A table rather than a second copy of the check, because there will be a third: every feature that
@@ -273,6 +298,16 @@ const ENGINE_REQUIREMENTS: EngineRequirement[] = [
       `Only engine ${ENGINE_MIN_FOR_GENERATED_COLUMNS}+ reads them. An older engine ignores ` +
       `\`identity\` and \`generated\` and applies the rest, so an identity column becomes a plain ` +
       `NOT NULL integer every insert fails on, and a generated one a plain column nothing fills.`,
+  },
+  {
+    since: ENGINE_MIN_FOR_CHANNELS,
+    declaredBy: schemaChannelDeclarations,
+    feature: "realtime channels",
+    consequence:
+      `Only engine ${ENGINE_MIN_FOR_CHANNELS}+ emits the functions the realtime service asks before it ` +
+      `admits a join, a broadcast or a presence update. An older engine drops \`channels\` and \`realtime\` ` +
+      `and applies the rest, so the push reports success while the channels you declared as private ` +
+      `are open: it enforces nothing. That silence is the reason this refuses.`,
   },
 ]
 
@@ -331,6 +366,47 @@ export function assertEngineSupportsSchema(
       }),
     )
   }
+}
+
+/**
+ * First realtime release that enforces a declared channel: it asks the access functions the engine
+ * emits before it admits a join, a broadcast or a presence update, and names itself in its first
+ * frame (v0.9.2 has neither). Only the native path reads `versions.realtime`; a compose stack runs
+ * the image of the CLI's own release.
+ *
+ * Silent in the way {@link ENGINE_MIN_FOR_CHANNELS} is, from the other side: an older realtime
+ * does not reject the channels, it never learns of them. The push succeeds and a client that asks
+ * for a private channel is refused `unsupported_server` (FF-34, 2026-11-23 e2e run).
+ */
+export const REALTIME_MIN_FOR_CHANNELS = "0.9.3"
+
+/**
+ * Refuse a schema that declares channels when the realtime this project pins is older than
+ * {@link REALTIME_MIN_FOR_CHANNELS}. Unpinned runs the CLI release's own realtime and `local` a
+ * build the config cannot date, so neither is compared (see {@link comparable}).
+ */
+export function assertRealtimeSupportsSchema(
+  ast: ExtractedSchemaAstV2,
+  pinnedRealtimeVersion: string | undefined,
+): void {
+  if (!comparable(pinnedRealtimeVersion)) return
+  if (compareVersions(pinnedRealtimeVersion, REALTIME_MIN_FOR_CHANNELS) >= 0) return
+
+  const needed = schemaChannelDeclarations(ast)
+  if (needed.length === 0) return
+
+  const shown = needed.slice(0, 3).join(", ")
+  const more = needed.length > 3 ? `, and ${needed.length - 3} more` : ""
+  throw new Error(
+    `This schema declares realtime channels, which needs realtime ${REALTIME_MIN_FOR_CHANNELS} or newer, ` +
+      `and this project pins ${pinnedRealtimeVersion}.\n\n` +
+      `  Declared on: ${shown}${more}\n\n` +
+      `Only realtime ${REALTIME_MIN_FOR_CHANNELS}+ enforces a channel. An older one does not know the ` +
+      `channels exist, so the push reports success and every client that joins a private channel is ` +
+      `refused \`unsupported_server\`. That is the reason this refuses.\n\n` +
+      `Raise or remove the pin in supatype.config.ts:\n` +
+      `  versions: { realtime: "${REALTIME_MIN_FOR_CHANNELS}" }   // or omit it to run this CLI's own`,
+  )
 }
 
 /**

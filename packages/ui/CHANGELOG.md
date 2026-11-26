@@ -1,16 +1,6 @@
 # Changelog
 
-## Unreleased
-
-### Breaking Changes
-
-* **rich-text:** `RichTextEditor` and `RichTextEditorProps` moved to `@supatype/ui/rich-text`.
-  Importing them from `@supatype/ui` fails; change the import to
-  `import { RichTextEditor } from "@supatype/ui/rich-text"`. The main entry no longer loads Lexical,
-  so an app that never renders the editor no longer needs the Lexical packages, which are now
-  optional peer dependencies. The rich text helpers (`emptyRichTextDocument`, `richTextIsEmpty`,
-  `stringToRichTextDocument`, `normalizeRichTextDefault`) and the `SerializedEditorState` types stay
-  in `@supatype/ui`.
+## 0.9.1 (2026-11-09)
 
 ### Features
 
@@ -21,6 +11,18 @@
 * **ui:** `Table`, `THead`, `TBody`, `Tr`, `Th` and `Td`, styled parts that render the native table
   elements, so screen readers get the table, row, column header and cell roles. They hold no data
   logic: map your rows into them.
+
+## 0.9.0 (2026-11-04)
+
+### Breaking Changes
+
+* **rich-text:** `RichTextEditor` and `RichTextEditorProps` moved to `@supatype/ui/rich-text`.
+  Importing them from `@supatype/ui` fails; change the import to
+  `import { RichTextEditor } from "@supatype/ui/rich-text"`. The main entry no longer loads Lexical,
+  so an app that never renders the editor no longer needs the Lexical packages, which are now
+  optional peer dependencies. The rich text helpers (`emptyRichTextDocument`, `richTextIsEmpty`,
+  `stringToRichTextDocument`, `normalizeRichTextDefault`) and the `SerializedEditorState` types stay
+  in `@supatype/ui`.
 
 ### Bug Fixes
 
@@ -50,3 +52,5 @@
 * **readme:** a README covering install, the Tailwind setup the components need (v4 `@source`, v3
   `content`, class-based dark mode for `ThemeProvider`), the stylesheet, the exports and the
   rich-text entry.
+
+
