@@ -38,6 +38,10 @@ vi.mock("../src/engine-floor.js", async (importOriginal) => ({
   assertEngineSupportsSchema: () => undefined,
 }))
 vi.mock("../src/byo-preflight.js", () => ({ byoPreflight: async () => [] }))
+// The push asks Docker whether this project's stack runs. A CI runner has no Docker to ask (macOS
+// and Windows), and no stack runs for this project either way.
+vi.mock("../src/compose-render-mode.js", async (importOriginal) =>
+  (await import("./support/no-running-stack.js")).withNoRunningStack(await importOriginal<typeof import("../src/compose-render-mode.js")>()))
 vi.mock("../src/engine-ownership-gate.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/engine-ownership-gate.js")>()),
   engineCapabilities: async () => ({ features: [], schema: 99 }),
