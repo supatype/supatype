@@ -302,7 +302,7 @@ Authorization: Bearer &lt;service role key&gt;
       <thead><tr><th scope="col">Command</th><th scope="col">Description</th><th scope="col">Useful flags</th></tr></thead>
       <tbody>
         <tr><td><code>self-update</code></td><td>Update the supatype CLI (npm or standalone CDN binary)</td><td><code>--force</code></td></tr>
-        <tr><td><code>update</code></td><td>Download the latest component binaries and update versions in supatype.config.ts</td><td><code>--check</code></td></tr>
+        <tr><td><code>update</code></td><td>Download the latest component binaries and update versions in supatype.config.ts. On a Docker project it checks for a newer CLI release first and says to upgrade the CLI when one exists, because the image pins come from the CLI version, then pulls the images this CLI pins. <code>--check</code> reports the running CLI, the latest release and whether an upgrade would move the pins, and pulls nothing</td><td><code>--check</code></td></tr>
         <tr><td><code>engine status</code></td><td>Run the host engine binary's <code>--version</code> and show which binary answered</td><td></td></tr>
         <tr><td><code>cache list</code></td><td>List cached component binaries and their sizes</td><td><code>--project &lt;path&gt;</code></td></tr>
         <tr><td><code>cache clean [component] [version]</code></td><td>Remove cached binaries not pinned by local project configs, and CLI programs of other versions (<code>cache clean cli</code> for those alone)</td><td><code>--dry-run</code>, <code>--force</code>, <code>--project &lt;path&gt;</code></td></tr>

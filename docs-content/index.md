@@ -275,7 +275,7 @@ $ supatype self-host compose up -d      # run them
 $ supatype push                         # apply the schema they expect
 ```
 
-`supatype update` never updates the CLI itself, so update it first. Under Docker, `update` renders the compose file and pulls the images. It does not restart anything, which is why `compose up -d` follows.
+`supatype update` never updates the CLI itself, so update it first. The image pins come from the CLI version, so under Docker it looks up the latest CLI release and, when yours is behind, prints the upgrade command for how you installed it before carrying on. `supatype update --check` reports the running and latest versions without pulling, and the check is skipped with a warning when offline or on a CLI built from source. Under Docker, `update` renders the compose file and pulls the images. It does not restart anything, which is why `compose up -d` follows.
 
 The push is the step that is easy to miss. Grants, policies, functions and buckets are generated from your schema and only reach the database through `push`, so new images on an older database can refuse rules until it runs. The upgrade is finished after the push, not before.
 
