@@ -178,3 +178,10 @@ export const HOOK_FILES_FEATURE = "hook_files"
  * before stay as they were.
  */
 export const HOOK_KEEP_FEATURE = "hook_keep"
+
+/**
+ * The feature a target lists in its capabilities (`data.features`) when it serves
+ * `POST /projects/:ref/schema/migrate`, the SQL a push would apply, written and applied to nothing.
+ * `push --dry-run` and `diff --sql` print a linked target's SQL only where it is listed.
+ */
+export const MIGRATE_SQL_FEATURE = "migrate_sql"
