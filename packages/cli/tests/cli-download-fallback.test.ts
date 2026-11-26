@@ -24,7 +24,7 @@ let requested: string[]
 let dir: string
 let stderr: string[]
 
-function respond(route: Route): Response {
+function respond(route: Exclude<Route, "network">): Response {
   if ("status" in route) return new Response(null, { status: route.status })
   return new Response(new Uint8Array(route.body), { status: 200 })
 }

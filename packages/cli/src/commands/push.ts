@@ -85,7 +85,7 @@ import {
 } from "../schema-sources.js"
 import { confirm, logSkippedConfirm } from "../ui/confirm.js"
 import { error, info, plain, warn } from "../ui/messages.js"
-import { error, info, plain } from "../ui/messages.js"
+import { printPlanSql } from "../plan-sql.js"
 import { printDiff } from "./diff.js"
 import { withSpinner } from "../ui/progress.js"
 import { projectOutputPaths, writeGeneratedTypes } from "../type-generation.js"
