@@ -22,7 +22,7 @@ A release is one number for the CLI and every `@supatype/*` package. The engine,
 | Component | Version | What it is |
 | --- | --- | --- |
 | CLI and npm packages | `0.9.2` | The latest release, 2026-11-12. The published `@supatype/*` packages, such as `@supatype/client` and `@supatype/react`, carry the same number |
-| Schema engine | `v0.11.1` | Parses the schema, plans and applies a push (`supatype/schema-engine`) |
+| Schema engine | `v0.11.2` | Parses the schema, plans and applies a push (`supatype/schema-engine`) |
 | Server | `v2.5.2-e2e.1b79e2bc` | The Supatype server: the API, auth and the services behind it (`supatype/server`) |
 | Postgres | `17.2.16` | The database image, with its extensions (`supatype/postgres`) |
 | Deno | `2.9.8` | The runtime for functions and hooks |
