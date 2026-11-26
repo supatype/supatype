@@ -7,7 +7,7 @@
  */
 
 /** Whether `part` is path structure rather than a name: empty, "." or "..". */
-const isStepPart = (part: string): boolean => part === "" || part === "." || part === ".."
+export const isStepPart = (part: string): boolean => part === "" || part === "." || part === ".."
 
 /** `sent` with the one leading "/" a name or prefix may carry stripped, and only that one. */
 const withoutLeadingSlash = (sent: string): string => (sent.startsWith("/") ? sent.slice(1) : sent)
