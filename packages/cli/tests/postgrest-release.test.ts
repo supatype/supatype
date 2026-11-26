@@ -73,7 +73,7 @@ function composeImage(): string {
 
 describe("PostgREST release", () => {
   it("compose runs a release with the PostgREST#3707 fix", () => {
-    const tag = composeImage().split(":v")[1] ?? ""
+    const tag = composeImage().split(":v")[1]?.split("@")[0] ?? ""
     expect(atLeast(tag, FIXED_IN), `postgrest/postgrest:v${tag}`).toBe(true)
   })
 

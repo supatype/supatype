@@ -19,6 +19,7 @@ import { readEnvFile } from "../src/env-file.js"
 import { isArrayOf, isJsonObject, isShape, isString } from "@supatype/shared"
 import { parseJsonAs } from "./support/json.js"
 import { composeServiceBlocks } from "./support/compose-services.js"
+import { VALKEY_IMAGE } from "../src/release-images.js"
 
 /**
  * One service's block from a rendered compose file.
@@ -876,7 +877,7 @@ export default defineConfig({
   it("self-host compose renders Kong TLS + Valkey where the project keeps the sidecar", () => {
     const compose = renderSelfHostCompose({ ...tlsConfig, cache: { provider: "valkey" } })
     expect(compose).toContain("\n  valkey:\n")
-    expect(compose).toContain("valkey/valkey:8-alpine")
+    expect(compose).toContain(VALKEY_IMAGE)
     expect(compose).toContain("- valkey")
     expect(compose).toMatch(/^\s{2}valkey-data:/m)
     expect(compose).toContain('- "443:8443"')
@@ -885,7 +886,7 @@ export default defineConfig({
   it("self-host compose includes Valkey and SUPATYPE_VALKEY_ADDR when it is the chosen provider", () => {
     const compose = renderSelfHostCompose({ ...baseConfig, cache: { provider: "valkey" } })
     expect(compose).toContain("\n  valkey:\n")
-    expect(compose).toContain("valkey/valkey:8-alpine")
+    expect(compose).toContain(VALKEY_IMAGE)
     expect(compose).toContain("SUPATYPE_VALKEY_ADDR: valkey:6379")
     expect(compose).toMatch(/^\s{2}valkey-data:/m)
   })
@@ -896,7 +897,7 @@ export default defineConfig({
     const compose = renderSelfHostCompose(unpinnedPostgres(baseConfig))
     // No second stateful service, and nothing left pointing at one.
     expect(compose).not.toContain("\n  valkey:\n")
-    expect(compose).not.toContain("valkey/valkey:8-alpine")
+    expect(compose).not.toContain(VALKEY_IMAGE)
     expect(compose).not.toMatch(/^\s{2}valkey-data:/m)
     expect(compose).not.toContain("      valkey:\n        condition: service_started")
     expect(compose).toContain("SUPATYPE_VALKEY_ADDR: db:6379")
