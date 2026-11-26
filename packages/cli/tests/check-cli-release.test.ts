@@ -71,7 +71,8 @@ describe("what the check reads from the tree", () => {
   })
 
   it("reads an empty and a filled embedded key", () => {
-    expect(embeddedKeyOf(repo("packages", "cli", "src", "release-public-key.ts"))).toBe("")
+    // Read from text, not the tree: the npm job embeds the real key into that file before it tests.
+    expect(embeddedKeyOf('export const EMBEDDED_RELEASE_PUBLIC_KEY = ""')).toBe("")
     expect(embeddedKeyOf('export const EMBEDDED_RELEASE_PUBLIC_KEY = "RWQxyz"')).toBe("RWQxyz")
   })
 

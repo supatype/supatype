@@ -5,6 +5,9 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { PlatformId } from "../src/binary-cache.js"
 
+// The npm job embeds the real release key before it tests; these downloads are unsigned fixtures.
+vi.mock("../src/release-public-key.js", () => ({ EMBEDDED_RELEASE_PUBLIC_KEY: "", releasePublicKey: () => "" }))
+
 /**
  * The CLI archive is fetched from releases.supatype.com, then from GitHub Releases when the CDN
  * cannot answer. fetch is mocked: no test touches the network.
