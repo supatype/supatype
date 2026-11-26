@@ -271,6 +271,8 @@ describe("seed routes (mock engine)", () => {
     assert.equal(res.status, 502)
     assert.match(String(res.json["message"]), /timed out/i)
     delete process.env["MOCK_SEED_MODE"]
+    // The follow-up must run under the default kill timer: a 300ms one races engine startup on a loaded runner.
+    delete process.env["SUPATYPE_SEED_TIMEOUT_MS"]
     assert.equal((await seed(seedBody())).status, 200)
   })
 
