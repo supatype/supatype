@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
@@ -18,7 +18,9 @@ afterEach(() => {
 
 /** An archive like a release's, holding `files` (name to contents), at `<dir>/<name>`. */
 function archive(name: string, files: Record<string, string>): string {
-  const dir = mkdtempSync(join(tmpdir(), "supatype-storage-archive-"))
+  // The long spelling of the temp dir: CI's Windows runner hands out an 8.3 short one (RUNNER~1),
+  // and Compress-Archive given that has produced a zip with no executable at its root.
+  const dir = mkdtempSync(join(realpathSync.native(tmpdir()), "supatype-storage-archive-"))
   dirs.push(dir)
   const stage = join(dir, "stage")
   mkdirSync(stage)

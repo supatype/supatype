@@ -75,17 +75,17 @@ export interface DockerProgram {
 }
 
 /**
- * The program a call runs. On Windows a call asks for a shell because Docker Desktop's `docker`
- * was found only that way, but at a limit the shell is what gets killed, and docker.exe ran on
- * holding what it had open. When docker.exe is on PATH it is run directly, so the limit ends it;
- * the shell is kept only when it is not (a shim that only the shell finds).
+ * The program a call runs. On Windows a spawn without a shell finds only a docker.exe, never a
+ * docker.cmd shim, so a docker that is not an .exe needs the shell whether the call asked for it or
+ * not. At a limit the shell is what gets killed, and docker.exe ran on holding what it had open, so
+ * when docker.exe is on PATH it is run directly and the limit ends it.
  */
 export function dockerProgram(
   shell: boolean,
   env: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
 ): DockerProgram {
-  if (!shell || platform !== "win32") return { file: "docker", shell }
+  if (platform !== "win32") return { file: "docker", shell }
   const found = windowsPath(env).map((dir) => join(dir, "docker.exe")).find((path) => existsSync(path))
   return found === undefined ? { file: "docker", shell: true } : { file: found, shell: false }
 }
