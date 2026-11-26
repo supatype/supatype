@@ -306,7 +306,11 @@ test.describe("Studio views", () => {
     const main = page.locator("main, [role='main']").first()
     await expect(main.getByRole("heading", { name: "Sign-up and confirmation" })).toBeVisible()
     await expect(main.getByRole("heading", { name: "Sign-in methods" })).toBeVisible()
-    await expect(main.getByRole("columnheader", { name: "Set by" })).toHaveCount(2)
+    // One "Set by" column per table: sign-up, sessions, MFA, phone codes, SAML options and sign-in methods.
+    for (const title of ["Sessions and security", "Multi-factor authentication", "Phone codes", "SAML options"]) {
+      await expect(main.getByRole("heading", { name: title })).toBeVisible()
+    }
+    await expect(main.getByRole("columnheader", { name: "Set by" })).toHaveCount(6)
     // A sign-up row and a sign-in row, each naming the variable that sets it.
     await expect(main.getByRole("row", { name: /^New signups/ })).toContainText("DISABLE_SIGNUP")
     await expect(main.getByRole("row", { name: /^email\b/ })).toContainText("SUPATYPE_EXTERNAL_EMAIL_ENABLED")
