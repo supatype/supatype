@@ -83,6 +83,37 @@ export function migrationSql(result: MigrateResult): string {
   return sql.trimEnd()
 }
 
+/** What the engine is asked to write the SQL for. */
+export interface MigrationSqlRequest {
+  ast: unknown
+  /** The database as the host reaches it. */
+  dsn: string
+  /** `--connection`, when one was named: it keeps the host binary, which connects to the URL given. */
+  connection: string | undefined
+  schema: string
+  opts: Pick<MigrateOptions, "record" | "force">
+}
+
+/**
+ * The SQL a push would apply, written by the engine and applied to nothing. The one call behind
+ * `migrate`, `push --dry-run` and `diff --sql`: the stack's engine when `dsn` is the stack's own
+ * database, else the host binary.
+ */
+export async function engineMigrationSql(
+  cwd: string,
+  config: ReturnType<typeof loadConfig>,
+  request: MigrationSqlRequest,
+): Promise<string> {
+  const engine = await stackEngine(cwd, config, request.connection, request.dsn)
+  const result = await engineRequestIn(
+    engine,
+    "/migrate",
+    migrateRequest(request.ast, request.dsn, request.schema, request.opts),
+    isMigrateAnswer,
+  )
+  return migrationSql(result)
+}
+
 /** Where `migrations list` and `rename --prune` read the history from. */
 export interface MigrationsTargetOptions {
   connection?: string
@@ -171,14 +202,13 @@ export function registerMigrate(program: Command): void {
       const connection = resolveHostDatabaseUrl(cwd, config, { connection: opts.connection, allowDerived: true }).dsn
       const ast = withPublishing(loadSchemaAst(schemaPathFromProject(config, cwd), cwd), config)
 
-      const engine = await stackEngine(cwd, config, opts.connection, connection)
-      const result = await engineRequestIn(
-        engine,
-        "/migrate",
-        migrateRequest(ast, connection, schemaPgSchema(cwd), opts),
-        isMigrateAnswer,
-      )
-      const sql = migrationSql(result)
+      const sql = await engineMigrationSql(cwd, config, {
+        ast,
+        dsn: connection,
+        connection: opts.connection,
+        schema: schemaPgSchema(cwd),
+        opts,
+      })
       if (opts.output === undefined) {
         process.stdout.write(`${sql}\n`)
         return

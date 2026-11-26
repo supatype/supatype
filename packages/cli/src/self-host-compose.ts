@@ -66,7 +66,14 @@ import { readRecordedTier } from "./recorded-field-masking-tier.js"
 import { projectHasVersionedModels } from "./model-versioning.js"
 import { POSTGREST_IMAGE } from "./postgrest-release.js"
 import { postgrestHookActorEnv } from "./hook-actor.js"
-import { IN_REPO_IMAGE_ENV, RELEASE_IMAGES, unpinnedImagesNote, type InRepoImage } from "./release-images.js"
+import {
+  IN_REPO_IMAGE_ENV,
+  KONG_IMAGE,
+  RELEASE_IMAGES,
+  unpinnedImagesNote,
+  VALKEY_IMAGE,
+  type InRepoImage,
+} from "./release-images.js"
 import { configEmailEnabled, configMailerAutoconfirm, EMAIL_ENABLED_ENV } from "./mailer-autoconfirm.js"
 import { mailerUrlPathsEnv } from "./mailer-env.js"
 import { resolveSpaFallback } from "./app/framework.js"
@@ -945,7 +952,7 @@ ${keyspaceAuthEnv}`
 `
     : `
   valkey:
-    image: \${SUPATYPE_VALKEY_IMAGE:-valkey/valkey:8-alpine}
+    image: \${SUPATYPE_VALKEY_IMAGE:-${VALKEY_IMAGE}}
 ${SERVICE_DEFAULTS}
     command: ["valkey-server", "--appendonly", "yes"]
     expose:
@@ -1436,7 +1443,7 @@ ${LOGGING}
 ${mounts.engineProject}
     working_dir: ${ENGINE_SERVICE.projectDir}
 ${dbDependency}${studioBlock}${valkeyBlock}${tlsHintComment}  kong:
-    image: kong:3.6
+    image: \${SUPATYPE_KONG_IMAGE:-${KONG_IMAGE}}
 ${SERVICE_DEFAULTS}
 ${gatewayNetworks}    # host.docker.internal is a Docker Desktop name. On Linux it does not resolve unless it is
     # mapped, so a project proxying the site or Studio to something on the host worked on macOS

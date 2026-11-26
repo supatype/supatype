@@ -60,6 +60,7 @@ import {
   engineCapabilities,
   schemaFeatureNeeds,
   serverAnswerCapabilities,
+  MIGRATE_SQL_NEED,
   OVERWRITE_DRIFT_NEED,
   REBASELINE_KEYS_NEED,
   RUN_HOOKS_NEED,
@@ -495,6 +496,32 @@ export async function targetSchemaDiff(
     }),
     isDiffResult,
   )
+}
+
+/** What `POST /schema/migrate` answers: the SQL, written by the engine and applied to nothing. */
+const isMigrateSqlAnswer: Guard<{ sql: string }> = isShape({ sql: isString })
+
+/**
+ * The SQL a push to a linked server would apply, which the server writes and applies to nothing.
+ * Refused, before anything is sent, by a server that lists no `migrate_sql`: one from before the
+ * route would answer with a 404.
+ */
+export async function targetSchemaMigrateSql(
+  target: DeployTarget,
+  ast: unknown,
+  opts?: { schema?: string },
+): Promise<string> {
+  await requireTargetFeatures(target, [MIGRATE_SQL_NEED, ...schemaFeatureNeeds(ast)])
+  const answer = await targetFetch(
+    target.apiBaseUrl,
+    target.apiPrefix,
+    apiFetchOpts(target, "POST", projectPath(target, "/schema/migrate"), {
+      ast,
+      schema: opts?.schema ?? "public",
+    }),
+    isMigrateSqlAnswer,
+  )
+  return answer.sql
 }
 
 export async function targetSchemaPush(

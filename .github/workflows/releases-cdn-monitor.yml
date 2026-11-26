@@ -1,0 +1,121 @@
+name: Releases CDN monitor
+
+# releases.supatype.com serves every file a first run of the CLI downloads. When it is down a clean
+# install fails (and, from the release that attaches the same files to GitHub Releases, falls back
+# and says so), so someone should hear about it before a user does.
+#
+# Every 15 minutes this reads the checksums file of the latest published CLI through the public
+# host, the same request the CLI makes first. A non-200 fails the run and opens (or refreshes) one
+# issue labelled releases-cdn-down; the first healthy run afterwards comments and closes it.
+#
+# GitHub's scheduler is best effort and can run late or skip a slot under load, and a repository
+# with no activity for 60 days has its schedules paused. This is a backstop beside an external
+# monitor, not a replacement for one.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+# One check at a time, so a slow run cannot race the next one into opening two issues.
+concurrency:
+  group: releases-cdn-monitor
+  cancel-in-progress: false
+
+env:
+  CDN: https://releases.supatype.com
+  LABEL: releases-cdn-down
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  GH_REPO: ${{ github.repository }}
+
+jobs:
+  check:
+    name: check releases.supatype.com
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # npm, not the CDN's own latest.json: when the CDN is down that file is down too, and the
+      # monitor would then have no version to ask about. A failure here is a failed run and no
+      # issue, because it says nothing about the CDN.
+      - name: Resolve the latest published CLI version
+        id: version
+        run: |
+          set -euo pipefail
+          version="$(curl --fail --silent --show-error --location --max-time 20 \
+            --retry 3 --retry-delay 5 --retry-all-errors \
+            https://registry.npmjs.org/@supatype/cli/latest | jq -r .version)"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "::error::npm returned no usable version for @supatype/cli: '$version'"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # Two quick retries inside the check absorb a single dropped request, so one blip does not
+      # open an issue. A real outage still fails all three. curl prints 000 when it got no answer.
+      - name: Fetch checksums.sha256 through the public host
+        id: probe
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -u
+          url="${CDN}/cli/v${VERSION}/checksums.sha256"
+          status=000
+          for attempt in 1 2 3; do
+            status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              --connect-timeout 10 --max-time 20 "$url" || true)"
+            [ "$status" = "200" ] && break
+            [ "$attempt" -lt 3 ] && sleep 10
+          done
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "$url answered $status"
+
+      - name: Open or refresh the issue when it is down
+        if: steps.probe.outputs.status != '200'
+        env:
+          URL: ${{ steps.probe.outputs.url }}
+          STATUS: ${{ steps.probe.outputs.status }}
+        run: |
+          set -euo pipefail
+          gh label create "$LABEL" --color B60205 \
+            --description "releases.supatype.com is not serving the CLI" 2>/dev/null || true
+          now="$(date -u +%Y-%m-%dT%H:%MZ)"
+          {
+            echo "releases.supatype.com is not serving the CLI release files."
+            echo
+            echo "- Checked: \`$URL\`"
+            echo "- Answered: \`$STATUS\` (000 means no answer at all)"
+            echo "- Last failing check: $now"
+            echo "- Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo
+            echo "A clean install of @supatype/cli fails while this lasts, unless the release carries"
+            echo "the same files on GitHub Releases, which the CLI then downloads instead."
+            echo
+            echo "This issue is refreshed by every failing check and closed by the first healthy one."
+          } > body.md
+          number="$(gh issue list --label "$LABEL" --state open --json number --jq '.[0].number // empty')"
+          if [ -z "$number" ]; then
+            gh issue create --title "releases.supatype.com is down" --label "$LABEL" --body-file body.md
+          else
+            gh issue edit "$number" --body-file body.md
+          fi
+
+      - name: Close the issue on recovery
+        if: steps.probe.outputs.status == '200'
+        run: |
+          set -euo pipefail
+          for number in $(gh issue list --label "$LABEL" --state open --json number --jq '.[].number'); do
+            gh issue close "$number" --comment "releases.supatype.com is serving the CLI release files again (checked $(date -u +%Y-%m-%dT%H:%MZ))."
+          done
+
+      - name: Fail the run when the host is down
+        if: steps.probe.outputs.status != '200'
+        env:
+          URL: ${{ steps.probe.outputs.url }}
+          STATUS: ${{ steps.probe.outputs.status }}
+        run: |
+          echo "::error::$URL answered $STATUS"
+          exit 1

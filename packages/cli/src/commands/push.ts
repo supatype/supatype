@@ -85,6 +85,8 @@ import {
 } from "../schema-sources.js"
 import { confirm, logSkippedConfirm } from "../ui/confirm.js"
 import { error, info, plain, warn } from "../ui/messages.js"
+import { printPlanSql } from "../plan-sql.js"
+import { printDiff } from "./diff.js"
 import { withSpinner } from "../ui/progress.js"
 import { projectOutputPaths, writeGeneratedTypes } from "../type-generation.js"
 import { isInteractive } from "../ui/interactive.js"
@@ -97,6 +99,10 @@ export function registerPush(program: Command): void {
       "Push schema to the database: diff, prompt for destructive changes, apply migration, generate types",
     )
     .option("--yes", "Skip confirmation prompts for destructive changes")
+    .option(
+      "--dry-run",
+      "Print the change list and the SQL the push would apply, then stop: nothing is applied, asked or recorded",
+    )
     .option("--connection <url>", "Database connection URL (overrides config)")
     .option("--env <name>", "Target environment when linked")
     .option("--direct", "Use local engine subprocess (skip control plane)")
@@ -115,6 +121,7 @@ export function registerPush(program: Command): void {
     )
     .action(async (opts: {
       yes?: boolean
+      dryRun?: boolean
       overwriteDrift?: boolean
       runHooks?: boolean
       resetAuthOverrides?: boolean
@@ -138,6 +145,8 @@ export function registerPush(program: Command): void {
         overwriteDrift: opts.overwriteDrift ?? false,
         runHooks: opts.runHooks ?? false,
         resetAuthOverrides: opts.resetAuthOverrides ?? false,
+        dryRun: opts.dryRun ?? false,
+        connection: opts.connection,
       }
       // A refusal (access changed by hand, another push running, an image Docker could not pull)
       // ends with what to do about it, whichever way the push went.
@@ -177,6 +186,13 @@ async function pushWherever(
 ): Promise<void> {
   const { ast, pgSchema, run, opts } = push
   const useDirect = opts.direct === true || opts.local === true || Boolean(opts.connection)
+  if (run.dryRun === true && !loadProjectLink(cwd) && !useDirect && resolveRuntimeProvider(config) === "docker") {
+    const localTarget = resolveTarget(cwd, { env: opts.env })
+    if (!(localTarget.mode === "local" && localTarget.token)) {
+      await dryRunDocker(cwd, config, { ast, pgSchema })
+      return
+    }
+  }
   if (loadProjectLink(cwd) && !useDirect) {
     await pushViaTarget(cwd, config, resolveTarget(cwd, { env: opts.env }), ast, pgSchema, run)
     return
@@ -192,6 +208,21 @@ async function pushWherever(
   }
   const target = resolveTarget(cwd, { env: opts.env, direct: true, connection: opts.connection })
   await pushViaTarget(cwd, config, target, ast, pgSchema, run)
+}
+
+/**
+ * `push --dry-run` on a docker project with no local control plane: the diff the stack's engine
+ * reads, then the SQL it would write. Nothing is applied, asked or recorded.
+ */
+async function dryRunDocker(cwd: string, config: SupatypeProjectConfig, plan: { ast: unknown; pgSchema: string }): Promise<void> {
+  const { dockerDiff } = await import("../dev-compose.js")
+  const diff = await withSpinner("Diffing against database", () => dockerDiff(cwd, config))
+  if (diff === undefined) {
+    plain("The engine returned no diff, so there is no SQL to show.")
+    return
+  }
+  printDiff(diff)
+  await printPlanSql(diff, { cwd, config, target: { mode: "local", environment: "local" }, ast: plan.ast, schema: plan.pgSchema })
 }
 
 /** What applies a docker project's push: the stack's schema-engine container, or `overrides.engine`. */
@@ -255,6 +286,10 @@ export interface PushRun {
   runHooks?: boolean
   /** `--reset-auth-overrides`: a push to Cloud drops the auth settings saved in Studio first. */
   resetAuthOverrides?: boolean
+  /** `--dry-run`: print the plan and its SQL, then stop before anything is asked, applied or recorded. */
+  dryRun?: boolean
+  /** `--connection`, when one was named. */
+  connection?: string | undefined
 }
 
 /**
@@ -313,7 +348,7 @@ async function pushViaTarget(
     withSpinner("Diffing against database", () => targetSchemaDiff(target, schema, { schema: pgSchema }))
   let diff = await plan(ast)
   // A rename recorded is a different schema: built and planned again, with the journal carrying it.
-  if (await recordedRenames(cwd, diff, run)) {
+  if (!run.dryRun && (await recordedRenames(cwd, diff, run))) {
     ast = pushAst(cwd, config)
     diff = await plan(ast)
   }
@@ -322,11 +357,15 @@ async function pushViaTarget(
   const changes = plannedChanges(diff)
   printDiffWarnings(diff)
 
-  if (changes.length === 0) info("Schema matches the database (no DDL). Syncing Studio metadata...")
+  if (changes.length === 0) info(run.dryRun ? "Schema matches the database (no DDL)." : "Schema matches the database (no DDL). Syncing Studio metadata...")
   else printDiffOperations(diff)
   // What each API role is left with, before anything is asked or applied (issue 16).
   printRoleAccess(diff)
   printChannelChanges(diff)
+  if (run.dryRun) {
+    await printPlanSql(diff, { cwd, config, target, ast, schema: pgSchema, connection: run.connection })
+    return
+  }
   if (!(await confirmRiskyChanges(changes, run))) {
     plain("Aborted.")
     return

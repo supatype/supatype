@@ -15,8 +15,11 @@ import type { PlatformId } from "./binary-cache.js"
 /** PostgREST version, as its release tags spell it after the `v`. */
 export const POSTGREST_VERSION = "14.18"
 
+/** The multi-arch index digest of `POSTGREST_VERSION`'s image, so a moved tag cannot change what compose runs. */
+const POSTGREST_IMAGE_DIGEST = "sha256:c7cd7e265a85b05248abf53f4473fcec7e327c282d0bd0cf60f1551996d09fcf"
+
 /** The Docker image compose runs. */
-export const POSTGREST_IMAGE = `postgrest/postgrest:v${POSTGREST_VERSION}`
+export const POSTGREST_IMAGE = `postgrest/postgrest:v${POSTGREST_VERSION}@${POSTGREST_IMAGE_DIGEST}`
 
 const POSTGREST_RELEASES = "https://github.com/PostgREST/postgrest/releases/download"
 

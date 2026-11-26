@@ -5,6 +5,8 @@ import { createRoot, type Root } from "react-dom/client"
 import { AdminClientContext } from "../src/hooks/useAdminClient.js"
 import { ElevatedNoticeProvider, useShowsProjectRows } from "../src/components/ElevatedModeBanner.js"
 import { LinkAccountPrompt } from "../src/components/LinkAccountPrompt.js"
+import { SendAsField } from "../src/components/SendAsField.js"
+import { useSendAs } from "../src/hooks/useSendAs.js"
 import { elementOf, testClient } from "./support.js"
 
 /**
@@ -118,5 +120,56 @@ describe("the link-your-account prompt", () => {
       body: { accessToken: "project-access-token" },
     })
     expect(onLinked).toHaveBeenCalledOnce()
+  })
+})
+
+function SendAsHarness(): React.ReactElement {
+  return <SendAsField sendAs={useSendAs()} />
+}
+
+async function renderSendAs(verify: Verify): Promise<void> {
+  stubFetch(verify)
+  container = document.createElement("div")
+  document.body.appendChild(container)
+  root = createRoot(container)
+  await act(async () => {
+    root!.render(
+      <AdminClientContext.Provider value={CLIENT}>
+        <SendAsHarness />
+      </AdminClientContext.Provider>,
+    )
+  })
+}
+
+async function choose(value: string): Promise<void> {
+  const select = elementOf(container, "select#send-as", HTMLSelectElement)
+  await act(async () => {
+    select.value = value
+    select.dispatchEvent(new Event("change", { bubbles: true }))
+  })
+}
+
+describe("sending a request as yourself with no link", () => {
+  // Invoke, Try it and GraphQL send as "Me" by default, admins included. On Cloud with no link the
+  // control plane refuses that request with identity_link_required, so the form is offered here,
+  // where the request is built, not only on screens that show rows.
+  it("offers the link form under Send as, even to an admin whose screens are elevated", async () => {
+    await renderSendAs({ mode: "elevated", identityLink: { linked: false } })
+    expect(container.textContent).toContain("Link your account to send as yourself")
+    expect(field("password")).not.toBeNull()
+  })
+
+  it("hides it once the request is sent as anyone else", async () => {
+    await renderSendAs({ mode: "elevated", identityLink: { linked: false } })
+    await choose("anon")
+    expect(container.textContent).not.toContain("Link your account")
+  })
+
+  it("says nothing to a linked member or on a host that has no links", async () => {
+    for (const verify of [{ mode: "self", identityLink: { linked: true } }, { mode: "self" }] as Verify[]) {
+      await renderSendAs(verify)
+      expect(container.textContent).not.toContain("Link your account")
+      act(() => root?.unmount())
+    }
   })
 })

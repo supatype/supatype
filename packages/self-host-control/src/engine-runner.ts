@@ -121,6 +121,24 @@ export async function runEngineDiff(databaseUrl: string, ast: unknown, schema = 
 }
 
 /**
+ * The SQL a push of `ast` would apply, as the engine's `migrate` prints it: nothing is applied and
+ * nothing is recorded. `force` is on, so a destructive change is written with its risk comment
+ * rather than held back for a yes nobody can give here.
+ */
+export async function runEngineMigrateSql(databaseUrl: string, ast: unknown, schema = "public"): Promise<string> {
+  const astPath = await writeTempJson(ast)
+  try {
+    const out = await runEngine("migrate", ["--database-url", databaseUrl, "--schema", schema, "--force"], {
+      inputPath: astPath,
+    })
+    if (out.trim() === "") throw new Error("Engine migrate printed no SQL")
+    return out.trimEnd()
+  } finally {
+    await deleteTempFile(astPath)
+  }
+}
+
+/**
  * Who a push is recorded as being from (the audit trail). The author is the identity this control
  * plane authenticated, never the client's word for it. The renames the push applies are recorded
  * from the rename journal the schema itself carries (`renameJournal`).

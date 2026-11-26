@@ -3,7 +3,8 @@
  *
  * **One S3 bucket** (`S3_BUCKET` set): every Supatype bucket is a key prefix inside that bucket, as
  * Supabase Storage keeps them under `GLOBAL_S3_BUCKET`. The login needs only to read, write, list and
- * delete in that one bucket.
+ * delete in that one bucket. `S3_KEY_PREFIX` puts all of it under one folder, so several deployments
+ * can share the bucket, each in its own folder, as Supabase keeps each tenant under its id.
  *
  * **An S3 bucket per Supatype bucket** (`S3_BUCKET` unset): each Supatype bucket is an S3 bucket of
  * its own, named `S3_BUCKET_PREFIX` then the bucket's id, created on demand with its own policy. The
@@ -27,6 +28,8 @@ export interface S3Settings {
   bucket: string
   /** Put in front of a Supatype bucket's id to name its S3 bucket, in per-bucket mode; "" for none. */
   bucketPrefix: string
+  /** The one folder every key goes under, in the one S3 bucket; "" for none (S3_KEY_PREFIX). */
+  keyPrefix: string
   /** The S3-compatible store's URL; undefined for AWS, where the region names it. */
   endpoint: string | undefined
   region: string
@@ -92,6 +95,35 @@ function bucketPrefix(bucket: string | undefined): string {
   return prefix
 }
 
+/** One plain folder name: lowercase letters, digits, `-` and `_`, starting with a letter or digit. */
+const FOLDER = "[a-z0-9][a-z0-9_-]{0,62}"
+/** One to four plain folder names joined by single `/`s, as `<project>/<environment>`. */
+const KEY_PREFIX = new RegExp(`^${FOLDER}(/${FOLDER}){0,3}$`)
+
+/**
+ * `S3_KEY_PREFIX`: the folder this deployment's keys all go under in the one S3 bucket, so several
+ * deployments can share it. Supatype Cloud sets `<project ref>/<environment>`. Refused without
+ * `S3_BUCKET`, or when it is anything but plain folder names: no `.` or `..`, no empty folder, no
+ * leading or trailing `/`, so it can never reach a folder beside its own.
+ */
+function keyPrefix(bucket: string | undefined): string {
+  const prefix = setting("S3_KEY_PREFIX") ?? ""
+  if (prefix === "") return ""
+  if (bucket === undefined) {
+    throw new Error(
+      `S3_KEY_PREFIX is "${prefix}", a folder inside the one S3 bucket, and S3_BUCKET is not set to name that bucket. ` +
+        "Set S3_BUCKET, or unset S3_KEY_PREFIX",
+    )
+  }
+  if (!KEY_PREFIX.test(prefix)) {
+    throw new Error(
+      `S3_KEY_PREFIX is "${prefix}", and it must be one to four folder names joined by "/", such as "abc123/production": ` +
+        'each lowercase letters, digits, "-" and "_", starting with a letter or digit, 63 characters at most',
+    )
+  }
+  return prefix
+}
+
 /** The settings S3 is reached with, in either mode. */
 function s3Store(bucket: string | undefined): S3Settings {
   const endpoint = setting("S3_ENDPOINT")
@@ -107,6 +139,7 @@ function s3Store(bucket: string | undefined): S3Settings {
   return {
     bucket: bucket ?? "",
     bucketPrefix: bucketPrefix(bucket),
+    keyPrefix: keyPrefix(bucket),
     endpoint,
     region,
     credentials: credentials(),
@@ -119,6 +152,7 @@ function s3Store(bucket: string | undefined): S3Settings {
 const UNUSED: S3Settings = {
   bucket: "",
   bucketPrefix: "",
+  keyPrefix: "",
   endpoint: undefined,
   region: "us-east-1",
   credentials: undefined,

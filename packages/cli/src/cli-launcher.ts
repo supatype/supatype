@@ -32,8 +32,9 @@ export async function ensureCliProgram(version: string, platform: PlatformId): P
   } catch (err) {
     throw new Error(
       `Could not download the Supatype CLI v${version}: ${messageOf(err)}\n` +
-        "The first run of each version fetches it from releases.supatype.com. " +
-        "To use a mirror of that site, set SUPATYPE_CDN_BASE to its address.",
+        "The first run of each version fetches it from releases.supatype.com, and from GitHub Releases " +
+        "when that site is not answering. To use a mirror of that site instead (with no fallback), " +
+        "set SUPATYPE_CDN_BASE to its address.",
     )
   }
 }

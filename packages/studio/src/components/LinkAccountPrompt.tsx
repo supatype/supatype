@@ -27,7 +27,17 @@ export function LinkAccountPrompt({ onLinked = reloadStudio }: { onLinked?: () =
   return <LinkAccountForm onLinked={onLinked} />
 }
 
-function LinkAccountForm({ onLinked }: { onLinked: () => void }): React.ReactElement {
+/**
+ * The sign-in that links the account. Also shown under "Send as" when a request builder is set to
+ * send as the member and they have no link: Cloud refuses that request until they link one.
+ */
+export function LinkAccountForm({
+  onLinked = reloadStudio,
+  heading = "Link your account to see this project's data",
+}: {
+  onLinked?: () => void
+  heading?: string
+}): React.ReactElement {
   const { state, link } = useLinkAccount(onLinked)
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -41,7 +51,7 @@ function LinkAccountForm({ onLinked }: { onLinked: () => void }): React.ReactEle
     <Card className="mb-4 p-4">
       <form onSubmit={submit} className="flex flex-col gap-3">
         <div>
-          <h2 className="text-sm font-medium text-foreground">Link your account to see this project's data</h2>
+          <h2 className="text-sm font-medium text-foreground">{heading}</h2>
           <p className="mt-1 text-xs text-muted-foreground">
             Studio shows you this project's data as its own access rules show it to you. Sign in once with
             your login for this project, using the same email as your Supatype account.

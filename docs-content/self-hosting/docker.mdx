@@ -289,7 +289,7 @@ one, keep the port closed in your firewall.
 
 ## Updating
 
-Pull the latest images, restart the stack, and apply any schema changes the new versions expect:
+Upgrade the CLI first when `supatype update` says a newer release exists, because the image pins come from the CLI version (`supatype update --check` shows the running and latest versions without pulling). Then pull the images, restart the stack, and apply any schema changes the new versions expect:
 
 ```bash
 supatype update

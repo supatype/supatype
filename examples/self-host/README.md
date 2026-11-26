@@ -41,6 +41,8 @@ Supatype image overrides in `.env` let you pin beta tags:
 - `SUPATYPE_CONTROL_PLANE_IMAGE`
 - `SUPATYPE_STUDIO_IMAGE`
 - `SUPATYPE_ENGINE_IMAGE` (schema-engine; compose `tools` profile)
+- `SUPATYPE_KONG_IMAGE` (the API gateway; pinned to an exact version and digest by default)
+- `SUPATYPE_VALKEY_IMAGE` (the optional cache sidecar; pinned the same way)
 
 If unset, compose defaults are used.
 

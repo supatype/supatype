@@ -513,10 +513,21 @@ jobs:
 
   # ── GitHub Release ──────────────────────────────────────────────────────────
   github-release:
-    needs: [prepare, npm, artifacts-published]
+    needs: [prepare, cli, npm, artifacts-published]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # The fallback download source: when releases.supatype.com is down, the CLI starter fetches
+      # these same files from here (packages/cli/src/cli-standalone.ts). They are the build's own
+      # artefact, the one cli-publish put on the CDN, so the archives, checksums.sha256 and its
+      # minisign signature are byte for byte what the CDN serves and verify under the same key.
+      # Flat under the tag, which is how the CLI asks for them. The build job already ran every
+      # archive and the CDN verify job already read them back, so nothing is rechecked here.
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-${{ needs.cli.outputs.version }}
+          path: cli-assets
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -526,6 +537,8 @@ jobs:
           # A prerelease is never the repository's "latest" release on GitHub.
           prerelease: ${{ contains(needs.prepare.outputs.version, '-') }}
           generate_release_notes: true
+          files: cli-assets/*
+          fail_on_unmatched_files: true
 
   # Homebrew lives here, not inside the reusable CLI workflow. It used to, and because npm
   # depends on that workflow as a unit, a failure pushing a formula blocked the npm publish:

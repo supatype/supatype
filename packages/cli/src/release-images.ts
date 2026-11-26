@@ -69,6 +69,17 @@ export const IN_REPO_IMAGE_ENV: Readonly<Record<InRepoImage, string>> = {
 }
 
 /**
+ * The third-party images the self-host stack runs, each an exact version plus the digest of its
+ * multi-arch index, so a tag moved on the registry cannot change what a project runs. One home for
+ * every place that names them (the compose file, the native-dev Valkey sidecar).
+ *
+ * Kong stays on 3.6.x: the declarative config this CLI writes is format 3.0, which later minors
+ * also read, but a minor bump is a deliberate change, not something a pin should smuggle in.
+ */
+export const KONG_IMAGE = "kong:3.6.1@sha256:a42d2b4503e7b6674ca7914883bdb0d2274b806b0e397a6af28d1dd57aafce4e"
+export const VALKEY_IMAGE = "valkey/valkey:8.1.11-alpine@sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a"
+
+/**
  * What to say when a CLI that is not a release runs in-repo images from `:latest`, naming those
  * nothing in `env` (`.env` under the shell, as compose reads them) overrides; undefined otherwise.
  * A released CLI runs the images of its own version and has nothing to say. A source build has no

@@ -670,7 +670,7 @@ describe("the switch", () => {
     })
   })
 
-  it("leaves everything as it was on a project whose engine has none of the functions", async () => {
+  it("treats a database that has none of the functions yet as declared, so nothing broadcasts before the first push", async () => {
     const { open, db } = await harness({}, (fake) => {
       fake.noFunctions = true
     })
@@ -680,9 +680,36 @@ describe("the switch", () => {
     await join(b, "room-1")
 
     a.send({ type: "broadcast", channel: "room-1", event: "hi", payload: {} })
+    const refusal = await a.next(isSystem("error", "matches no declared channel"))
+
+    expect(refusal).toMatchObject({ channel: "room-1" })
+    expect(db.callerSessions).toBe(0)
+  })
+
+  it("refuses presence on any channel of a database that has none of the functions yet", async () => {
+    const { open } = await harness({}, (fake) => {
+      fake.noFunctions = true
+    })
+    const anon = await open(anonKey())
+    await join(anon, "room-1")
+
+    anon.send({ type: "presence_track", channel: "room-1", payload: { status: "here" } })
+
+    expect(await anon.next(isSystem("error", "matches no declared channel"))).toMatchObject({ channel: "room-1" })
+  })
+
+  it("keeps a project whose functions exist and whose mode is open working, as it does today", async () => {
+    const { open } = await harness({}, (fake) => {
+      fake.mode = "open"
+    })
+    const a = await open(userToken(ALICE))
+    const b = await open(userToken(BOB))
+    await join(a, "room-1")
+    await join(b, "room-1")
+
+    a.send({ type: "broadcast", channel: "room-1", event: "hi", payload: {} })
 
     expect(await b.next((m) => m.type === "broadcast")).toMatchObject({ event: "hi" })
-    expect(db.callerSessions).toBe(0)
   })
 })
 

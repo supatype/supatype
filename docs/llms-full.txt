@@ -1,6 +1,6 @@
 # Supatype: full context for language models
 
-Docs version: Supatype 0.9.2 (released 2026-11-12). Engine v0.11.2, server v2.6.0, Postgres 17.2.16, Deno 2.9.8.
+Docs version: Supatype 0.9.2 (released 2026-11-12). Engine v0.11.2, server v2.6.1, Postgres 17.2.16, Deno 2.9.8.
 
 > Zero drift: one set of TypeScript types runs the whole stack, database to component. One schema derives the Postgres tables, migrations, row-level security, REST and GraphQL APIs, auth, storage, realtime, Studio editing views and the typed client. Self-hostable. SDKs MIT, CLI and services Apache 2.0, API server MIT, Postgres image PostgreSQL License, schema engine source-available under BSL 1.1.
 
@@ -33,7 +33,7 @@ Supatype lets developers define backend data models as TypeScript `Model<>` type
 2. Author models in `schema/index.ts`.
 3. Run `supatype dev`. It starts the stack in Docker Compose (or natively), applies the schema, and on every save migrates the database and regenerates the typed client. It keeps running; use a second terminal for other commands. It stops with its stack when the process that started it exits (a killed script, a cancelled CI job), as on Ctrl+C; to leave a stack running with nothing attached, use `supatype self-host compose up -d`. If `dev` itself is killed (its process ended, or its window closed before it finished stopping), the stack can be left running: the next `supatype dev` offers to stop it, and `supatype self-host compose down` stops it now.
 4. Apply the schema to another database (staging, production, a self-hosted server) with `supatype push`. `supatype diff` previews a change; `supatype migrate` writes the SQL without applying it.
-5. Deploy: self-host with `supatype self-host compose up` on a server you own, or Supatype Cloud (`supatype link`, `supatype deploy`), which is coming soon: join the waiting list at https://www.supatype.com/#cloud.
+5. Deploy: self-host with `supatype self-host compose up` on a server you own, or Supatype Cloud (`supatype link`, `supatype deploy`), which is in closed beta: request access at https://www.supatype.com/#cloud.
 6. Bring an existing database: `supatype pull --out schema/index.ts` drafts the types from it; `supatype adopt` hands Supatype tables that already exist under the schema's names.
 
 ## Stack notes
@@ -384,7 +384,7 @@ $ supatype self-host compose up -d      # run them
 $ supatype push                         # apply the schema they expect
 ```
 
-`supatype update` never updates the CLI itself, so update it first. Under Docker, `update` renders the compose file and pulls the images. It does not restart anything, which is why `compose up -d` follows.
+`supatype update` never updates the CLI itself, so update it first. The image pins come from the CLI version, so under Docker it looks up the latest CLI release and, when yours is behind, prints the upgrade command for how you installed it before carrying on. `supatype update --check` reports the running and latest versions without pulling, and the check is skipped with a warning when offline or on a CLI built from source. Under Docker, `update` renders the compose file and pulls the images. It does not restart anything, which is why `compose up -d` follows.
 
 The push is the step that is easy to miss. Grants, policies, functions and buckets are generated from your schema and only reach the database through `push`, so new images on an older database can refuse rules until it runs. The upgrade is finished after the push, not before.
 
@@ -2478,6 +2478,7 @@ The storage service reads these environment variables. The self-host compose fil
 | `TRANSFORM_CACHE_TTL` | 3600 | `max-age`, in seconds, on transformed images |
 | `S3_BUCKET` | unset | One S3 bucket that holds every bucket as a key prefix, as described [below](https://www.supatype.com/docs/storage.html#own-bucket). Unset, each bucket gets an S3 bucket of its own, which the service creates and names `S3_BUCKET_PREFIX` then the bucket's id. |
 | `S3_BUCKET_PREFIX` | empty | With `S3_BUCKET` unset, put in front of each bucket's id to name its S3 bucket: `acme-prod-` makes `avatars` the S3 bucket `acme-prod-avatars`. S3 bucket names are global on AWS, so set one there. A prefix or a bucket id that makes no valid S3 bucket name is refused, the prefix at start and the bucket with 400. |
+| `S3_KEY_PREFIX` | empty | With `S3_BUCKET` set, a folder every key goes under, so several storage services can share one S3 bucket: `abc123/production` keeps `avatars/cat.png` at `abc123/production/avatars/cat.png`. One to four folder names joined by `/`, each lowercase letters, digits, `-` and `_`. Bucket ids are then limited to letters, digits, `.`, `_` and `-`. Anything else is refused, the prefix at start and the bucket with 400. |
 | `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_FORCE_PATH_STYLE` | none | Where the bytes are kept. The self-host stack sets them for its SeaweedFS. Running the service yourself, set `S3_REGION` for AWS or `S3_ENDPOINT` for another store; the service refuses to start with neither. Leave both keys blank to use the AWS SDK's own credentials. Path-style addressing is on when there is an endpoint. |
 
 > **SELF-HOSTED LIMITS:** The defaults above are for the storage service run on its own. A self-hosted stack has no plan, so its compose file sets `STORAGE_QUOTA`, `TIER_MAX_UPLOAD_SIZE` and `MAX_UPLOAD_SIZE` to `-1`, which means no limit. Set any of them in `.env`, in bytes, and run `supatype self-host compose up -d` to put a limit back. A bucket's `maxSize` still applies.
@@ -5339,7 +5340,7 @@ $ supatype push --help
 
 The npm package needs Node.js 18 or later. It is the install to use on Windows.
 
-The npm package runs the same program as the standalone install, so the React version your app uses, or any other package it installs, has no effect on the CLI. The first run of each version downloads that program from `releases.supatype.com` into `~/.supatype/cache/cli/<version>/` and checks it against the release's signed checksums. In a scaffolded project that happens during `npm install`, when the `prepare` script runs `supatype generate`. A production install with `--omit=dev` leaves the CLI out, and `prepare` then generates nothing and succeeds, since the build that needed the generated files ran with everything installed. Where that site is unreachable, set `SUPATYPE_CDN_BASE` to a mirror of it. A CLI built from source has no release public key embedded and refuses the download; set `SUPATYPE_RELEASE_PUBLIC_KEY` to the release minisign public key to verify the checksums against it. When set, it takes the place of the embedded key. The program is built for Linux and macOS on x64 and arm64, and for Windows on x64.
+The npm package runs the same program as the standalone install, so the React version your app uses, or any other package it installs, has no effect on the CLI. The first run of each version downloads that program from `releases.supatype.com` into `~/.supatype/cache/cli/<version>/` and checks it against the release's signed checksums. In a scaffolded project that happens during `npm install`, when the `prepare` script runs `supatype generate`. A production install with `--omit=dev` leaves the CLI out, and `prepare` then generates nothing and succeeds, since the build that needed the generated files ran with everything installed. If that site is not answering (a 5xx, or no connection), the CLI downloads the same files from the release's page on GitHub Releases, says so in one line, and still checks them against the signed checksums. A 404 or a checksum failure is never retried elsewhere. Releases published after v0.9.2 carry the files there. To use a mirror of the site instead, set `SUPATYPE_CDN_BASE` to its address; a mirror is used on its own, with no fallback to GitHub. A CLI built from source has no release public key embedded and refuses the download; set `SUPATYPE_RELEASE_PUBLIC_KEY` to the release minisign public key to verify the checksums against it. When set, it takes the place of the embedded key. The program is built for Linux and macOS on x64 and arm64, and for Windows on x64.
 
 On a Linux or macOS machine without Node, such as a CI image or a server, install the standalone binary instead, with the script or with Homebrew:
 
@@ -5389,10 +5390,10 @@ Commands that use Docker first check that it answers. A Docker that says it cann
 
 | Command | Description | Useful flags |
 | --- | --- | --- |
-| `push` | Push schema to the database: diff, prompt for destructive changes, apply migration, generate types | `--yes`, `--connection <url>`, `--env <name>`, `--direct` (alias `--local`), `--overwrite-drift`, `--run-hooks` |
-| `diff` | Show planned schema changes (the operations, not the SQL) without applying them. There is no `push --dry-run`: `diff` is the preview and `migrate` prints the SQL | `--connection <url>`, `--env <name>`, `--direct` |
+| `push` | Push schema to the database: diff, prompt for destructive changes, apply migration, generate types. With `--dry-run` it prints the change list and the full SQL the push would apply, then stops: nothing is applied, asked or recorded, and no `--yes` is needed. Supatype Cloud and a linked self-host server cannot write SQL without applying it, so there it prints the change list and says so | `--yes`, `--dry-run`, `--connection <url>`, `--env <name>`, `--direct` (alias `--local`), `--overwrite-drift`, `--run-hooks` |
+| `diff` | Show planned schema changes without applying them (dry run). With `--sql` it then prints the SQL a push would apply, as `migrate` writes it | `--sql`, `--connection <url>`, `--env <name>`, `--direct` |
 | `generate` | Regenerate TypeScript types without running a migration |  |
-| `migrate` | Write the SQL a push would apply, without applying it. Plain, it takes no lock your application waits on and the file records nothing: applied by hand, the next push finds the tables unmanaged. With `--record` the file also records the migration as a push does | `-o, --output <file>`, `--record`, `--force` |
+| `migrate` | Write the SQL a push would apply, without applying it (to preview it on screen, `supatype diff --sql` or `supatype push --dry-run` print the same SQL after the change list). Plain, it takes no lock your application waits on and the file records nothing: applied by hand, the next push finds the tables unmanaged. With `--record` the file also records the migration as a push does | `-o, --output <file>`, `--record`, `--force` |
 | `migrations list` | List applied migrations with schema snapshot metadata | `--connection <url>`, `--env <name>` |
 | `rollback` | Roll back the last applied migration | `--sync-schema`, `--no-sync-schema` |
 | `reset` | Drop every managed table and its rows, apply the schema again, then run the seeds (destructive) | `--yes`, `--no-seed`, `--connection <url>` |
@@ -5523,7 +5524,7 @@ All of these need Supatype Cloud, which is in closed beta ([request access](http
 | Command | Description | Useful flags |
 | --- | --- | --- |
 | `self-update` | Update the supatype CLI (npm or standalone CDN binary) | `--force` |
-| `update` | Download the latest component binaries and update versions in supatype.config.ts | `--check` |
+| `update` | Download the latest component binaries and update versions in supatype.config.ts. On a Docker project it checks for a newer CLI release first and says to upgrade the CLI when one exists, because the image pins come from the CLI version, then pulls the images this CLI pins. `--check` reports the running CLI, the latest release and whether an upgrade would move the pins, and pulls nothing | `--check` |
 | `engine status` | Run the host engine binary's `--version` and show which binary answered |  |
 | `cache list` | List cached component binaries and their sizes | `--project <path>` |
 | `cache clean [component] [version]` | Remove cached binaries not pinned by local project configs, and CLI programs of other versions (`cache clean cli` for those alone) | `--dry-run`, `--force`, `--project <path>` |
@@ -5549,7 +5550,7 @@ A release is one number for the CLI and every `@supatype/*` package. The engine,
 | --- | --- | --- |
 | CLI and npm packages | `0.9.2` | The latest release, 2026-11-12. The published `@supatype/*` packages, such as `@supatype/client` and `@supatype/react`, carry the same number |
 | Schema engine | `v0.11.2` | Parses the schema, plans and applies a push (`supatype/schema-engine`) |
-| Server | `v2.6.0` | The Supatype server: the API, auth and the services behind it (`supatype/server`) |
+| Server | `v2.6.1` | The Supatype server: the API, auth and the services behind it (`supatype/server`) |
 | Postgres | `17.2.16` | The database image, with its extensions (`supatype/postgres`) |
 | Deno | `2.9.8` | The runtime for functions and hooks |
 
