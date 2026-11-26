@@ -43,7 +43,7 @@ import { BuildRefused } from "../build-refused.js"
 import { siteBuildEnv } from "../site-build-env.js"
 import { publicValueCount } from "../site-public-env.js"
 import { describeFrontendSources } from "../frontend-values.js"
-import { deploySite, megabytes, overPlanLines } from "../site-deploy.js"
+import { deploySite, formatSiteSize, overPlanLines } from "../site-deploy.js"
 import { spawnSync } from "node:child_process"
 import { error, info, plain, step, warn } from "../ui/messages.js"
 import { responseFailureText } from "../error-message.js"
@@ -460,8 +460,8 @@ type CurrentDeployment = typeof isCurrentDeployment extends Guard<infer T> ? T :
 
 /** The size line: against the plan when the server says what the plan is. */
 function sizeLine(size: number, planBytes: number | null | undefined): string {
-  if (planBytes) return `Size: ${megabytes(size)} MB of ${megabytes(planBytes)} MB plan`
-  return `Size: ${(size / (1024 * 1024)).toFixed(1)}MB`
+  if (planBytes) return `Size: ${formatSiteSize(size)} of ${formatSiteSize(planBytes)} plan`
+  return `Size: ${formatSiteSize(size)}`
 }
 
 function printDeploymentStatus(data: CurrentDeployment): void {
@@ -491,7 +491,7 @@ async function deployStaticSite(
 
   if (target.apiPrefix === "/platform/v1") {
     const files = collectFiles(outputDir, outputDir)
-    info(`${files.length} files to upload (${formatSize(files.reduce((s, f) => s + f.size, 0))})`)
+    info(`${files.length} files to upload (${formatSiteSize(files.reduce((s, f) => s + f.size, 0))})`)
     const filePayload = files.map((f) => ({
       path: f.relativePath,
       content: readFileSync(f.absolutePath).toString("base64"),
@@ -561,10 +561,4 @@ function collectFiles(dir: string, baseDir: string): FileEntry[] {
     }
   }
   return files
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
 }

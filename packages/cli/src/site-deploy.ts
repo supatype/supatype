@@ -81,6 +81,16 @@ const BYTES_PER_MB = 1024 * 1024
 /** Whole MB, rounded up so a site just over the plan never reads as equal to it. */
 export const megabytes = (bytes: number): number => Math.ceil(bytes / BYTES_PER_MB)
 
+/** A number with at most one decimal, so 2.0 reads as 2. */
+const trimmed = (n: number): string => String(Math.round(n * 10) / 10)
+
+/** A size a person can read: B under 1 KB, KB under 1 MB, otherwise MB. */
+export function formatSiteSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < BYTES_PER_MB) return `${trimmed(bytes / 1024)} KB`
+  return `${trimmed(bytes / BYTES_PER_MB)} MB`
+}
+
 /** The date part of an ISO timestamp; anything else is shown as the server sent it. */
 const dateOf = (iso: string): string => (/^\d{4}-\d{2}-\d{2}/.test(iso) ? iso.slice(0, 10) : iso)
 
