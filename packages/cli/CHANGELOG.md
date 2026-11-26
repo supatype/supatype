@@ -7,6 +7,11 @@ no entries are missing from this file.
 
 ### Features
 
+* **push, diff:** `supatype push --dry-run` and `supatype diff --sql` print the full SQL a push would
+  apply, after the change list, from the same engine call `supatype migrate` uses. A dry run applies
+  nothing, asks nothing, records no rename, deploys no hooks and exits 0, and shows destructive changes
+  with their risk comments without `--yes`. Supatype Cloud and a linked self-host server have no
+  endpoint that writes SQL without applying it, so there they print the change list and say so.
 * **storage:** the extractor reads `Folder<N>` as a bucket-rule operand and refuses it in a model's
   `access`, or with a position that is not a whole number from 1.
 * **push, diff:** the access summary lists what each role can reach under the rules (new `effective`
