@@ -164,10 +164,15 @@ export default async (_req: Request): Promise<Response> => {
     headers: { "content-type": "application/json" },
     body: "[{}]",
   })
-  await fetch(`${Deno.env.get("SUPATYPE_EXTERNAL_URL")}/charge`, { method: "POST" })
+  // The worker scrubs every variable a function may not see, SUPATYPE_EXTERNAL_URL among them, so the
+  // third-party API is the stack host on the external stub's port, baked in below.
+  const external = new URL(Deno.env.get("SUPATYPE_INTERNAL_URL") ?? "")
+  external.port = "__EXTERNAL_STUB_PORT__"
+  await fetch(new URL("/charge", external), { method: "POST" })
   return new Response(null, { status: 204 })
 }
 TS
+perl -pi -e "s/__EXTERNAL_STUB_PORT__/${EXTERNAL_STUB_PORT}/" "$WORK/hooks/writer/index.ts"
 
 mkdir -p "$WORK/functions/import-peek"
 cat > "$WORK/functions/import-peek/index.ts" <<'TS'
