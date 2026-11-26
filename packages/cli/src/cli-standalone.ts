@@ -11,7 +11,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSyn
 import { createHash } from "node:crypto"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { spawnSync } from "node:child_process"
+import { extractArchive } from "./archive-extract.js"
 import { cdnGet, downloadToFile } from "./cdn-fetch.js"
 import { fetchChecksums, readLatestVersion, withRetry, type PlatformId } from "./binary-cache.js"
 import {
@@ -50,28 +50,10 @@ export async function fetchStandaloneCliLatestVersion(): Promise<string> {
 /**
  * Unpack the single executable from an archive.
  *
- * PowerShell on Windows, because Git Bash's tar is usually first on PATH there and chokes on
- * drive-letter paths. The same split exists in commands/dev.ts for component archives.
+ * Through extractArchive, which unpacks a Windows zip with the system tar.exe (archive-extract.ts).
  */
 function unpackExecutable(archivePath: string, destDir: string, platform: PlatformId): string {
-  mkdirSync(destDir, { recursive: true })
-  const result = platform.os === "windows"
-    ? spawnSync(
-        "powershell.exe",
-        [
-          "-NoProfile",
-          "-Command",
-          `Expand-Archive -Path '${archivePath}' -DestinationPath '${destDir}' -Force`,
-        ],
-        { stdio: "pipe" },
-      )
-    : spawnSync("tar", ["-xzf", archivePath, "-C", destDir], { stdio: "pipe" })
-
-  if (result.status !== 0) {
-    throw new Error(
-      `Failed to unpack ${archivePath}: ${result.stderr?.toString().trim() || "unknown error"}`,
-    )
-  }
+  extractArchive(archivePath, destDir)
 
   const exe = join(destDir, cliExecutableName(platform))
   if (!existsSync(exe)) {
