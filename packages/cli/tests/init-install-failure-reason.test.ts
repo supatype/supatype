@@ -17,7 +17,9 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
 /** A stand-in package manager: node, printing `lines` (stdout) and then exiting with `code`. */
 function fakePackageManager(lines: string[], code = 1): InstallCommand {
-  const script = `for (const l of ${JSON.stringify(lines)}) console.log(l); process.exit(${code})`
+  // exitCode, not process.exit: on Linux a pipe write is asynchronous, and exiting at once could drop
+  // the last lines before they reached the parent (CI lost "line 199" this way).
+  const script = `for (const l of ${JSON.stringify(lines)}) console.log(l); process.exitCode = ${code}`
   return { file: process.execPath, args: ["-e", script], shell: false }
 }
 
