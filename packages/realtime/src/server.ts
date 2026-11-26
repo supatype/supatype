@@ -275,7 +275,7 @@ export class RealtimeServer {
     // and replication keeps retrying behind it.
     await new Promise<void>((resolve) => {
       this.httpServer!.listen(this.env.port, this.env.host, () => {
-        console.log(`[realtime] WebSocket server listening on port ${this.env.port}${this.env.multiTenant ? " (multi-tenant)" : ""}`)
+        console.log(`[realtime] WebSocket server listening on port ${this.port}${this.env.multiTenant ? " (multi-tenant)" : ""}`)
         resolve()
       })
     })
@@ -333,6 +333,20 @@ export class RealtimeServer {
       broadcast: (input, projectRef) => this.studioBroadcast(input, projectRef),
     })
     await this.admin.start(adminPort, this.env.host)
+  }
+
+  /**
+   * The port the public listener is bound to, which is what `env.port` asked for unless that was 0
+   * (any free port), so a caller that let the OS pick can learn which one it got.
+   */
+  get port(): number {
+    const addr = this.httpServer?.address()
+    return typeof addr === "object" && addr !== null ? addr.port : this.env.port
+  }
+
+  /** The admin listener's bound port, or null when none is configured or it is not listening. */
+  get adminPort(): number | null {
+    return this.admin?.port ?? null
   }
 
   /** Resolves when the initial replication connection has settled, tests await this. */

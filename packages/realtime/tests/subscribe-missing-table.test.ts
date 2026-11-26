@@ -4,7 +4,7 @@ import { ReplicationListener } from "../src/replication.js"
 import { RlsFilter, type DeliveryVerdict } from "../src/rls.js"
 import type { JwtClaims } from "../src/auth.js"
 import type { ServerMessage, WalChange } from "../src/types.js"
-import { connect, freePort, isSystem, serviceToken, settle, testEnv, userToken, type Peer } from "./fixtures/socket.js"
+import { connect, isSystem, serviceToken, settle, ANY_PORT, testEnv, userToken, type Peer } from "./fixtures/socket.js"
 import { undeclaredChannels } from "./fixtures/fake-channel-db.js"
 
 /**
@@ -86,10 +86,10 @@ describe("a join for a table that does not exist", () => {
   beforeAll(async () => {
     // The check needs the database, and replication being up is how the server knows it has one.
     vi.spyOn(ReplicationListener.prototype, "isConnected").mockReturnValue(true)
-    port = await freePort()
     filter = new FakeCatalogFilter()
-    server = new RealtimeServer(testEnv(port), { rlsFilter: filter, channelDb: undeclaredChannels() })
+    server = new RealtimeServer(testEnv(ANY_PORT), { rlsFilter: filter, channelDb: undeclaredChannels() })
     await server.start()
+    port = server.port
   })
 
   afterAll(async () => {

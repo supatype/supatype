@@ -5,7 +5,7 @@ import pg from "pg"
 import { RealtimeServer } from "../src/server.js"
 import { RlsFilter } from "../src/rls.js"
 import type { WalChange } from "../src/types.js"
-import { anonKey, connect, freePort, isSystem, settle, testEnv, userToken, type Peer } from "./fixtures/socket.js"
+import { anonKey, connect, isSystem, settle, ANY_PORT, testEnv, userToken, type Peer } from "./fixtures/socket.js"
 
 /**
  * Private channels against a real Postgres running the engine's own functions: the server's
@@ -82,12 +82,12 @@ describe.skipIf(!databaseUrl)("private channels against Postgres", { timeout: 30
     await admin.query("INSERT INTO public.lots (id, seller_id) VALUES ($1, $2)", [LOT, SELLER])
     await admin.query("INSERT INTO public.lot_watchers (lot_id, user_id) VALUES ($1, $2), ($1, $3)", [LOT, ALICE, SELLER])
     filter = new RlsFilter(databaseUrl!)
-    port = await freePort()
     server = new RealtimeServer(
-      testEnv(port, { databaseUrl: databaseUrl!, slotName: SLOT, replicationPollInterval: 100 }),
+      testEnv(ANY_PORT, { databaseUrl: databaseUrl!, slotName: SLOT, replicationPollInterval: 100 }),
       { rlsFilter: filter },
     )
     await server.start()
+    port = server.port
     await server.waitForReplicationStartup()
   })
 

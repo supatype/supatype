@@ -52,6 +52,12 @@ export class AdminServer {
 
   constructor(private readonly deps: AdminDeps) {}
 
+  /** The bound port once listening (the OS's pick when started on 0), else null. */
+  get port(): number | null {
+    const addr = this.server?.address()
+    return typeof addr === "object" && addr !== null ? addr.port : null
+  }
+
   async start(port: number, host?: string): Promise<void> {
     const server = createServer((req, res) => {
       void this.handle(req, res)
@@ -60,7 +66,7 @@ export class AdminServer {
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject)
       server.listen(port, host, () => {
-        console.log(`[realtime] admin API listening on port ${port}`)
+        console.log(`[realtime] admin API listening on port ${this.port}`)
         resolve()
       })
     })

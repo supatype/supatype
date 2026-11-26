@@ -5,11 +5,10 @@ import type { ServerMessage } from "../src/types.js"
 import {
   anonKey,
   connect,
-  freePort,
   isSystem,
   settle,
   subscribe as subscribeTo,
-  testEnv,
+  ANY_PORT, testEnv,
   userToken,
   type Peer,
 } from "./fixtures/socket.js"
@@ -44,9 +43,9 @@ describe.each([true, false])("broadcast and presence (secureChannels %s)", (secu
   }
 
   beforeAll(async () => {
-    port = await freePort()
-    server = new RealtimeServer(testEnv(port, { secureChannels }), { channelDb: undeclaredChannels() })
+    server = new RealtimeServer(testEnv(ANY_PORT, { secureChannels }), { channelDb: undeclaredChannels() })
     await server.start()
+    port = server.port
   })
 
   afterAll(async () => {

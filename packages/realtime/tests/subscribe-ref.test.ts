@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { RealtimeServer } from "../src/server.js"
-import { connect, freePort, isSystem, settle, testEnv, userToken, type Peer } from "./fixtures/socket.js"
+import { connect, isSystem, settle, ANY_PORT, testEnv, userToken, type Peer } from "./fixtures/socket.js"
 import type { ServerMessage, SystemMessage } from "../src/types.js"
 import { undeclaredChannels } from "./fixtures/fake-channel-db.js"
 
@@ -26,9 +26,9 @@ describe("a reply to a join with a ref", () => {
   }
 
   beforeAll(async () => {
-    port = await freePort()
-    server = new RealtimeServer(testEnv(port), { channelDb: undeclaredChannels() })
+    server = new RealtimeServer(testEnv(ANY_PORT), { channelDb: undeclaredChannels() })
     await server.start()
+    port = server.port
   })
 
   afterAll(async () => {

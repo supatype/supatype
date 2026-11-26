@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:http"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { RealtimeServer } from "../src/server.js"
 import type { WalChange } from "../src/types.js"
-import { SECRET, connect, freePort, settle, testEnv, userToken, type Peer } from "./fixtures/socket.js"
+import { SECRET, connect, settle, ANY_PORT, testEnv, userToken, type Peer } from "./fixtures/socket.js"
 import { FakeChannelDb, LOT_ID } from "./fixtures/fake-channel-db.js"
 
 /**
@@ -22,18 +22,20 @@ describe("private channels on a shared instance", () => {
   const peers: Peer[] = []
 
   beforeAll(async () => {
-    const routesPort = await freePort()
     routes = createServer((_req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" })
       res.end(JSON.stringify({ routes: [{ ref: PROJECT, jwtSecret: SECRET, tier: "free", status: "active" }] }))
     })
-    await new Promise<void>((resolve) => routes.listen(routesPort, "127.0.0.1", resolve))
-    port = await freePort()
+    await new Promise<void>((resolve) => routes.listen(ANY_PORT, "127.0.0.1", resolve))
+    const bound = routes.address()
+    if (bound === null || typeof bound === "string") throw new Error("the routes server is not listening")
+    const routesPort = bound.port
     server = new RealtimeServer(
-      testEnv(port, { multiTenant: true, routingTableUrl: `http://127.0.0.1:${routesPort}/routes`, connectionLimits: { free: 50 } }),
+      testEnv(ANY_PORT, { multiTenant: true, routingTableUrl: `http://127.0.0.1:${routesPort}/routes`, connectionLimits: { free: 50 } }),
       { channelDb: db },
     )
     await server.start()
+    port = server.port
   })
 
   afterAll(async () => {

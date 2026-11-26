@@ -7,11 +7,10 @@ import {
   SECRET,
   anonKey,
   connect,
-  freePort,
   isSystem,
   serviceToken,
   settle,
-  testEnv,
+  ANY_PORT, testEnv,
   userToken,
   type Peer,
 } from "./fixtures/socket.js"
@@ -57,9 +56,9 @@ async function harness(over: Partial<RealtimeEnv> = {}, configure: (db: FakeChan
   db.watch(LOT_ID, BOB)
   db.watch(LOT_ID, SELLER)
   db.sellers.set(LOT_ID, SELLER)
-  const port = await freePort()
-  const server = new RealtimeServer(testEnv(port, over), { channelDb: db })
+  const server = new RealtimeServer(testEnv(ANY_PORT, over), { channelDb: db })
   await server.start()
+  const port = server.port
   const peers: Peer[] = []
   running.push({ server, peers })
   const open = async (token?: string): Promise<Peer> => {

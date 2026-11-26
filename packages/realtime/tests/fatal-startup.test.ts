@@ -27,7 +27,7 @@ vi.mock("pg", () => {
 })
 
 const { RealtimeServer } = await import("../src/server.js")
-const { freePort, testEnv } = await import("./fixtures/socket.js")
+const { ANY_PORT, testEnv } = await import("./fixtures/socket.js")
 const { undeclaredChannels } = await import("./fixtures/fake-channel-db.js")
 
 describe("a fatal replication startup failure", () => {
@@ -41,13 +41,13 @@ describe("a fatal replication startup failure", () => {
 
   it("fails liveness and asks the process to exit instead of sitting alive and unready", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined)
-    const port = await freePort()
     const exits: number[] = []
-    server = new RealtimeServer(testEnv(port, { host: "127.0.0.1" }), {
+    server = new RealtimeServer(testEnv(ANY_PORT, { host: "127.0.0.1" }), {
       channelDb: undeclaredChannels(),
       onFatal: (code) => void exits.push(code),
     })
     await server.start()
+    const port = server.port
     await server.waitForReplicationStartup()
 
     expect(exits).toEqual([1])

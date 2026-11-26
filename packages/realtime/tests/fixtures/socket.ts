@@ -29,6 +29,17 @@ function serverMessage(frame: string): ServerMessage {
 
 export const SECRET = "realtime-broadcast-presence-test-secret-0123456789"
 
+/**
+ * Ask the OS for any free port: listen on 0, then read the bound port back from the server
+ * (`RealtimeServer.port`, `.adminPort`). Nothing is picked beforehand, so nothing can be taken
+ * between the choice and the bind.
+ */
+export const ANY_PORT = 0
+
+/**
+ * A port that was free a moment ago. Only for a process this test cannot ask for its bound port,
+ * which can lose the race to another listener, so a server in this process must use `ANY_PORT`.
+ */
 export function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const probe = createServer()
