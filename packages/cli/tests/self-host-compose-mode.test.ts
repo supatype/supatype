@@ -98,7 +98,8 @@ beforeEach(() => {
 afterEach(() => {
   process.chdir(originalCwd)
   vi.restoreAllMocks()
-  rmSync(projectDir, { recursive: true, force: true })
+  // Windows can hold a just-closed file in the folder for a moment (EBUSY on the runner).
+  rmSync(projectDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 describe("self-host compose commands keep the stack's mode (SH2)", () => {
