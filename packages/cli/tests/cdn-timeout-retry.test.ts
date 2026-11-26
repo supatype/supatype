@@ -2,6 +2,9 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { portOf } from "./support/ports.js"
 
+// The npm job embeds the real release key before it tests; these downloads are unsigned fixtures.
+vi.mock("../src/release-public-key.js", () => ({ EMBEDDED_RELEASE_PUBLIC_KEY: "", releasePublicKey: () => "" }))
+
 /**
  * A CDN that hangs the first request for a path and answers the second, standing in for the
  * stalled connection that used to hang `supatype self-update` forever.
