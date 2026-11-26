@@ -96,4 +96,7 @@ db="$(docker ps -q --filter "label=com.docker.compose.project=$E2E_COMPOSE_PROJE
 docker exec -e PGPASSWORD="$(env_file_value .env POSTGRES_PASSWORD)" "$db"   psql -U "$(env_file_value .env POSTGRES_USER)" -d "$(env_file_value .env POSTGRES_DB)" -X -tAc   "SELECT table_name || '(' || string_agg(column_name, ',' ORDER BY column_name) || ')' FROM information_schema.columns WHERE table_schema='public' AND table_name LIKE 'lot_%' OR table_name LIKE '%_lot' GROUP BY table_name"
 
 echo "==> Linking, listing and removing"
-SUPATYPE_URL="$BASE_URL" SUPATYPE_ANON_KEY="$(env_file_value .env ANON_KEY)" npx tsx verify.ts
+# `tsx` belongs to tests/integration, so it is run through that package: `npx tsx` from the example
+# finds it only when pnpm hoists it, which a strict install does not (exit 127, "tsx: not found").
+(cd "$ROOT_DIR" && SUPATYPE_URL="$BASE_URL" SUPATYPE_ANON_KEY="$(cd "$EXAMPLE_DIR" && env_file_value .env ANON_KEY)" \
+  pnpm --filter supatype-integration exec tsx "$EXAMPLE_DIR/verify.ts")
