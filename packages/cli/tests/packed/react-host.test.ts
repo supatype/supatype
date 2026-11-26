@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import type { SpawnSyncReturns } from "node:child_process"
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, truncateSync, writeFileSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { isJsonObject, isShape } from "@supatype/shared"
@@ -74,7 +74,7 @@ function plantThrowingPackage(appDir: string, name: string): void {
 }
 
 async function buildRelease(): Promise<Release> {
-  const root = mkdtempSync(join(realpathSync.native(tmpdir()), "supatype-packed-"))
+  const root = mkdtempSync(join(tmpdir(), "supatype-packed-"))
   const tarballs = join(root, "tarballs")
   mkdirSync(tarballs)
   const shared = packWorkspacePackage("shared", tarballs)

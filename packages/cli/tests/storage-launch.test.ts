@@ -1,9 +1,10 @@
 import { spawnSync } from "node:child_process"
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { archiveNameCandidates, validateArtifactFormat } from "../src/binary-cache.js"
+import { windowsZipTool } from "./packed/release-fixture.js"
 import { storageExecutableName, unpackedStorage } from "../src/storage-launch.js"
 
 /**
@@ -18,16 +19,14 @@ afterEach(() => {
 
 /** An archive like a release's, holding `files` (name to contents), at `<dir>/<name>`. */
 function archive(name: string, files: Record<string, string>): string {
-  // The long spelling of the temp dir: CI's Windows runner hands out an 8.3 short one (RUNNER~1),
-  // and Compress-Archive given that has produced a zip with no executable at its root.
-  const dir = mkdtempSync(join(realpathSync.native(tmpdir()), "supatype-storage-archive-"))
+  const dir = mkdtempSync(join(tmpdir(), "supatype-storage-archive-"))
   dirs.push(dir)
   const stage = join(dir, "stage")
   mkdirSync(stage)
   for (const [file, text] of Object.entries(files)) writeFileSync(join(stage, file), text)
   const out = join(dir, name)
   const result = out.endsWith(".zip")
-    ? spawnSync("powershell.exe", ["-NoProfile", "-Command", `Compress-Archive -Path '${stage}\\*' -DestinationPath '${out}'`])
+    ? spawnSync(windowsZipTool(), ["-a", "-c", "-f", out, "-C", stage, "."])
     : spawnSync("tar", ["-czf", out, "-C", stage, "."])
   if (result.status !== 0) throw new Error(`could not build ${out}: ${result.stderr}`)
   return out

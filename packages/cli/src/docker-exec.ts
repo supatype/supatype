@@ -75,10 +75,10 @@ export interface DockerProgram {
 }
 
 /**
- * The program a call runs. On Windows a spawn without a shell finds only a docker.exe, never a
- * docker.cmd shim, so a docker that is not an .exe needs the shell whether the call asked for it or
- * not. At a limit the shell is what gets killed, and docker.exe ran on holding what it had open, so
- * when docker.exe is on PATH it is run directly and the limit ends it.
+ * The program a call runs. On Windows, `docker` is whatever Windows itself would run: PATH is
+ * walked in order and, in each directory, the PATHEXT extensions are tried, so the first match wins.
+ * An .exe or .com runs without a shell, so a limit ends it and not a shell around it; a .cmd or .bat
+ * shim, or no match at all, needs the shell, which a spawn without one cannot do.
  */
 export function dockerProgram(
   shell: boolean,
@@ -86,13 +86,31 @@ export function dockerProgram(
   platform: NodeJS.Platform = process.platform,
 ): DockerProgram {
   if (platform !== "win32") return { file: "docker", shell }
-  const found = windowsPath(env).map((dir) => join(dir, "docker.exe")).find((path) => existsSync(path))
-  return found === undefined ? { file: "docker", shell: true } : { file: found, shell: false }
+  const found = firstDockerOnPath(env)
+  if (found === undefined || /\.(cmd|bat)$/i.test(found)) return { file: "docker", shell: true }
+  return shell ? { file: found, shell: false } : { file: "docker", shell: false }
+}
+
+/** The first `docker` Windows would run from PATH, with its extension, when there is one. */
+function firstDockerOnPath(env: NodeJS.ProcessEnv): string | undefined {
+  const extensions = (envValue(env, "PATHEXT") ?? ".COM;.EXE;.BAT;.CMD").split(";").filter((ext) => ext !== "")
+  for (const dir of windowsPath(env)) {
+    for (const ext of extensions) {
+      const path = join(dir, `docker${ext.toLowerCase()}`)
+      if (existsSync(path)) return path
+    }
+  }
+  return undefined
+}
+
+/** An environment variable by name, however the environment spells its case (Windows' is not). */
+function envValue(env: NodeJS.ProcessEnv, name: string): string | undefined {
+  return Object.entries(env).find(([key]) => key.toUpperCase() === name)?.[1]
 }
 
 /** The directories on Windows' PATH, which the environment may spell `Path`. */
 function windowsPath(env: NodeJS.ProcessEnv): string[] {
-  const value = Object.entries(env).find(([key]) => key.toUpperCase() === "PATH")?.[1] ?? ""
+  const value = envValue(env, "PATH") ?? ""
   return value.split(";").map((dir) => dir.trim().replace(/^"|"$/g, "")).filter((dir) => dir !== "")
 }
 
